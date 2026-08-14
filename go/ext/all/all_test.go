@@ -36,6 +36,11 @@ func TestShippedHalves(t *testing.T) {
 		{"json", true, true, true},
 		{"jsonc", true, true, true},
 		{"yaml", true, true, true},
+		// TOML's reader: without it Resolve had nothing to resolve a TOML
+		// target against (so §9.7 records were JSON-only), and every
+		// document-API step that reads before writing — Replace, and Remove
+		// even when qualified Optional — failed with "cannot read \"toml\"
+		// documents" rather than doing the edit.
 		{"toml", true, true, true},
 		// HCL is the one appliable format with no reader, and the reason is a
 		// CONTRACT limit rather than missing work: Node resolves one segment to
