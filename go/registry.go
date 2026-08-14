@@ -203,12 +203,13 @@ func DetectFormat(filename string) (FormatID, bool) {
 			}
 		}
 	}
-	switch {
-	case nameHits == 1:
+	if nameHits == 1 {
 		return byName, true
-	case nameHits > 1:
+	}
+	if nameHits > 1 {
 		return "", false // ambiguous: HEW021, never a guess
-	case extHits == 1:
+	}
+	if extHits == 1 {
 		return byExt, true
 	}
 	return "", false

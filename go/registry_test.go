@@ -311,6 +311,166 @@ func TestExtensionDeclaredKindParsesInANotationPatch(t *testing.T) {
 	}
 }
 
+// --- extension-claimed segment shapes (O48) ---------------------------------
+//
+// The mechanism, on a fake shape: `[name]` is an INI section header, a spelling
+// the core knows nothing about and never has to. ext/markdown's suite tests the
+// three shapes that actually shipped; these tests are about the seam.
+
+// stanzaForm claims "[name]" and refuses the nameless "[]" — the malformed
+// answer, which is what keeps a typo from becoming a key that resolves nowhere.
+func stanzaForm() SegmentForm {
+	return SegmentForm{
+		Name: "stanza",
+		Claim: func(raw string) (bool, error) {
+			if len(raw) < 2 || raw[0] != '[' || raw[len(raw)-1] != ']' {
+				return false, nil
+			}
+			if raw == "[]" {
+				return true, segErr("segment \"[]\": stanza requires a name")
+			}
+			return true, nil
+		},
+	}
+}
+
+func registerStanza(t *testing.T) {
+	t.Helper()
+	isolate(t)
+	b := fakeBinding("ini", []string{".ini"}, nil)
+	b.Segments = []SegmentForm{stanzaForm()}
+	Register("ini", b)
+}
+
+func TestClaimedSegmentParsesAndRoundTrips(t *testing.T) {
+	registerStanza(t)
+
+	p, err := ParsePath("/[server]/port")
+	if err != nil {
+		t.Fatalf("ParsePath: %v", err)
+	}
+	seg := p.Segment(0)
+	if seg.Kind != SegExtension {
+		t.Fatalf("kind = %s, want an extension-claimed segment", seg.Kind)
+	}
+	if seg.Form != "stanza" || seg.Raw != "[server]" {
+		t.Fatalf("form/raw = %q/%q, want stanza/[server]", seg.Form, seg.Raw)
+	}
+	if got := p.String(); got != "/[server]/port" {
+		t.Fatalf("String() = %q; a claimed segment must print back byte for byte", got)
+	}
+	if !seg.spellable() {
+		t.Fatal("a claimed segment does not survive its own round trip")
+	}
+}
+
+func TestClaimedSegmentCarriesTheUniversalSuffixes(t *testing.T) {
+	registerStanza(t)
+
+	p, err := ParsePath("/[server][2]?")
+	if err != nil {
+		t.Fatalf("ParsePath: %v", err)
+	}
+	seg := p.Segment(0)
+	// The `?` and the `[n]` are stripped before the form is offered the token,
+	// so a form describes only its own shape and cannot forget to handle them.
+	if seg.Raw != "[server]" {
+		t.Fatalf("raw = %q, want the token without the universal suffixes", seg.Raw)
+	}
+	if !seg.Optional || seg.Ordinal == nil || *seg.Ordinal != 2 {
+		t.Fatalf("suffixes lost: %+v", seg)
+	}
+	if got := p.String(); got != "/[server][2]?" {
+		t.Fatalf("String() = %q", got)
+	}
+}
+
+func TestMalformedClaimIsAnError(t *testing.T) {
+	registerStanza(t)
+
+	if _, err := ParsePath("/[]"); err == nil {
+		t.Fatal("a claimed-but-malformed token parsed; the form's error was dropped")
+	} else if !strings.Contains(err.Error(), "stanza requires a name") {
+		t.Fatalf("error %q does not carry the form's own message", err)
+	}
+}
+
+func TestUnclaimedTokenFallsThroughToKey(t *testing.T) {
+	registerStanza(t)
+
+	for _, body := range []string{"[unclosed", "server]", "plain"} {
+		p, err := ParsePath("/" + body)
+		if err != nil {
+			t.Fatalf("ParsePath(/%s): %v", body, err)
+		}
+		if k := p.Segment(0).Kind; k != SegKey {
+			t.Errorf("/%s parsed as %s, want the key floor", body, k)
+		}
+	}
+}
+
+func TestCoreShapesOutrankAClaim(t *testing.T) {
+	isolate(t)
+	// A form that claims EVERYTHING still cannot take a shape the core owns:
+	// the quoted segment, "-", and the comment address are read before any
+	// extension is asked, and an index or a key-match after (§8.8).
+	greedy := SegmentForm{Name: "greedy", Claim: func(string) (bool, error) { return true, nil }}
+	b := fakeBinding("ini", []string{".ini"}, nil)
+	b.Segments = []SegmentForm{greedy}
+	Register("ini", b)
+
+	for _, c := range []struct {
+		body string
+		want SegmentKind
+	}{
+		{`"aws"`, SegLabel},
+		{"-", SegAppend},
+		{"#0", SegComment},
+		{"#t", SegComment},
+		// These two the extension DOES take, because §8.8 puts the claim ahead
+		// of index, key-match and key — the shapes a claimed spelling has
+		// always outranked (`code:0` would otherwise be a key, `@name` too).
+		{"7", SegExtension},
+		{"name=x", SegExtension},
+	} {
+		p, err := ParsePath("/" + c.body)
+		if err != nil {
+			t.Fatalf("ParsePath(/%s): %v", c.body, err)
+		}
+		if got := p.Segment(0).Kind; got != c.want {
+			t.Errorf("/%s parsed as %s, want %s", c.body, got, c.want)
+		}
+	}
+}
+
+func TestClaimOrderIsDeterministic(t *testing.T) {
+	isolate(t)
+	both := func(name string) SegmentForm {
+		return SegmentForm{Name: name, Claim: func(raw string) (bool, error) {
+			return strings.HasPrefix(raw, "%"), nil
+		}}
+	}
+	// Two formats claiming one shape is an ambiguity the core cannot resolve;
+	// what it CAN promise is that it resolves the same way every run, which map
+	// iteration alone would not give.
+	a := fakeBinding("aaa", []string{".a"}, nil)
+	a.Segments = []SegmentForm{both("first")}
+	Register("aaa", a)
+	z := fakeBinding("zzz", []string{".z"}, nil)
+	z.Segments = []SegmentForm{both("second")}
+	Register("zzz", z)
+
+	for i := 0; i < 20; i++ {
+		p, err := ParsePath("/%x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.Segment(0).Form; got != "first" {
+			t.Fatalf("form = %q on run %d; claims must resolve by sorted format id", got, i)
+		}
+	}
+}
+
 // --- extension-owned transform qualifiers (O48, tension 1) ------------------
 
 func TestBindingDeclaresItsQualifierKeys(t *testing.T) {

@@ -177,6 +177,28 @@ func TestAccessorsRejectForeignSegments(t *testing.T) {
 	}
 }
 
+// TestAccessorsRejectMalformedRaw covers the segments a PROGRAM can build that
+// the grammar would never produce: Segment is an exported struct, so Raw can
+// hold anything, and an accessor must report "not mine" rather than trust the
+// Form label and hand back a decoded lie.
+func TestAccessorsRejectMalformedRaw(t *testing.T) {
+	for _, raw := range []string{"", "#", "###", "nospace", "# a~2b", "# a~"} {
+		if _, _, ok := ParseHeading(hew.Segment{Kind: hew.SegExtension, Form: FormHeading, Raw: raw}); ok {
+			t.Errorf("ParseHeading accepted the malformed raw %q", raw)
+		}
+	}
+	for _, raw := range []string{"", "code", "nope:0", "code:x", "code:99999999999999999999"} {
+		if _, _, ok := ParseBlock(hew.Segment{Kind: hew.SegExtension, Form: FormBlock, Raw: raw}); ok {
+			t.Errorf("ParseBlock accepted the malformed raw %q", raw)
+		}
+	}
+	for _, raw := range []string{"", "@", "@a~2b", "@a~"} {
+		if _, ok := ParseMarker(hew.Segment{Kind: hew.SegExtension, Form: FormMarker, Raw: raw}); ok {
+			t.Errorf("ParseMarker accepted the malformed raw %q", raw)
+		}
+	}
+}
+
 func TestAllBlockKindsAreClaimed(t *testing.T) {
 	for _, k := range []BlockKind{BlockPara, BlockCode, BlockList, BlockTable, BlockQuote, BlockHTML} {
 		seg := Block(k, 0)
