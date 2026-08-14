@@ -2956,6 +2956,28 @@ of promises outstanding rather than a list of tests that happen to fail:
 The two ratchets do the rest: the rule dies the moment the behaviour lands (a rule matching
 nothing is a build failure), and the strict gate reports the whole outstanding set at once.
 
+**The pending cases are the acceptance tests, and implementation MUST proceed test-first**
+([O50](#p5--the-filesystem-surface-and-tdd-discipline-2026-08-14)). This is the discipline P0
+through P4 ran under; writing it down makes it reviewable rather than remembered.
+
+1. **A work package begins by deleting its skip rules.** That is the red step, and it is not
+   optional or reordered: the corpus case was written when the ruling landed, so the failing
+   test already exists and the first commit of an implementation makes it *run*. A package
+   that implements first and deletes rules afterwards has written its acceptance test knowing
+   the answer.
+2. **Layer-level unit tests are written red/green alongside**, not backfilled. The document API
+   (A.0), the registry (A.6), `hewfs` (A.8) and the reversal patch each get their own suite.
+   Those suites use **`afero.MemMapFs`**, and a tmpdir-based test where an in-memory
+   filesystem would serve is a defect — it is slower, it leaks state between runs, and it
+   tests the operating system rather than the code.
+3. **The established mutation gates apply**: **≥85% on the core, ≥75% on the format
+   extensions**, run as `just mutate-go` (`gremlins`, `--timeout-coefficient 30`, unit-test
+   killers only — the inner loop).
+4. **The acceptance-mutation gate runs once at P5 completion**: `just mutate-go-acceptance`
+   (`--coverpkg --integration`). §13.8 already states why this is the one that matters — it
+   measures whether **the corpus itself** detects a defect, and a surviving mutant is a corpus
+   gap to be fixed in `corpus/`, not in an implementation's own tests.
+
 ### 13.8 Acceptance criteria and the quality bar
 
 **The corpus states the obligations; `features/` states them as acceptance criteria.** A
@@ -3039,14 +3061,31 @@ restatement of a rule the format already has.
 
 **Rule 1 — format appears at the open boundary and nowhere else.** §8.0 is normative here:
 detection is from the **name**, never from the content, and an explicit override is legal only
-where a patch would carry `format=`. The name is what `Open` takes; the override is what
-`As` supplies. After the document is open, no method mentions a format again, ever.
+where a patch would carry `format=`. The name is what every constructor takes — a path, a
+handle's `Name()`, or an explicit label for bare bytes — and the override is what `As`
+supplies. After the document is open, no method mentions a format again, ever.
+
+**The constructor family is three functions**, ratified as
+[O49](#p5--the-filesystem-surface-and-tdd-discipline-2026-08-14), and the filesystem type
+throughout is `afero.Fs`:
 
 ```go
-// Open reads name from fsys and returns a Document bound to the format §8.0
-// detects FROM THE NAME. Content is never sniffed (§8.0). A name whose format
+import "github.com/spf13/afero"
+
+// Open reads path from fsys and returns a document bound to the format §8.0
+// detects FROM THE PATH. Content is never sniffed (§8.0). A path whose format
 // cannot be determined is HEW021 — fixable at this call site, and only here.
-func Open(fsys fs.FS, name string, opts ...OpenOption) (*Doc, error)
+func Open(fsys afero.Fs, path string, opts ...OpenOption) (*Doc, error)
+
+// OpenFile adopts an ALREADY-OPEN handle. Detection reads f.Name(); a handle
+// with no usable name takes hew.As, exactly as an ambiguous path does.
+//
+// The caller owns the handle: hew does not open it, does not lock it, and
+// NEVER CLOSES A HANDLE IT DID NOT OPEN. This is the constructor for a program
+// that has already taken a lock, already resolved a symlink, or already
+// stat-ed and validated the file it is about to edit — which is what a careful
+// config writer does, and what it must not be made to redo.
+func OpenFile(f afero.File, opts ...OpenOption) (*Doc, error)
 
 // OpenBytes is the same for content already in hand. name is still required
 // and still the only thing detection reads: bytes have no name of their own,
@@ -3060,7 +3099,8 @@ func As(format FormatID) OpenOption
 ```
 
 ```go
-doc, err := hew.Open(os.DirFS(home), ".claude/settings.json")   // jsonc, by well-known name
+doc, err := hew.Open(fsys, ".claude/settings.json")              // jsonc, by well-known name
+doc, err := hew.OpenFile(f)                                      // an FD the caller already holds
 doc, err := hew.OpenBytes("config", src, hew.As(hew.FormatTOML)) // no extension: say so
 ```
 
@@ -3234,10 +3274,10 @@ func (d *Doc) RenderPatch(opt RenderOptions) ([]byte, error)
 // patched bytes. All-or-nothing (§10.5): on any error the result is nil.
 func (d *Doc) Bytes() ([]byte, error)
 
-// Write commits Bytes() back to the file the document was opened from,
-// through hewfs's atomic temp-and-rename (§10.5, A.8). Requires a writable
-// filesystem; a Doc opened from an fs.FS or from bytes returns an error
-// naming that rather than guessing a destination.
+// Write commits Bytes() back THROUGH THE SAME afero.Fs OR afero.File the
+// document was opened from, via §10.5's temp-and-rename. A Doc from
+// OpenBytes has no destination and returns an error naming that rather than
+// guessing one.
 func (d *Doc) Write(opt ...WriteOption) error
 ```
 
@@ -3245,6 +3285,17 @@ The terminal set is the honest statement of what this API is: **a patch producer
 to be able to apply its own output.** `RenderPatch` is not a debugging aid — it is how a
 program that edits a user's file leaves behind a reviewable statement of what it did, in the
 same notation a human would have written by hand.
+
+**The atomicity caveat, stated rather than implied.** §10.5 requires an atomic temp-and-rename,
+and `Write` performs one — but **through an arbitrary `afero.Fs` the guarantee is best-effort,
+because the rename semantics belong to the backend, not to hew.** On `afero.OsFs` a rename
+within one filesystem is the atomic operation §10.5 assumes. On `MemMapFs` it is atomic in the
+trivial sense that nothing else is running. On a backend layered over object storage or a
+network filesystem, "rename" may be copy-then-delete, which has a window §10.5's contract does
+not survive. hew cannot detect this and does not pretend to: a caller whose backend does not
+provide atomic rename does not get atomic writes, and needs to know that about its own
+filesystem. Everything §10.5 promises about *detectable* failures still holds on every backend
+— a failed apply writes nothing at all, because staging happens entirely in memory.
 
 ### A.1 The IR — `TransformList`
 
@@ -3616,14 +3667,20 @@ no backup file*, which is a property, not a helper — and a host that wants its
 wraps `hewfs`, exactly as ctxloom's `config-write` already wraps its writes in
 `agent.WithFileLock` from the outside.
 
+**`afero.Fs` is the filesystem type here and in A.0** ([O49](#p5--the-filesystem-surface-and-tdd-discipline-2026-08-14)),
+which is the lineage this appendix already had: A.7's `NewGitResolver(fsys afero.Fs, …)` took
+one from the first draft, and the P5 ratification restores it consistently rather than
+introducing it.
+
 ```go
 package hewfs // imports: stdlib, afero, and hew. Nothing else.
 
 // ApplyFile applies every file section of a parsed patch, honoring §10.5:
 // every section stages in memory, and the commit phase runs only if all
 // staged successfully. There is no .rej file, no partial output, and NO
-// BACKUP FILE — the write is an atomic temp-and-rename, and a failed apply
-// leaves every target byte-identical.
+// BACKUP FILE — the write is a temp-and-rename, and a failed apply leaves
+// every target byte-identical. (Rename atomicity is the afero backend's;
+// see A.0's caveat.)
 func ApplyFile(fsys afero.Fs, root string, tls []hew.TransformList, opt WriteOptions) ([]FileResult, error)
 
 // ApplyTransforms is the same path for a hand-authored or generated .hewt
@@ -4121,6 +4178,17 @@ fix — it changes where a whole class of construct lives.
 | # | Question | Ruling |
 |---|---|---|
 | **O48** | How much may the core know about any particular format? | **As close to nothing as the design allows, every construct challenged, and whatever genuinely survives as format-specific lives in `ext/<format>`** (§8.8, with the full audit table). The core grammar keeps five universal lexical shapes — key, index, append, key-match, quoted — and everything else becomes an **extension-claimed segment form** whose interpretation the registered format supplies. The quoted segment (O41) is the proof the mechanism works: one lexical form, label against a block set and key against a mapping, resolved by the container the resolver already has. Verdicts in brief: `SegLabel` **restructured** (it was never a kind, only a quoted segment against a block set); `SegHeading`/`SegBlock`/`SegMarker`/`BlockKind` **relocated to `ext/markdown`**, which is what turns [O29](#residual--genuinely-open)'s severability claim into deleting a directory; `SegComment` **restructured** into the `#` form plus a shared `ext/comment` helper, because comment addressing is capability-scoped, not universal and not single-format; `KindBlock`/`KindSection` **restructured** into extension-declared kind names; `Anchor`/`Surface` **restructured so ownership moves and the `.hewt` spelling does not**; §8.0's detection table **relocated** to the extensions and demoted to non-normative; and the binding packages **renamed `hew<format>` → `ext/<format>`** so the isolation is visible in the import path (breaking, landing with the P5 implementation; consumers pinned at `v0.1.0` are unaffected until they upgrade). The audit also found a **live defect**: `FormatID.Valid()` hardcodes the six v0 formats, so a correctly-registered seventh extension is refused by the parser before any binding is consulted — validity must be a registry lookup, which is what makes §12's documented-only families addable without a core change. Two tensions are recorded rather than forced: `Transform`'s serialized fields cannot leave the one IR without losing deterministic canonicalization and RT2, so the core retains two format-specific *key names*; and path parsing becomes format-aware, which the ruling reconciles with §9 by drawing the line at mechanics (no target, no document, no I/O) rather than at knowledge of a segment grammar. |
+
+### P5 — the filesystem surface and TDD discipline, 2026-08-14
+
+**Ruled by the human, 2026-08-14.** Two rulings that close the last open questions before
+implementation starts: what the API's filesystem parameter is, and how the implementation is
+allowed to proceed.
+
+| # | Question | Ruling |
+|---|---|---|
+| **O49** | What is the filesystem type across A.0 and A.8, and may a caller hand hew a file it has already opened? | **`afero.Fs` throughout, and yes — a three-constructor family** (A.0, A.8). `io/fs.FS` is **rejected**: it is read-only, so `Doc.Write()` cannot exist on it, and an API whose write path is unreachable from its own open path is not a filesystem abstraction. `afero` is writable, is mockable in-memory (`MemMapFs`, which O50 then requires the unit suites to use), and **is already the consumer's abstraction** — ctxloom's `config-write` imports afero today, so this adds no dependency to the program most likely to adopt A.0 first. It is also the lineage this appendix already had: A.7's `NewGitResolver(fsys afero.Fs, …)` took one from the first draft. The constructors are `Open(fsys, path)` (detection from the path, §8.0), **`OpenFile(f afero.File)`** (detection from `f.Name()`, `hew.As` for a nameless or ambiguous handle), and `OpenBytes(name, data)` unchanged. `OpenFile` exists because a careful config writer has already opened, locked, and validated the file it is about to edit, and must not be made to redo any of that: **the caller owns the handle, and hew never closes a handle it did not open.** `Doc.Write()` writes back through the same `Fs`/`File`. **Bare `*os.File`-only constructors are rejected** — they make every test allocate a tmpdir, which is the tmpdir-based testing O50 forbids. The honest caveat is stated at A.0: **temp-and-rename atomicity through an arbitrary afero backend is best-effort**, because rename semantics belong to the backend; hew cannot detect a backend whose rename is copy-then-delete and does not pretend to. What holds on every backend is that a *detectable* failure writes nothing at all, because staging is entirely in memory. |
+| **O50** | How does the implementation phase proceed against a corpus that is already red? | **Test-first, and the ratified-pending corpus cases ARE the acceptance tests** (§13.7). Four rules. (a) **A work package begins by deleting its skip rules** — that is the red step; a package that implements first and deletes rules afterwards wrote its acceptance test knowing the answer. (b) **Layer-level unit suites are written red/green alongside**, one each for the document API, the registry, `hewfs` and the reversal patch, and they use **`afero.MemMapFs`** — a tmpdir-based test where an in-memory filesystem would serve is a defect, because it is slower, leaks state between runs, and tests the operating system rather than the code. (c) The established **mutation gates** apply: ≥85% core, ≥75% extensions, `gremlins --timeout-coefficient 30`. (d) The **acceptance-mutation gate** (`--coverpkg --integration`) runs once at P5 completion, because §13.8 already establishes that it is the gate that measures whether the corpus itself detects a defect. This is the same discipline P0–P4 ran under; the ruling writes it down so it is reviewable rather than remembered. |
 
 ### Residual — genuinely open
 
