@@ -27,6 +27,7 @@ const (
 	keyAbsent     = "absent"
 	keyCount      = "count"
 	keyKind       = "kind"
+	keyExhaustive = "exhaustive"
 	keyOnConflict = "on_conflict"
 	keyAnchor     = "anchor"
 	keySurface    = "surface"
@@ -103,6 +104,9 @@ func transformNode(t Transform) *yaml.Node {
 	}
 	if t.NodeKind != nil {
 		put(m, keyKind, strNode(string(*t.NodeKind)))
+	}
+	if t.Exhaustive {
+		put(m, keyExhaustive, boolNode(true))
 	}
 	if t.OnConflict != "" {
 		put(m, keyOnConflict, strNode(string(t.OnConflict)))
@@ -376,6 +380,8 @@ func assignField(t *Transform, key string, v *yaml.Node) error {
 		}
 		k := NodeKind(s)
 		t.NodeKind = &k
+	case keyExhaustive:
+		return flag(&t.Exhaustive)
 	case keyOnConflict:
 		var s string
 		if err := str(&s); err != nil {
@@ -427,6 +433,8 @@ func normalizeMove(t Transform, line int) ([]Transform, error) {
 		return nil, bad("count")
 	case t.NodeKind != nil:
 		return nil, bad("kind")
+	case t.Exhaustive:
+		return nil, bad("exhaustive")
 	case t.OnConflict != "":
 		return nil, bad("on_conflict")
 	case t.Surface != "":

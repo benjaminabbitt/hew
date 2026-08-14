@@ -114,11 +114,21 @@ type Transform struct {
 	Before Path
 	After  Path
 
-	// Exactly one of Value, Absent, Count and NodeKind selects the assertion
-	// mode on OpTest.
+	// Exactly one of Value, Absent, Count, NodeKind and Exhaustive selects the
+	// assertion mode on OpTest.
 	Absent   bool
 	Count    *int
 	NodeKind *NodeKind
+
+	// Exhaustive represents `? exhaustive` (§7.1): the listed children are the
+	// COMPLETE child set of the governed container (§9.1 step 3: "exhaustive
+	// -> test with exhaustive: true"). Appendix A.1's Transform has no field
+	// for this — a spec gap found while implementing, flagged in the P2
+	// report. The parser always pairs it with Count (the number of children
+	// asserted elsewhere in the same hunk at this level), so the applier can
+	// evaluate it as a count check while still naming it "exhaustive" in a
+	// failure's diagnostic (corpus message_contains requires the word).
+	Exhaustive bool
 
 	OnConflict OnConflict // OpAdd only
 	Anchor     AnchorMode // YAML alias policy
@@ -162,7 +172,8 @@ func (tl TransformList) Equal(o TransformList) bool {
 func (t Transform) Equal(o Transform) bool {
 	if t.Op != o.Op || t.Absent != o.Absent || t.OnConflict != o.OnConflict ||
 		t.Anchor != o.Anchor || t.Surface != o.Surface ||
-		t.Optional != o.Optional || t.Idempotent != o.Idempotent {
+		t.Optional != o.Optional || t.Idempotent != o.Idempotent ||
+		t.Exhaustive != o.Exhaustive {
 		return false
 	}
 	if !t.Path.Equal(o.Path) || !t.From.Equal(o.From) ||
@@ -272,7 +283,9 @@ func (t Transform) Validate() error {
 		}
 	}
 
-	// The assertion modes — test only, exactly one.
+	// The assertion modes — test only, exactly one. Exhaustive pairs with
+	// Count (the parser always sets both together, §9.1 step 3) and counts as
+	// one mode, not two.
 	modes := 0
 	if !t.Value.IsZero() {
 		modes++
@@ -280,15 +293,21 @@ func (t Transform) Validate() error {
 	if t.Absent {
 		modes++
 	}
-	if t.Count != nil {
+	if t.Count != nil && !t.Exhaustive {
 		modes++
 	}
 	if t.NodeKind != nil {
 		modes++
 	}
+	if t.Exhaustive {
+		modes++
+	}
 	if t.Op == OpTest {
 		if modes != 1 {
-			return irErr(p, "op test: exactly one of value, absent, count and kind, got %d", modes)
+			return irErr(p, "op test: exactly one of value, absent, count, kind and exhaustive, got %d", modes)
+		}
+		if t.Exhaustive && t.Count == nil {
+			return irErr(p, "op test: exhaustive requires count")
 		}
 	} else {
 		if t.Absent {
@@ -299,6 +318,9 @@ func (t Transform) Validate() error {
 		}
 		if t.NodeKind != nil {
 			return irErr(p, "op %s: kind is valid only on test", t.Op)
+		}
+		if t.Exhaustive {
+			return irErr(p, "op %s: exhaustive is valid only on test", t.Op)
 		}
 	}
 	if t.Count != nil && *t.Count < 0 {
