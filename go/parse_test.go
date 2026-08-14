@@ -616,8 +616,14 @@ func TestParseLowering(t *testing.T) {
 // yaml/pragma-idempotent-file's whole point (ruling O3).
 func TestParsePragmaAndPrecedence(t *testing.T) {
 	pragma := "hew: 1\nidempotent: true\n\n--- t.yaml format=yaml\n\n"
+	// Idempotence is two grants (§7.5, ruling O3): the pragma (or a hunk
+	// `! idempotent`) tolerates BOTH the assert and the write, while
+	// `! strict` opts only the write back out — the assert stays tolerant
+	// (yaml/reapply-not-idempotent pins the assert's line,
+	// yaml/pragma-strict-override the write's).
 	want := `  - op: test
     path: /server/timeout
+    idempotent: true
     value: 30
   - op: replace
     path: /server/timeout
@@ -627,7 +633,14 @@ func TestParsePragmaAndPrecedence(t *testing.T) {
 	if got := lowered(t, pragma+"@@ /server @@\n- timeout: 30\n+ timeout: 60\n"); got != want {
 		t.Errorf("file pragma:\n%s\nwant:\n%s", got, want)
 	}
-	strict := strings.ReplaceAll(want, "    idempotent: true\n", "")
+	strict := `  - op: test
+    path: /server/timeout
+    idempotent: true
+    value: 30
+  - op: replace
+    path: /server/timeout
+    value: 60
+`
 	if got := lowered(t, pragma+"@@ /server @@\n! strict\n- timeout: 30\n+ timeout: 60\n"); got != strict {
 		t.Errorf("! strict over the pragma:\n%s\nwant:\n%s", got, strict)
 	}

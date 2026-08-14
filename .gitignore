@@ -1,0 +1,8 @@
+
+# ctxloom private working state (rebuildable/local — cache, sessions, project id, local state)
+.agents/
+.codex/config.toml
+.codex/auth.json
+.claude/
+.ctxloom/
+opencode.json

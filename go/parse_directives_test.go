@@ -4,7 +4,7 @@ import "testing"
 
 // parseOne parses a single-section patch, with the preamble lines after
 // "hew: 1" and the hunk body supplied separately.
-func parseOne(t *testing.T, preamble, body string) TransformList {
+func parseOneDirective(t *testing.T, preamble, body string) TransformList {
 	t.Helper()
 	src := []byte("hew: 1\n" + preamble + "\n--- t.yaml format=yaml\n\n" + body)
 	tls, err := Parse(src)
@@ -41,7 +41,7 @@ func opAt(t *testing.T, tl TransformList, op OpKind) Transform {
 func TestParseDirectivesRideTheirTransforms(t *testing.T) {
 	t.Run("anchor", func(t *testing.T) {
 		for _, mode := range []AnchorMode{AnchorFork, AnchorRewrite} {
-			tl := parseOne(t, "", "@@ /s @@\n! anchor "+string(mode)+"\n- timeout: 30\n+ timeout: 60\n")
+			tl := parseOneDirective(t, "", "@@ /s @@\n! anchor "+string(mode)+"\n- timeout: 30\n+ timeout: 60\n")
 			for _, tr := range tl.Transform {
 				if tr.Anchor != mode {
 					t.Errorf("%s: anchor want %s, got %q", tr.Op, mode, tr.Anchor)
@@ -54,7 +54,7 @@ func TestParseDirectivesRideTheirTransforms(t *testing.T) {
 		parseFails(t, "@@ /s @@\n! anchor\n- a: 1\n")
 	})
 	t.Run("optional", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n! optional\n- gone: true\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n! optional\n- gone: true\n")
 		for _, tr := range tl.Transform {
 			if !tr.Optional {
 				t.Errorf("%s: optional not carried", tr.Op)
@@ -62,23 +62,23 @@ func TestParseDirectivesRideTheirTransforms(t *testing.T) {
 		}
 	})
 	t.Run("default and upsert", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n! default\n+ timeout: 30\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n! default\n+ timeout: 30\n")
 		if got := opAt(t, tl, OpAdd).OnConflict; got != ConflictKeep {
 			t.Errorf("! default: on_conflict want keep, got %q", got)
 		}
-		tl = parseOne(t, "", "@@ /s @@\n! upsert\n+ timeout: 30\n")
+		tl = parseOneDirective(t, "", "@@ /s @@\n! upsert\n+ timeout: 30\n")
 		if got := opAt(t, tl, OpAdd).OnConflict; got != ConflictReplace {
 			t.Errorf("! upsert: on_conflict want replace, got %q", got)
 		}
 	})
 	t.Run("idempotent rides both the assert and the write", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n! idempotent\n- timeout: 30\n+ timeout: 60\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n! idempotent\n- timeout: 30\n+ timeout: 60\n")
 		if !opAt(t, tl, OpTest).Idempotent || !opAt(t, tl, OpReplace).Idempotent {
 			t.Errorf("! idempotent must qualify both the test and the replace: %v", tl.Transform)
 		}
 	})
 	t.Run("strict opts the write out of the file pragma", func(t *testing.T) {
-		tl := parseOne(t, "idempotent: true\n", "@@ /s @@\n! strict\n- timeout: 30\n+ timeout: 60\n")
+		tl := parseOneDirective(t, "idempotent: true\n", "@@ /s @@\n! strict\n- timeout: 30\n+ timeout: 60\n")
 		if !opAt(t, tl, OpTest).Idempotent {
 			t.Error("the pragma's tolerance still applies to the assert (§7.5)")
 		}
@@ -87,19 +87,19 @@ func TestParseDirectivesRideTheirTransforms(t *testing.T) {
 		}
 	})
 	t.Run("file pragma alone", func(t *testing.T) {
-		tl := parseOne(t, "idempotent: true\n", "@@ /s @@\n- timeout: 30\n+ timeout: 60\n")
+		tl := parseOneDirective(t, "idempotent: true\n", "@@ /s @@\n- timeout: 30\n+ timeout: 60\n")
 		if !opAt(t, tl, OpTest).Idempotent || !opAt(t, tl, OpReplace).Idempotent {
 			t.Errorf("the pragma applies to every hunk: %v", tl.Transform)
 		}
 	})
 	t.Run("no pragma, no directive", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n- timeout: 30\n+ timeout: 60\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n- timeout: 30\n+ timeout: 60\n")
 		if opAt(t, tl, OpTest).Idempotent || opAt(t, tl, OpReplace).Idempotent {
 			t.Error("strict is the default (§7.5)")
 		}
 	})
 	t.Run("line-scoped attaches to the next line only", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n+ a: 1\n! default\n+ b: 2\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n+ a: 1\n! default\n+ b: 2\n")
 		var adds []Transform
 		for _, tr := range tl.Transform {
 			if tr.Op == OpAdd {
@@ -128,7 +128,7 @@ func TestParseDirectivesRideTheirTransforms(t *testing.T) {
 // part of that member, not members of their own.
 func TestParseGroupsIndentedBodyLines(t *testing.T) {
 	t.Run("nested mapping value", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n  cmd: npx\n+ env:\n+   K: v\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n  cmd: npx\n+ env:\n+   K: v\n")
 		add := opAt(t, tl, OpAdd)
 		if add.Path.String() != "/s/env" {
 			t.Fatalf("path: want /s/env, got %s", add.Path)
@@ -142,7 +142,7 @@ func TestParseGroupsIndentedBodyLines(t *testing.T) {
 		}
 	})
 	t.Run("two-line sequence element", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n  - name: github\n+ - name: ctxloom\n+   command: ctxloom\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n  - name: github\n+ - name: ctxloom\n+   command: ctxloom\n")
 		add := opAt(t, tl, OpAdd)
 		if add.Path.String() != "/s" {
 			t.Fatalf("an element add addresses the container, got %s", add.Path)
@@ -156,7 +156,7 @@ func TestParseGroupsIndentedBodyLines(t *testing.T) {
 		}
 	})
 	t.Run("a same-indent line is its own member", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n+ a: 1\n+ b: 2\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n+ a: 1\n+ b: 2\n")
 		n := 0
 		for _, tr := range tl.Transform {
 			if tr.Op == OpAdd {
@@ -168,7 +168,7 @@ func TestParseGroupsIndentedBodyLines(t *testing.T) {
 		}
 	})
 	t.Run("two dash lines are two elements", func(t *testing.T) {
-		tl := parseOne(t, "", "@@ /s @@\n+ - a\n+ - b\n")
+		tl := parseOneDirective(t, "", "@@ /s @@\n+ - a\n+ - b\n")
 		if n := len(tl.Transform); n != 2 {
 			t.Fatalf("want 2 adds, got %d transforms: %v", n, tl.Transform)
 		}
@@ -178,7 +178,7 @@ func TestParseGroupsIndentedBodyLines(t *testing.T) {
 // TestParseCommentOrdinalsArePerImage pins §4.5b's ordinals against §5's two
 // images: a removed comment and the comment replacing it are both #0.
 func TestParseCommentOrdinalsArePerImage(t *testing.T) {
-	tl := parseOne(t, "", "@@ /s @@\n- # old\n+ # new\n  timeout: 30\n")
+	tl := parseOneDirective(t, "", "@@ /s @@\n- # old\n+ # new\n  timeout: 30\n")
 	rep := opAt(t, tl, OpReplace)
 	if rep.Path.String() != "/s/#0" {
 		t.Fatalf("want a replace at /s/#0, got %s", rep.Path)
@@ -191,7 +191,7 @@ func TestParseCommentOrdinalsArePerImage(t *testing.T) {
 	}
 
 	// Two added comments number 0 and 1 in the after-image.
-	tl = parseOne(t, "", "@@ /s @@\n+ # one\n+ # two\n")
+	tl = parseOneDirective(t, "", "@@ /s @@\n+ # one\n+ # two\n")
 	var paths []string
 	for _, tr := range tl.Transform {
 		paths = append(paths, tr.Path.String())
@@ -201,7 +201,7 @@ func TestParseCommentOrdinalsArePerImage(t *testing.T) {
 	}
 
 	// A context comment is in both images, so the next removed comment is #1.
-	tl = parseOne(t, "", "@@ /s @@\n  # kept\n- # dropped\n")
+	tl = parseOneDirective(t, "", "@@ /s @@\n  # kept\n- # dropped\n")
 	if rm := opAt(t, tl, OpRemove); rm.Path.String() != "/s/#1" {
 		t.Fatalf("want a remove at /s/#1, got %s", rm.Path)
 	}
@@ -209,7 +209,7 @@ func TestParseCommentOrdinalsArePerImage(t *testing.T) {
 
 // TestCommentValueRoundTrip pins the {comment: "…"} shape the corpus fixtures
 // carry at a comment address (§4.5b, §11.10 reduction 3).
-func TestCommentValueRoundTrip(t *testing.T) {
+func TestCommentValueRoundTripDirectives(t *testing.T) {
 	v := CommentValue("hello")
 	got, ok := CommentText(v)
 	if !ok || got != "hello" {

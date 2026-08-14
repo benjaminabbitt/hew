@@ -30,7 +30,7 @@ corpus-go-strict:
 # Mutation testing, unit-test killers only (fast inner loop; slow suites skipped).
 mutate-go pkg="./internal/...":
     @test -f go/go.mod || { echo "go implementation not started (go/go.mod missing)"; exit 1; }
-    cd go && HEW_SKIP_SLOW_SUITES=1 go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --invert-assignments --invert-logical --invert-loopctrl {{pkg}}
+    cd go && HEW_SKIP_SLOW_SUITES=1 go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 30 --invert-assignments --invert-logical --invert-loopctrl {{pkg}}
 
 # Mutation with the corpus + acceptance suites as killers (milestone exit gate; slow).
 mutate-go-acceptance pkg="":

@@ -27,12 +27,17 @@ type quals struct {
 
 // over folds the more specific qualifier set q onto dst. Precedence is
 // §7.5's: line beats hunk beats the file pragma beats the strict default.
+// Idempotence is two grants (yaml/reapply-not-idempotent pins the assert's
+// patch line, yaml/pragma-strict-override the write's): the pragma or a
+// `! idempotent` tolerates the ASSERT unconditionally, while `! strict`
+// opts only the WRITE back out of an outer grant.
 func (q quals) over(dst *quals) {
 	if q.strict {
-		dst.idempotent = false
+		dst.strict = true
 	}
 	if q.idempotent {
 		dst.idempotent = true
+		dst.strict = false
 	}
 	if q.optional {
 		dst.optional = true
@@ -63,8 +68,15 @@ func (q quals) applyTo(t *Transform) {
 	if q.optional && (t.Op == OpRemove || t.Op == OpTest) {
 		t.Optional = true
 	}
-	if q.idempotent && (t.Op == OpAdd || t.Op == OpRemove || t.Op == OpReplace) {
-		t.Idempotent = true
+	if q.idempotent {
+		switch t.Op {
+		case OpTest:
+			t.Idempotent = true // the assert's tolerance survives ! strict
+		case OpAdd, OpRemove, OpReplace:
+			if !q.strict {
+				t.Idempotent = true
+			}
+		}
 	}
 }
 
