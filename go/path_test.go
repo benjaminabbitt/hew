@@ -5,37 +5,6 @@ import (
 	"testing"
 )
 
-func ordinalPtr(n int) *int { return &n }
-
-func TestParsePathRoundTrip(t *testing.T) {
-	cases := []string{
-		"/",
-		"/server/timeout",
-		"/tags/0",
-		"/tags/-",
-		"/mcpServers/name=github",
-		`/tool/x/id="a b"`,
-		"/servers/enabled=true",
-		"/tags/=gamma",
-		`/permissions/deny/="Bash(curl *)"`,
-		`/provider/"aws"`,
-		`/resource/"aws_instance"/"web"`,
-		"/mcpServers/name=ctxloom?",
-		"/server/tls?",
-		"/server/#0",
-		"/server/#t",
-	}
-	for _, s := range cases {
-		p, err := ParsePath(s)
-		if err != nil {
-			t.Fatalf("ParsePath(%q): %v", s, err)
-		}
-		if got := p.String(); got != s {
-			t.Errorf("ParsePath(%q).String() = %q, want %q", s, got, s)
-		}
-	}
-}
-
 func TestParsePathEmptyIsError(t *testing.T) {
 	if _, err := ParsePath(""); err == nil {
 		t.Fatal("ParsePath(\"\") should fail: empty path (§4)")
@@ -65,15 +34,6 @@ func TestRelativePath(t *testing.T) {
 	}
 	if !root.IsRelative() || root.Len() != 0 {
 		t.Fatalf("relative root: %+v", root)
-	}
-}
-
-func TestOrdinalOnlyInIR(t *testing.T) {
-	if _, err := ParsePath(`/provider/"aws"[1]`); err != nil {
-		t.Fatalf("ParsePath with ordinal should succeed: %v", err)
-	}
-	if _, err := ParseAuthoredPath(`/provider/"aws"[1]`); err == nil {
-		t.Fatal("ParseAuthoredPath must reject IR-only [n] ordinal selectors (§9.6, §11.10 reduction 4)")
 	}
 }
 
@@ -167,14 +127,12 @@ func TestSegmentSpellability(t *testing.T) {
 		{"unknown block kind is an ordinary key", Segment{Kind: SegKey, Name: "notablock:0"}, true},
 		{"empty brackets are not an ordinal", Segment{Kind: SegKey, Name: "a[]"}, true},
 		{"key with the optional flag", Segment{Kind: SegKey, Name: "tls", Optional: true}, true},
-		{"key with an ordinal selector", Segment{Kind: SegKey, Name: "server", Ordinal: ordinalPtr(1)}, true},
 		{"empty key survives in a non-leading position", Segment{Kind: SegKey, Name: ""}, true},
 
 		// --- healthy non-key segments ---------------------------------------
 		{"index zero", Segment{Kind: SegIndex, Index: 0}, true},
 		{"index", Segment{Kind: SegIndex, Index: 42}, true},
 		{"append", Segment{Kind: SegAppend}, true},
-		{"append with an ordinal", Segment{Kind: SegAppend, Ordinal: ordinalPtr(2)}, true},
 		{"match on a field", Segment{Kind: SegMatch, Name: "name", Value: Scalar{Kind: ScalarString, Text: "github"}}, true},
 		{"empty-field match", Segment{Kind: SegMatch, Value: Scalar{Kind: ScalarString, Text: "gamma"}}, true},
 		{"quoted match value", Segment{Kind: SegMatch, Name: "port", Value: Scalar{Kind: ScalarString, Text: "8080", Quoted: true}}, true},

@@ -302,7 +302,7 @@ func (s *Sel) place(sibling string, before bool) *Sel {
 	} else {
 		// buildScope, matching ParsePath on the branch above: both halves of a
 		// placement sibling resolve in the same grammar.
-		seg, err := parseSegment(sibling, false, buildScope)
+		seg, err := parseSegment(sibling, buildScope)
 		if err != nil {
 			return s.reject(s.badf("placement sibling %q: %s", sibling, err.Error()))
 		}

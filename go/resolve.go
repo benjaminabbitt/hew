@@ -48,7 +48,7 @@ type Node interface {
 // --ops` prints it and `--record` embeds it (§9.7); hew cannot read it back,
 // and v0 defines no way to author one. The qualifiers with no RFC 6902
 // representation — anchor, surface, on_conflict, optional, idempotent, the
-// ordinal selectors, and the Markdown/comment addressing forms — are
+// and the Markdown/comment addressing forms — are
 // consumed during resolution, which is the lossy direction §9.2 names.
 //
 // Two fields extend Appendix A.1's ResolvedOp, for the same reason
@@ -264,10 +264,6 @@ func (r *resolver) createPointer(path Path, line int) (string, error) {
 		return "", err
 	}
 	last := path.Segment(path.Len() - 1)
-	if last.Ordinal != nil {
-		return "", r.err(hewerr.CodeInexpressible, path.String(), line,
-			"resolve: an ordinal selector cannot address a node that does not exist")
-	}
 	switch last.Kind {
 	case SegKey:
 		return parentPtr + "/" + escapePointer(last.Name), nil
@@ -345,10 +341,6 @@ type stepErr struct {
 // the node it selects. A nil node means the segment addresses a position
 // rather than a node ("-"), which only the last segment may do.
 func (r *resolver) step(n Node, seg Segment) (string, Node, *stepErr) {
-	if seg.Ordinal != nil && seg.Kind != SegMatch {
-		return "", nil, &stepErr{inexpressible: true,
-			detail: fmt.Sprintf("an ordinal selector on a %s segment has no RFC 6901 projection (§9.2)", seg.describe())}
-	}
 	switch seg.Kind {
 	case SegKey:
 		if n.Kind() != KindMap {
@@ -405,16 +397,6 @@ func (r *resolver) stepMatch(n Node, seg Segment) (string, Node, *stepErr) {
 		if v.Equal(seg.Value.Value()) {
 			hits = append(hits, matched{index: i, node: e})
 		}
-	}
-	if seg.Ordinal != nil {
-		// §7.2: ord is 0-based and counts same-shape siblings in source
-		// order. Selecting the ordinal is the whole point of the selector,
-		// so several matches are not ambiguous here.
-		o := *seg.Ordinal
-		if o < 0 || o >= len(hits) {
-			return "", nil, &stepErr{detail: fmt.Sprintf("ordinal %d selects nothing among %d elements matching %s", o, len(hits), seg.String())}
-		}
-		return strconv.Itoa(hits[o].index), hits[o].node, nil
 	}
 	switch len(hits) {
 	case 0:

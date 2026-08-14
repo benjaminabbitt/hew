@@ -85,17 +85,11 @@ type run struct {
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
-// honour: a YAML anchor policy, or an ordinal selector, which would otherwise
-// silently resolve to the first matching sibling — the exact failure §9.3
-// forbids.
+// honour: a YAML anchor policy, which has no meaning here (§9.3).
 func (r *run) unsupported(t hew.Transform) error {
 	if t.Anchor != "" {
 		return r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 			"anchor is a YAML alias directive and has no TOML meaning (§8.3)")
-	}
-	if t.Path.HasOrdinal() || t.From.HasOrdinal() {
-		return r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
-			"ordinal selectors are not implemented by the TOML binding; address the node by key or value (§4.2, §7.2)")
 	}
 	return nil
 }

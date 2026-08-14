@@ -82,7 +82,6 @@ func TestKeyBijection(t *testing.T) {
 				NewPath(Segment{Kind: SegKey, Name: key}, Segment{Kind: SegKey, Name: key}),
 				NewRelativePath(Segment{Kind: SegKey, Name: key}),
 				NewPath(Segment{Kind: SegKey, Name: key, Optional: true}),
-				NewPath(Segment{Kind: SegKey, Name: key, Ordinal: ordinalPtr(2)}),
 				// The same key as a key-match FIELD and as a match VALUE.
 				NewPath(Segment{Kind: SegMatch, Name: key, Value: Scalar{Kind: ScalarString, Text: "v"}}),
 				NewPath(Segment{Kind: SegMatch, Name: "name", Value: Scalar{Kind: ScalarString, Text: key}}),
@@ -143,9 +142,12 @@ func TestCanonicalRenderingQuotesExactlyTheEnumeratedClasses(t *testing.T) {
 	// its SHAPE, so "08080" is quoted even though RFC 6901's index production
 	// would not have taken it.
 	quoted := []string{"", "-", "*", "8080", "0", "007", "08080", "@scope/pkg", "#0", "#t",
-		"# Setup", `"q"`, "code:0", "notablock:0", "a1:0", "_x-y:12", "opt?", "a[1]", "a[12]"}
+		"# Setup", `"q"`, "code:0", "notablock:0", "a1:0", "_x-y:12", "opt?"}
 	bare := []string{"server", "left-pad", "8080x", "a/b", "a~b", "a=b",
-		"para:x", "a[]", "a[1", "0:0", "1a:0", ":0", "a:", "a:b", "-x", "true", "1.0", "{}"}
+		"para:x", "a[]", "a[1", "0:0", "1a:0", ":0", "a:", "a:b", "-x", "true", "1.0", "{}",
+		// A trailing "[n]" is an ordinary key now that the IR-only ordinal
+		// selector is gone: it reparses as itself, so quoting it would be noise.
+		"a[1]", "a[12]"}
 	for _, k := range quoted {
 		if got := (Segment{Kind: SegKey, Name: k}).String(); !strings.HasPrefix(got, `"`) {
 			t.Errorf("key %q renders bare as %q; §4.1 requires the quoted form", k, got)

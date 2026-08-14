@@ -112,19 +112,13 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	b.WriteByte('\n')
 
 	for _, anchor := range order {
-		header, ord, err := authoredAnchor(anchor)
+		header := anchor.String()
 		if err != nil {
 			return nil, err
 		}
 		lines, err := renderGroup(anchor, groups[anchor.String()], dial)
 		if err != nil {
 			return nil, err
-		}
-		if ord != nil {
-			// An ordinal is an addressing mode in the IR and an annotation in
-			// the notation: it goes back to `! match ord=` on the hunk's first
-			// body line, the hunk-anchored form of §7.2.
-			lines = append([]string{fmt.Sprintf("! match ord=%d", *ord)}, lines...)
 		}
 		b.WriteByte('\n')
 		fmt.Fprintf(&b, "@@ %s @@\n", header)
@@ -134,31 +128,6 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 		}
 	}
 	return []byte(b.String()), nil
-}
-
-// authoredAnchor splits a hunk anchor into the address the notation can spell
-// and the ordinal selector that has to become a `! match ord=` annotation:
-// ParseAuthoredPath refuses an `[n]` selector, so rendering one into a hunk
-// header would emit notation this very parser rejects (§7.2, §9.6).
-func authoredAnchor(p Path) (string, *int, error) {
-	segs := p.Segments()
-	for i, s := range segs {
-		if s.Ordinal == nil || i == len(segs)-1 {
-			continue
-		}
-		return "", nil, fmt.Errorf("%w: an ordinal selector on %s is not the anchor's last segment, and only the last one is writable as `! match ord=` (§7.2)",
-			ErrInexpressible, p)
-	}
-	if len(segs) == 0 || segs[len(segs)-1].Ordinal == nil {
-		return p.String(), nil, nil
-	}
-	ord := *segs[len(segs)-1].Ordinal
-	segs[len(segs)-1].Ordinal = nil
-	bare := RootPath().Append(segs...)
-	if p.IsRelative() {
-		bare = NewRelativePath(segs...)
-	}
-	return bare.String(), &ord, nil
 }
 
 func targetToken(s string) string {
@@ -912,10 +881,6 @@ func jsonText(n *yaml.Node) string {
 func renderFreeAssertion(t Transform) (string, error) {
 	if t.Exhaustive {
 		return "? exhaustive", nil
-	}
-	if t.Path.HasOrdinal() {
-		return "", fmt.Errorf("%w: assertion at %s carries an ordinal selector, which only a hunk anchor can spell as `! match ord=` (§7.2)",
-			ErrInexpressible, t.Path)
 	}
 	path := t.Path.String()
 	switch {

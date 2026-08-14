@@ -351,7 +351,7 @@ func spellFailure(seg Segment) string {
 			"a path is written on one line, so there is nowhere to put it"
 	}
 	spelling := strconv.Quote(seg.String())
-	got, err := parseSegment(seg.String(), true, buildScope)
+	got, err := parseSegment(seg.String(), buildScope)
 	switch {
 	case err != nil:
 		return "its spelling " + spelling + " is not a legal segment"

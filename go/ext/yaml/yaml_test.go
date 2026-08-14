@@ -728,10 +728,6 @@ func TestUnimplementedQualifiersAreRefused(t *testing.T) {
 	target := "s:\n  - name: a\n  - name: a\n"
 	mustFail(t, target, "  - op: add\n    path: /s/x\n    surface: table\n    value: 1\n",
 		hewerr.CodeInexpressible, "/s/x")
-	mustFail(t, target, "  - op: replace\n    path: /s/name=a[1]/name\n    value: b\n",
-		hewerr.CodeInexpressible, "/s/name=a[1]/name")
-	mustFail(t, target, "  - op: copy\n    from: /s/name=a[0]\n    path: /other\n",
-		hewerr.CodeInexpressible, "/other")
 }
 
 func TestUnsupportedOpIsInexpressible(t *testing.T) {

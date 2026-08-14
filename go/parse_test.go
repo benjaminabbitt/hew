@@ -262,62 +262,6 @@ func TestParseLowering(t *testing.T) {
     value: gamma
 `,
 	}, {
-		name: "a removed container asserts its children and removes only itself",
-		body: "@@ / @@\n- provider \"azurerm\" {\n-   features {}\n- }\n",
-		want: `  - op: test
-    path: /provider/"azurerm"/features
-    value: {}
-  - op: remove
-    path: /provider/"azurerm"
-`,
-	}, {
-		name: "a context container is lowered in full where it stands",
-		body: "@@ / @@\n! match label=[\"aws\"] ord=0\n  provider \"aws\" {\n" +
-			"-   region = \"us-west-1\"\n+   region = \"us-west-2\"\n    profile = \"default\"\n  }\n" +
-			"! match label=[\"aws\"] ord=1\n  provider \"aws\" {\n    alias = \"east\"\n+   profile = \"ctxloom\"\n  }\n",
-		want: `  - op: test
-    path: /provider/"aws"[0]/region
-    value: us-west-1
-  - op: test
-    path: /provider/"aws"[0]/profile
-    value: default
-  - op: replace
-    path: /provider/"aws"[0]/region
-    value: us-west-2
-  - op: test
-    path: /provider/"aws"[1]/alias
-    value: east
-  - op: add
-    path: /provider/"aws"[1]/profile
-    after: /provider/"aws"[1]/alias
-    value: ctxloom
-`,
-	}, {
-		name: "a first-line ordinal with no block after it selects the anchor",
-		body: "@@ /provider/\"aws\" @@\n! match ord=1\n  alias = \"east\"\n+ profile = \"ctxloom\"\n",
-		want: `  - op: test
-    path: /provider/"aws"[1]/alias
-    value: east
-  - op: add
-    path: /provider/"aws"[1]/profile
-    after: /provider/"aws"[1]/alias
-    value: ctxloom
-`,
-	}, {
-		name: "an added block writes its body as the value, labels stay in the address",
-		body: "@@ /terraform @@\n  required_version = \">= 1.6\"\n+ required_providers {\n" +
-			"+   aws = {\n+     source = \"hashicorp/aws\"\n+   }\n+ }\n",
-		want: `  - op: test
-    path: /terraform/required_version
-    value: '>= 1.6'
-  - op: add
-    path: /terraform/required_providers
-    after: /terraform/required_version
-    value:
-      aws:
-        source: hashicorp/aws
-`,
-	}, {
 		name: "a comment is a node with an address in each projection",
 		body: "@@ /server @@\n  # ports below 1024 need CAP_NET_BIND_SERVICE\n  port: 8080\n- # TODO\n+ # done\n",
 		want: `  - op: test
@@ -587,12 +531,9 @@ func TestParseLowering(t *testing.T) {
     value: 1
 `,
 	}, {
-		name: "an empty block and an empty container have their empty values",
-		body: "@@ / @@\n  features {}\n  opts: {\n  }\n  list: [\n  ]\n",
+		name: "an empty container has its empty value",
+		body: "@@ / @@\n  opts: {\n  }\n  list: [\n  ]\n",
 		want: `  - op: test
-    path: /features
-    value: {}
-  - op: test
     path: /opts
     value: {}
   - op: test
@@ -762,14 +703,13 @@ func TestParseErrors(t *testing.T) {
 		{"unclosed hunk header", "hew: 1\n\n--- t.json format=json\n@@ /server\n  a: 1\n", hewerr.CodeParse, 4, "not closed"},
 		{"hunk attribute", "hew: 1\n\n--- t.json format=json\n@@ / @@ mode=x\n  a: 1\n", hewerr.CodeParse, 4, "unknown hunk attribute"},
 		{"bad anchor path", "hew: 1\n\n--- t.json format=json\n@@ server @@\n  a: 1\n", hewerr.CodeParse, 4, "must begin with"},
-		{"IR-only ordinal in the notation", "hew: 1\n\n--- t.json format=json\n@@ /a[0] @@\n  b: 1\n", hewerr.CodeParse, 4, "IR-only"},
 		{"empty hunk", "hew: 1\n\n--- t.json format=json\n@@ / @@\n\n", hewerr.CodeParse, 4, "no body lines"},
 		{"bad margin", hdr + "@@ / @@\n* a: 1\n", hewerr.CodeParse, 6, "not a margin character"},
 		{"missing margin space", hdr + "@@ / @@\n+a: 1\n", hewerr.CodeParse, 6, "must be a single space"},
 		{"unexpected indentation", hdr + "@@ / @@\n  a: 1\n    b: 2\n", hewerr.CodeParse, 7, "unexpected indentation"},
 		{"a body line shallower than the hunk's first", hdr + "@@ / @@\n    a: 1\n  b: 2\n", hewerr.CodeParse, 7, "unexpected indentation"},
 		{"stray closing delimiter", hdr + "@@ / @@\n  }\n", hewerr.CodeParse, 6, "unexpected closing delimiter"},
-		{"mixed margins in an added container", hdr + "@@ / @@\n+ a {\n-   b = 1\n+ }\n", hewerr.CodeParse, 7, "mixed margins"},
+		{"mixed margins in an added container", hdr + "@@ / @@\n+ opts: {\n-   b: 1\n+ }\n", hewerr.CodeParse, 7, "mixed margins"},
 		{"unknown assertion", hdr + "@@ / @@\n? probably /a\n  b: 1\n", hewerr.CodeParse, 6, "unknown assertion"},
 		{"unknown directive", hdr + "@@ / @@\n! hurry\n  b: 1\n", hewerr.CodeParse, 6, "unknown directive"},
 		{"empty annotation", hdr + "@@ / @@\n?\n  b: 1\n", hewerr.CodeParse, 6, "carries no directive"},
@@ -783,17 +723,6 @@ func TestParseErrors(t *testing.T) {
 		{"anchor mode", hdr + "@@ / @@\n! anchor maybe\n- a: 1\n", hewerr.CodeParse, 6, "`! anchor` takes"},
 		{"anchor arity", hdr + "@@ / @@\n! anchor fork rewrite\n- a: 1\n", hewerr.CodeParse, 6, "exactly one argument"},
 		{"surface value", hdr + "@@ / @@\n! surface inline\n+ a: 1\n", hewerr.CodeParse, 6, "`! surface` takes"},
-		{"match without ord", hdr + "@@ /provider/\"aws\" @@\n! match label=[\"aws\"]\n  a: 1\n", hewerr.CodeParse, 6, "requires `ord=`"},
-		{"match with a bad ord", hdr + "@@ /provider/\"aws\" @@\n! match ord=last\n  a: 1\n", hewerr.CodeParse, 6, "non-negative integer"},
-		{"match with a bad label list", hdr + "@@ /provider/\"aws\" @@\n! match label=aws ord=0\n  a: 1\n", hewerr.CodeParse, 6, "list of labels"},
-		{"match with an unknown attribute", hdr + "@@ /provider/\"aws\" @@\n! match ord=0 fuzzy=1\n  a: 1\n", hewerr.CodeParse, 6, "unknown `! match` attribute"},
-		{"match attribute without a value", hdr + "@@ /provider/\"aws\" @@\n! match ord\n  a: 1\n", hewerr.CodeParse, 6, "not key=value"},
-		{"two match annotations on one line", hdr + "@@ / @@\n! match ord=0\n! match ord=1\n  provider \"aws\" {\n    a = 1\n  }\n", hewerr.CodeParse, 7, "two `! match`"},
-		{"match on the document root", hdr + "@@ / @@\n! match ord=1\n  a: 1\n", hewerr.CodeParse, 0, "document root"},
-		{"match away from a block", hdr + "@@ /provider/\"aws\" @@\n  a: 1\n! match ord=1\n+ b: 2\n", hewerr.CodeParse, 7, "must precede the block"},
-		{"ordinal without a distinguishing assert", hdr + "@@ /provider/\"aws\" @@\n! match ord=1\n+ profile = \"x\"\n", hewerr.CodeParse, 6, "distinguishing"},
-		{"label cross-check", hdr + "@@ /provider/\"aws\" @@\n! match label=[\"gcp\"] ord=1\n  alias = \"east\"\n", hewerr.CodeAssertionFailed, 6, "does not match the selected block's labels"},
-		{"label cross-check beside a block", hdr + "@@ / @@\n! match label=[\"gcp\"] ord=1\n  provider \"aws\" {\n    alias = \"east\"\n  }\n", hewerr.CodeAssertionFailed, 6, "does not match the selected block's labels"},
 		{"element with no identity", hdr + "@@ /a @@\n  - inner:\n      deep: 1\n", hewerr.CodeParse, 6, "no usable identity field"},
 		{"comment inside an added container", hdr + "@@ / @@\n+ server:\n+   # why\n+   port: 8080\n", hewerr.CodeInexpressible, 7, "no address in the IR"},
 		{"unreadable value", hdr + "@@ / @@\n  a: \"unterminated\n", hewerr.CodeParse, 6, "cannot read"},

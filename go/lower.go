@@ -80,27 +80,9 @@ func (q quals) applyTo(t *Transform) {
 	}
 }
 
-// ordAnnot is a parsed `! match [label=[…]] ord=<n>` (§7.2).
-type ordAnnot struct {
-	ord       int
-	labels    []string
-	hasLabels bool
-	line      int
-}
-
-// ordUse records where an ordinal selector landed, so the
-// distinguishing-assert rule (§6.4.3 rule 2) can be checked once the hunk's
-// transforms exist.
-type ordUse struct {
-	path Path   // the selected path, ordinal included
-	show string // the path as authored, without the selector — what the error names
-	line int
-}
-
 type lowerer struct {
 	anchor Path
 	out    []Transform
-	ords   []ordUse
 
 	// format is the file section's declared format (§2.2), carried so that an
 	// annotation's path is lexed under the ACTIVE format's segment grammar
@@ -125,7 +107,7 @@ func lowerHunk(format FormatID, anchor Path, anchorLine int, body []bodyLine, fi
 		return nil, parseErr(bl.num, "", "unexpected indentation: %d spaces where %d were expected (§2.3)", bl.indent, body[0].indent)
 	}
 
-	nodes, surface, hunkQ, hunkOrd, err := attach(entries, true)
+	nodes, surface, hunkQ, err := attach(entries, true)
 	if err != nil {
 		return nil, err
 	}
@@ -133,23 +115,9 @@ func lowerHunk(format FormatID, anchor Path, anchorLine int, body []bodyLine, fi
 	hunkQ.over(&q)
 
 	l := &lowerer{format: format}
-	if hunkOrd != nil {
-		if err := checkLabels(hunkOrd, anchorLabels(anchor), anchor.String()); err != nil {
-			return nil, err
-		}
-		show := anchor.String()
-		anchor, err = withOrdinal(anchor, hunkOrd.ord, show)
-		if err != nil {
-			return nil, err
-		}
-		l.ords = append(l.ords, ordUse{path: anchor, show: show, line: hunkOrd.line})
-	}
 	l.anchor = anchor
 
 	if err := l.emit(anchor, nodes, surface, q); err != nil {
-		return nil, err
-	}
-	if err := l.checkOrdinals(); err != nil {
 		return nil, err
 	}
 	for i := range l.out {
@@ -164,17 +132,16 @@ func lowerHunk(format FormatID, anchor Path, anchorLine int, body []bodyLine, fi
 // is lifted out; line-scoped directives are folded onto the entry they
 // govern. When top is set, a line-scoped directive written as the first body
 // line governs the anchor instead.
-func attach(entries []*mirrorEntry, top bool) (nodes []*mirrorEntry, surface Surface, hunkQ quals, hunkOrd *ordAnnot, err error) {
-	fail := func(e error) ([]*mirrorEntry, Surface, quals, *ordAnnot, error) {
-		return nil, "", quals{}, nil, e
+func attach(entries []*mirrorEntry, top bool) (nodes []*mirrorEntry, surface Surface, hunkQ quals, err error) {
+	fail := func(e error) ([]*mirrorEntry, Surface, quals, error) {
+		return nil, "", quals{}, e
 	}
 	var pending quals
-	var pendOrd *ordAnnot
 	pendLine := 0
 	for i, e := range entries {
 		if e.node() {
-			e.q, e.ord = pending, pendOrd
-			pending, pendOrd, pendLine = quals{}, nil, 0
+			e.q = pending
+			pending, pendLine = quals{}, 0
 			nodes = append(nodes, e)
 			continue
 		}
@@ -196,17 +163,17 @@ func attach(entries []*mirrorEntry, top bool) (nodes []*mirrorEntry, surface Sur
 			}
 			nodes = append(nodes, e) // `? exhaustive`, emitted in place
 		case annotLine:
-			toAnchor, aerr := anchorScoped(entries, i, top)
-			if aerr != nil {
-				return fail(aerr)
-			}
-			target, ordSlot := &pending, &pendOrd
+			// §7's rule is positional: a line-scoped directive written as
+			// the hunk's FIRST body line governs the anchor, otherwise it
+			// governs the body line after it.
+			toAnchor := top && i == 0
+			target := &pending
 			if toAnchor {
-				target, ordSlot = &hunkQ, &hunkOrd
+				target = &hunkQ
 			} else {
 				pendLine = e.annot.line
 			}
-			if derr := applyDirective(e.annot, target, ordSlot); derr != nil {
+			if derr := applyDirective(e.annot, target); derr != nil {
 				return fail(derr)
 			}
 		}
@@ -214,36 +181,7 @@ func attach(entries []*mirrorEntry, top bool) (nodes []*mirrorEntry, surface Sur
 	if pendLine != 0 {
 		return fail(parseErr(pendLine, "", "line-scoped annotation is not followed by a body line (§7)"))
 	}
-	return nodes, surface, hunkQ, hunkOrd, nil
-}
-
-// anchorScoped decides whether a line-scoped directive governs the hunk's
-// anchor rather than the body line after it. §7's rule is positional — the
-// first body line of a hunk governs the anchor — with one refinement §7.2
-// spells out and the corpus pins: `! match` is written "in place, beside the
-// block it selects", so an ordinal followed by a block header selects THAT
-// block even when it stands first (hcl/repeated-label-ordinal, whose anchor
-// is the document root). Only when no block line follows it is the ordinal
-// the hunk-anchored form (hcl/ordinal-without-distinguishing-assert).
-func anchorScoped(entries []*mirrorEntry, i int, top bool) (bool, error) {
-	first := top && i == 0
-	if entries[i].annot.verb != verbMatch {
-		return first, nil
-	}
-	for j := i + 1; j < len(entries); j++ {
-		if !entries[j].node() {
-			continue
-		}
-		if entries[j].kind == mBlock {
-			return false, nil
-		}
-		break
-	}
-	if first {
-		return true, nil
-	}
-	return false, parseErr(entries[i].annot.line, "",
-		"`! match` must precede the block it selects, or stand as the hunk's first body line (§7.2)")
+	return nodes, surface, hunkQ, nil
 }
 
 // emit lowers one container's entries. Order is §9.1's: the container's
@@ -451,7 +389,7 @@ func (l *lowerer) fieldTests(elem Path, e *mirrorEntry, q quals) error {
 // container lowers a nested container: its own annotations are attached
 // within it, and its transforms are emitted where the container line stands.
 func (l *lowerer) container(path Path, entries []*mirrorEntry, q quals) error {
-	nodes, surface, _, _, err := attach(entries, false)
+	nodes, surface, _, err := attach(entries, false)
 	if err != nil {
 		return err
 	}
@@ -462,7 +400,7 @@ func (l *lowerer) container(path Path, entries []*mirrorEntry, q quals) error {
 // children of a removed container are asserted, but only the container itself
 // is removed (§9.1 steps 2 and 4).
 func (l *lowerer) testsOnly(path Path, entries []*mirrorEntry, q quals) error {
-	nodes, _, _, _, err := attach(entries, false)
+	nodes, _, _, err := attach(entries, false)
 	if err != nil {
 		return err
 	}
@@ -543,7 +481,7 @@ func (l *lowerer) freeAssert(path Path, e *mirrorEntry) error {
 // resolve reads an annotation's path argument, expanding a `.`-relative path
 // against the enclosing hunk's anchor (§4.6).
 func (l *lowerer) resolve(text string, line int) (Path, error) {
-	p, err := ParseAuthoredPathIn(l.format, text)
+	p, err := ParsePathIn(l.format, text)
 	if err != nil {
 		if he, ok := hewerr.As(err); ok {
 			he.PatchLine = line
@@ -572,40 +510,13 @@ func (l *lowerer) entryPath(path Path, e *mirrorEntry, before bool) (Path, error
 	if err != nil {
 		return Path{}, err
 	}
-	if e.ord == nil {
-		return p, nil
-	}
-	if err := checkLabels(e.ord, entryLabels(e), p.String()); err != nil {
-		return Path{}, err
-	}
-	show := p.String()
-	p, err = withOrdinal(p, e.ord.ord, show)
-	if err != nil {
-		return Path{}, err
-	}
-	l.noteOrdinal(ordUse{path: p, show: show, line: e.ord.line})
 	return p, nil
-}
-
-func (l *lowerer) noteOrdinal(u ordUse) {
-	for _, have := range l.ords {
-		if have.path.Equal(u.path) {
-			return
-		}
-	}
-	l.ords = append(l.ords, u)
 }
 
 func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
 	switch e.kind {
 	case mKV:
 		return path.Append(Segment{Kind: SegKey, Name: e.key}), nil
-	case mBlock:
-		segs := []Segment{{Kind: SegKey, Name: e.labels[0]}}
-		for _, label := range e.labels[1:] {
-			segs = append(segs, Segment{Kind: SegKey, Name: label, Quoted: true})
-		}
-		return path.Append(segs...), nil
 	case mTable:
 		rest := stripPathPrefix(path, e.labels)
 		if len(rest) == 0 {
@@ -809,30 +720,6 @@ func pairRuns(nodes []*mirrorEntry, paired []int) {
 	}
 }
 
-// checkOrdinals enforces §6.4.3 rule 2: an ordinal-addressed hunk MUST carry
-// at least one distinguishing assert, so that a shifted target fails loudly
-// instead of patching the wrong block. The parser can see whether an
-// assertion exists; whether it distinguishes anything is the target's
-// business, and the corpus splits the two (hcl/ordinal-without-distinguishing-assert
-// versus hcl/ordinal-shifted-target).
-func (l *lowerer) checkOrdinals() error {
-	for _, u := range l.ords {
-		found := false
-		for i := range l.out {
-			t := &l.out[i]
-			if t.Op == OpTest && strictlyUnder(u.path, t.Path) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return parseErr(u.line, u.show,
-				"`! match ord=` carries no distinguishing assert: an ordinal-addressed hunk MUST assert a child that differs between the same-label siblings, or a shifted target would be silently patched (§6.4.3, §7.2)")
-		}
-	}
-	return nil
-}
-
 func strictlyUnder(parent, p Path) bool {
 	if p.Len() <= parent.Len() || p.IsRelative() != parent.IsRelative() {
 		return false
@@ -843,57 +730,6 @@ func strictlyUnder(parent, p Path) bool {
 		}
 	}
 	return true
-}
-
-// withOrdinal puts a `! match ord=` selector on a path's last segment: an
-// ordinal is an addressing mode, and belongs with the address once it is out
-// of human hands (§9.6, §11.10 reduction 4).
-func withOrdinal(p Path, ord int, show string) (Path, error) {
-	segs := p.Segments()
-	if len(segs) == 0 {
-		return Path{}, parseErr(0, show, "`! match ord=` cannot select the document root (§7.2)")
-	}
-	n := ord
-	segs[len(segs)-1].Ordinal = &n
-	if p.IsRelative() {
-		return NewRelativePath(segs...), nil
-	}
-	return RootPath().Append(segs...), nil
-}
-
-// checkLabels performs the redundant `label=[…]` cross-check of §7.2: when
-// present it is checked against the selected block's actual labels, and a
-// mismatch is HEW011.
-func checkLabels(o *ordAnnot, actual []string, path string) error {
-	if !o.hasLabels {
-		return nil
-	}
-	if len(o.labels) != len(actual) {
-		return assertErr(o.line, path, "! match label=%v does not match the selected block's labels %v (§7.2)", o.labels, actual)
-	}
-	for i := range o.labels {
-		if o.labels[i] != actual[i] {
-			return assertErr(o.line, path, "! match label=%v does not match the selected block's labels %v (§7.2)", o.labels, actual)
-		}
-	}
-	return nil
-}
-
-func entryLabels(e *mirrorEntry) []string {
-	if e.kind == mBlock && len(e.labels) > 0 {
-		return e.labels[1:]
-	}
-	return nil
-}
-
-func anchorLabels(p Path) []string {
-	var out []string
-	for i := 0; i < p.Len(); i++ {
-		if s := p.Segment(i); s.IsQuoted() {
-			out = append(out, s.Name)
-		}
-	}
-	return out
 }
 
 // entryValue is the value an added or replaced entry writes: its inline
@@ -968,7 +804,7 @@ func childKey(c *mirrorEntry) (string, error) {
 	switch c.kind {
 	case mKV:
 		return c.key, nil
-	case mBlock, mTable:
+	case mTable:
 		return strings.Join(c.labels, "."), nil
 	}
 	return "", parseErr(c.line, "", "cannot write this line as a member of the container being added (§5)")

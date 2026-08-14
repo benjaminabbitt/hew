@@ -768,13 +768,6 @@ func TestUnsupportedQualifiersAreRefusedNotIgnored(t *testing.T) {
 		hewerr.CodeInexpressible, "/x")
 	mustContain(t, he, "anchor is a YAML alias directive", "§8.3")
 
-	he = mustFail(t, "[[p]]\nx = 1\n", "  - op: replace\n    path: /p[0]/x\n    value: 2\n",
-		hewerr.CodeInexpressible, "/p[0]/x")
-	mustContain(t, he, "ordinal selectors are not implemented")
-
-	he = mustFail(t, "[[p]]\nx = 1\n", "  - op: copy\n    path: /y\n    from: /p[0]/x\n",
-		hewerr.CodeInexpressible, "/y")
-	mustContain(t, he, "ordinal selectors are not implemented")
 }
 
 func TestNullHasNoTomlSpelling(t *testing.T) {

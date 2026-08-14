@@ -83,17 +83,11 @@ type run struct {
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
-// honour: a TOML surface directive, or an ordinal selector, which would
-// otherwise silently resolve to the first matching sibling — the exact
-// failure §9.3 forbids.
+// honour: a TOML surface directive, which has no meaning here (§9.3).
 func (r *run) unsupported(t hew.Transform) error {
 	if t.Surface != "" {
 		return r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 			"surface is a TOML placement directive and has no YAML meaning (§8.4)")
-	}
-	if t.Path.HasOrdinal() || t.From.HasOrdinal() {
-		return r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
-			"ordinal selectors are not implemented by the YAML binding; address the node by key or value (§4.2, §7.2)")
 	}
 	return nil
 }

@@ -367,20 +367,20 @@ func TestClaimedSegmentParsesAndRoundTrips(t *testing.T) {
 func TestClaimedSegmentCarriesTheUniversalSuffixes(t *testing.T) {
 	registerStanza(t)
 
-	p, err := ParsePath("/[server][2]?")
+	p, err := ParsePath("/[server]?")
 	if err != nil {
 		t.Fatalf("ParsePath: %v", err)
 	}
 	seg := p.Segment(0)
-	// The `?` and the `[n]` are stripped before the form is offered the token,
-	// so a form describes only its own shape and cannot forget to handle them.
+	// The `?` is stripped before the form is offered the token, so a form
+	// describes only its own shape and cannot forget to handle it.
 	if seg.Raw != "[server]" {
 		t.Fatalf("raw = %q, want the token without the universal suffixes", seg.Raw)
 	}
-	if !seg.Optional || seg.Ordinal == nil || *seg.Ordinal != 2 {
-		t.Fatalf("suffixes lost: %+v", seg)
+	if !seg.Optional {
+		t.Fatalf("suffix lost: %+v", seg)
 	}
-	if got := p.String(); got != "/[server][2]?" {
+	if got := p.String(); got != "/[server]?" {
 		t.Fatalf("String() = %q", got)
 	}
 }
@@ -550,21 +550,18 @@ func TestSegmentClaimsAreScopedToTheActiveFormat(t *testing.T) {
 	}
 }
 
-// TestAuthoredPathsAreScopedToo pins the same scope on the authored entry
-// point, which is the one the .hew parser uses.
-func TestAuthoredPathsAreScopedToo(t *testing.T) {
+// TestParserEntryPointIsScopedToo pins the same scope on the entry point the
+// .hew parser uses for a hunk anchor.
+func TestParserEntryPointIsScopedToo(t *testing.T) {
 	isolate(t)
 	stanzaFormat(t, "ini")
 
-	p, err := ParseAuthoredPathIn("json", "/%x")
+	p, err := ParsePathIn("json", "/%x")
 	if err != nil {
-		t.Fatalf("ParseAuthoredPathIn: %v", err)
+		t.Fatalf("ParsePathIn: %v", err)
 	}
 	if got := p.Segment(0); got.Kind != SegKey {
 		t.Errorf("got %+v, want an ordinary key under a format that claims nothing", got)
-	}
-	if _, err := ParseAuthoredPathIn("ini", "/%x[1]"); err == nil {
-		t.Error("the authored parser must still refuse an IR-only ordinal (§7.2)")
 	}
 }
 
