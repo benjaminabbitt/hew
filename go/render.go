@@ -20,8 +20,10 @@ type RenderOptions struct {
 	// hand it (that would silently change strictness, exactly what §9.4-R2's
 	// own note warns against).
 	Context int
-	// Preamble controls whether "hew: 1" (and "idempotent: true", if any
-	// transform carries Idempotent) is emitted.
+	// Preamble controls whether "hew: 1" is emitted. Convergence is never
+	// written as the file-level `idempotent:` pragma (§2.1, ruling O3): the
+	// pragma governs every hunk, while Idempotent is a per-transform
+	// qualifier, so it goes back out as the `! idempotent` line it came from.
 	Preamble bool
 	// Comment, if non-empty, is written as a leading "# " comment line before
 	// the preamble.
@@ -62,9 +64,6 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	}
 	if opt.Preamble {
 		fmt.Fprintf(&b, "hew: %d\n", Version)
-		if anyIdempotent(tl.Transform) {
-			b.WriteString("idempotent: true\n")
-		}
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(&b, "--- %s", targetToken(tl.Target))
@@ -74,12 +73,22 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	b.WriteByte('\n')
 
 	for _, anchor := range order {
+		header, ord, err := authoredAnchor(anchor)
+		if err != nil {
+			return nil, err
+		}
 		lines, err := renderGroup(anchor, groups[anchor.String()])
 		if err != nil {
 			return nil, err
 		}
+		if ord != nil {
+			// An ordinal is an addressing mode in the IR and an annotation in
+			// the notation: it goes back to `! match ord=` on the hunk's first
+			// body line, the hunk-anchored form of §7.2.
+			lines = append([]string{fmt.Sprintf("! match ord=%d", *ord)}, lines...)
+		}
 		b.WriteByte('\n')
-		fmt.Fprintf(&b, "@@ %s @@\n", anchor.String())
+		fmt.Fprintf(&b, "@@ %s @@\n", header)
 		for _, l := range lines {
 			b.WriteString(l)
 			b.WriteByte('\n')
@@ -88,13 +97,29 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-func anyIdempotent(ts []Transform) bool {
-	for _, t := range ts {
-		if t.Idempotent {
-			return true
+// authoredAnchor splits a hunk anchor into the address the notation can spell
+// and the ordinal selector that has to become a `! match ord=` annotation:
+// ParseAuthoredPath refuses an `[n]` selector, so rendering one into a hunk
+// header would emit notation this very parser rejects (§7.2, §9.6).
+func authoredAnchor(p Path) (string, *int, error) {
+	segs := p.Segments()
+	for i, s := range segs {
+		if s.Ordinal == nil || i == len(segs)-1 {
+			continue
 		}
+		return "", nil, fmt.Errorf("%w: an ordinal selector on %s is not the anchor's last segment, and only the last one is writable as `! match ord=` (§7.2)",
+			ErrInexpressible, p)
 	}
-	return false
+	if len(segs) == 0 || segs[len(segs)-1].Ordinal == nil {
+		return p.String(), nil, nil
+	}
+	ord := *segs[len(segs)-1].Ordinal
+	segs[len(segs)-1].Ordinal = nil
+	bare := NewPath(segs...)
+	if p.IsRelative() {
+		bare = NewRelativePath(segs...)
+	}
+	return bare.String(), &ord, nil
 }
 
 func targetToken(s string) string {
@@ -123,10 +148,11 @@ func anchorFor(t Transform) Path {
 		}
 		return t.Path
 	case OpTest:
-		if t.Exhaustive {
-			return t.Path
-		}
-		if t.Absent || (t.Count != nil && !t.Exhaustive) || t.NodeKind != nil {
+		// `? exhaustive` governs the container it is written in, so its path
+		// IS the anchor. Every other free-standing assertion carries its own
+		// path and can live in any hunk; hostAnchor puts it in the one it was
+		// written in (§7.1, §4.6).
+		if t.Exhaustive || freeAssert(t) {
 			return t.Path
 		}
 		return testAnchor(t.Path)
@@ -159,17 +185,46 @@ func testAnchor(path Path) Path {
 	return path
 }
 
+// freeAssert reports a `?` assertion that carries its own path rather than
+// addressing a child of the hunk it stands in (§7.1). `? exhaustive` is not
+// one: it governs the container, and is handled with the anchor.
+func freeAssert(t Transform) bool {
+	return t.Op == OpTest && !t.Exhaustive && (t.Absent || t.Count != nil || t.NodeKind != nil)
+}
+
+// hostAnchor picks the hunk a free-standing assertion is written in: the one
+// its neighbours belong to, so the assertion keeps its position in body order
+// instead of being exiled to a hunk of its own (which would reorder the list
+// and break RT2). It falls back to its own path when the list is nothing but
+// assertions — an assert-only hunk (§7.4).
+func hostAnchor(ts []Transform, i int) Path {
+	for j := i - 1; j >= 0; j-- {
+		if !freeAssert(ts[j]) {
+			return anchorFor(ts[j])
+		}
+	}
+	for j := i + 1; j < len(ts); j++ {
+		if !freeAssert(ts[j]) {
+			return anchorFor(ts[j])
+		}
+	}
+	return anchorFor(ts[i])
+}
+
 // groupByAnchor buckets transforms by their hunk anchor, preserving
 // first-seen anchor order (deterministic, §9.4-R1 applies to render too).
 func groupByAnchor(ts []Transform) (map[string][]Transform, []Path, error) {
 	groups := map[string][]Transform{}
 	var order []Path
 	seen := map[string]bool{}
-	for _, t := range ts {
+	for i, t := range ts {
 		if t.Op == OpCopy {
 			return nil, nil, ErrInexpressible
 		}
 		a := anchorFor(t)
+		if freeAssert(t) {
+			a = hostAnchor(ts, i)
+		}
 		key := a.String()
 		if !seen[key] {
 			seen[key] = true
@@ -203,13 +258,18 @@ type contentEntry struct {
 	remove     *Transform
 	replace    *Transform
 	add        *Transform
+
+	// A free-standing assertion (§7.1) occupies a body slot of its own,
+	// keeping the position it holds in the transform stream: the parser
+	// emits `?` lines in body order, interleaved with the container's
+	// tests, so rendering them all at the top of the hunk would move them
+	// and break RT2 for any list whose asserts do not come first.
+	assert *Transform
 }
 
 // renderGroup renders one hunk's body lines for the transforms sharing one
 // anchor (§9.1's lowering, inverted).
 func renderGroup(anchor Path, ts []Transform) ([]string, error) {
-	var exhaustive *Transform
-	var freeAsserts []Transform
 	var order []string
 	bySeg := map[string]*contentEntry{}
 	// chainAfter/chainBefore let a second add that names the same sibling
@@ -230,17 +290,22 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 		return e
 	}
 	syntheticN := 0
+	assertN := 0
+	// slot appends a body slot that is not addressed by a child segment: a
+	// free-standing assertion, which keeps its place in body order.
+	slot := func(t *Transform) {
+		key := fmt.Sprintf("?%d", assertN)
+		assertN++
+		bySeg[key] = &contentEntry{assert: t}
+		order = append(order, key)
+	}
 
 	for i := range ts {
 		t := &ts[i]
 		switch t.Op {
 		case OpTest:
-			if t.Exhaustive {
-				exhaustive = t
-				continue
-			}
-			if t.Absent || (t.Count != nil) || t.NodeKind != nil {
-				freeAsserts = append(freeAsserts, *t)
+			if t.Exhaustive || t.Absent || t.Count != nil || t.NodeKind != nil {
+				slot(t)
 				continue
 			}
 			rel, ok := relSegs(anchor, t.Path)
@@ -279,7 +344,7 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 					after = &rel[0]
 				}
 			}
-			if before == nil && !t.Before.IsZero() {
+			if !t.Before.IsZero() {
 				if rel, ok := relSegs(anchor, t.Before); ok && len(rel) == 1 {
 					before = &rel[0]
 				}
@@ -311,23 +376,27 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 	}
 
 	var lines []string
-	if exhaustive != nil {
-		lines = append(lines, "? exhaustive")
+	// `! surface` is container-scoped (§7, §8.4 rule 4): it governs every
+	// creation in the hunk, so it is written once, at the top.
+	surface, err := groupSurface(ts)
+	if err != nil {
+		return nil, err
 	}
-	for _, a := range freeAsserts {
-		l, err := renderFreeAssertion(anchor, a)
-		if err != nil {
-			return nil, err
-		}
-		lines = append(lines, l)
+	if surface != "" {
+		lines = append(lines, "! surface "+string(surface))
 	}
-
 	for _, key := range order {
 		e := bySeg[key]
 		if e == nil {
 			continue
 		}
 		switch {
+		case e.assert != nil:
+			l, err := renderFreeAssertion(*e.assert)
+			if err != nil {
+				return nil, err
+			}
+			lines = append(lines, l)
 		case e.replace != nil:
 			var v Value
 			switch {
@@ -342,7 +411,12 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			default:
 				return nil, fmt.Errorf("%w: replace at %s/%s has no accompanying test to supply the removed value", ErrInexpressible, anchor, e.seg)
 			}
+			// A line-scoped directive governs the line that FOLLOWS it (§7),
+			// and the parser reads a `-`/`+` pair as two entries: the test
+			// carries the `-` line's qualifiers, the replace the `+` line's.
+			lines = append(lines, qualLines(e.test())...)
 			lines = append(lines, renderMemberLine('-', e.seg, v))
+			lines = append(lines, qualLines(e.replace)...)
 			lines = append(lines, renderMemberLine('+', e.seg, e.replace.Value))
 		case e.remove != nil:
 			var v Value
@@ -358,16 +432,22 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			default:
 				return nil, fmt.Errorf("%w: remove at %s/%s has no accompanying test to supply the removed value", ErrInexpressible, anchor, e.seg)
 			}
+			// One `-` line carries both the test and the removal, so it takes
+			// the union of their qualifiers.
+			lines = append(lines, qualLines(e.test(), e.remove)...)
 			lines = append(lines, renderMemberLine('-', e.seg, v))
 		case e.add != nil:
+			lines = append(lines, qualLines(e.add)...)
 			lines = append(lines, renderMemberLine('+', e.seg, e.add.Value))
 		case len(e.fieldTests) > 0:
 			v, err := flowValueFromFields(e.seg, e.fieldTests)
 			if err != nil {
 				return nil, err
 			}
+			lines = append(lines, qualLines(e.test())...)
 			lines = append(lines, renderMemberLine(' ', e.seg, v))
 		case e.plainTest != nil:
+			lines = append(lines, qualLines(e.plainTest)...)
 			lines = append(lines, renderMemberLine(' ', e.seg, e.plainTest.Value))
 		}
 	}
@@ -375,6 +455,80 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 		return nil, fmt.Errorf("hew: render: hunk at %s has no body lines", anchor)
 	}
 	return lines, nil
+}
+
+// groupSurface reads the one TOML surface directive a hunk may carry. The
+// notation attaches `! surface` to a container, not to a line, so a hunk
+// whose adds disagree about their surface cannot be written at all — that is
+// two hunks' worth of intent, and saying so is better than picking one.
+func groupSurface(ts []Transform) (Surface, error) {
+	var surface Surface
+	seen := false
+	for i := range ts {
+		if ts[i].Op != OpAdd {
+			continue
+		}
+		if seen && ts[i].Surface != surface {
+			return "", fmt.Errorf("%w: adds under one anchor disagree about `! surface` (%q vs %q), which is container-scoped (§8.4 rule 4)",
+				ErrInexpressible, surface, ts[i].Surface)
+		}
+		surface, seen = ts[i].Surface, true
+	}
+	return surface, nil
+}
+
+// test returns the entry's before-image test, whichever shape it took: a
+// whole-node test, or the first of a keyed element's field tests (which all
+// carry the same qualifiers, having come from the same body line).
+func (e *contentEntry) test() *Transform {
+	if e.plainTest != nil {
+		return e.plainTest
+	}
+	if len(e.fieldTests) > 0 {
+		return e.fieldTests[0]
+	}
+	return nil
+}
+
+// qualLines renders the `!` directive lines that put a transform's qualifiers
+// back on the body line they ride (§9.1 step 6, inverted). Order is fixed so
+// rendering stays deterministic; `on_conflict: fail` has no spelling because
+// it IS the default add semantics (§7.7), and writing nothing round-trips it
+// as the same behavior.
+func qualLines(ts ...*Transform) []string {
+	var out []string
+	var anchor AnchorMode
+	var onConflict OnConflict
+	optional, idempotent := false, false
+	for _, t := range ts {
+		if t == nil {
+			continue
+		}
+		if t.Anchor != "" {
+			anchor = t.Anchor
+		}
+		if t.OnConflict != "" {
+			onConflict = t.OnConflict
+		}
+		optional = optional || t.Optional
+		idempotent = idempotent || t.Idempotent
+	}
+	if anchor != "" {
+		out = append(out, "! anchor "+string(anchor))
+	}
+	switch onConflict {
+	case ConflictReplace:
+		out = append(out, "! upsert")
+	case ConflictKeep:
+		out = append(out, "! default")
+	}
+	if optional {
+		out = append(out, "! optional")
+	}
+	if idempotent {
+		out = append(out, "! idempotent")
+	}
+	return out
 }
 
 // syntheticKind marks an add whose element has no identity yet (a
@@ -432,11 +586,13 @@ func renderMemberLine(margin byte, seg Segment, v Value) string {
 	case SegKey:
 		text = escapeKey(seg.Name) + ": " + renderValueText(v)
 	case SegComment:
+		// A comment node's value is `{comment: <text>}` (§4.5b, §11.10
+		// reduction 3); the body line shows the text, not the wrapper.
 		body, ok := commentTextOf(v)
 		if !ok {
 			body = valueText(v)
 		}
-		text = "# " + body
+		text = strings.TrimRight("# "+body, " ")
 	default:
 		// Sequence element (scalar or keyed flow object) and the synthetic
 		// container-add marker both render as a bare value line.
@@ -445,7 +601,14 @@ func renderMemberLine(margin byte, seg Segment, v Value) string {
 	return string(margin) + " " + text
 }
 
-func renderFreeAssertion(anchor Path, t Transform) (string, error) {
+func renderFreeAssertion(t Transform) (string, error) {
+	if t.Exhaustive {
+		return "? exhaustive", nil
+	}
+	if t.Path.HasOrdinal() {
+		return "", fmt.Errorf("%w: assertion at %s carries an ordinal selector, which only a hunk anchor can spell as `! match ord=` (§7.2)",
+			ErrInexpressible, t.Path)
+	}
 	path := t.Path.String()
 	switch {
 	case t.Absent:
