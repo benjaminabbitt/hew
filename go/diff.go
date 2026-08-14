@@ -337,8 +337,16 @@ type placementRef struct {
 }
 
 // placement derives §9.1 step 5's relative position for an added slot: the
-// nearest surviving sibling before it, or failing that the nearest after it.
-// Never an index — the patch must stay target-independent (§9.2).
+// nearest surviving sibling before it, or failing that the nearest one after
+// it. Never an index — the patch must stay target-independent (§9.2).
+//
+// The two scans are not symmetric, and the asymmetry is the point. Looking
+// BACKWARD, an already-added sibling is a legitimate anchor: mutations execute
+// in slot order, so it is in the document by the time this add runs — that is
+// what lets a member land after the comment that documents it. Looking
+// FORWARD, an added sibling is not there yet, so naming it would hand the
+// applier a path that cannot resolve; the scan skips ahead to a sibling the
+// old document already has.
 func placement(slots []slot, i int) (placementRef, bool) {
 	for j := i - 1; j >= 0; j-- {
 		if slots[j].state.survives() {
@@ -346,7 +354,7 @@ func placement(slots []slot, i int) (placementRef, bool) {
 		}
 	}
 	for j := i + 1; j < len(slots); j++ {
-		if slots[j].state.survives() {
+		if slots[j].state.survives() && slots[j].state != slotAdded {
 			return placementRef{path: slots[j].ref, before: true}, true
 		}
 	}

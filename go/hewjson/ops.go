@@ -165,7 +165,7 @@ func (d *doc) planCopy(target string, t hew.Transform) (*edit, error) {
 func (d *doc) planInsert(target string, path, before, after hew.Path, value hew.Value, text string, onConflict hew.OnConflict, idempotent bool, line int) (*edit, error) {
 	if existing, err := d.resolveFull(target, path, line); err == nil {
 		if existing.kind == jArr {
-			return d.insertArrayElement(existing, before, after, text, line)
+			return d.insertArrayElement(existing, before, after, value, text, line)
 		}
 		return d.handleExistingConflict(target, path, existing, value, text, onConflict, idempotent, line)
 	}
@@ -189,7 +189,7 @@ func (d *doc) planInsert(target string, path, before, after hew.Path, value hew.
 	if last.Kind != hew.SegKey {
 		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line, "add: unsupported address shape")
 	}
-	return d.insertObjectMember(parent, last.Name, before, after, text, line)
+	return d.insertObjectMember(parent, last.Name, before, after, value, text, line)
 }
 
 // handleExistingConflict implements the add-semantics variants (OP-02/03/04,
@@ -213,13 +213,71 @@ func (d *doc) handleExistingConflict(target string, path hew.Path, existing *jNo
 }
 
 // insertObjectMember computes the edit to add a new "key": value member.
-func (d *doc) insertObjectMember(obj *jNode, key string, before, after hew.Path, valueText string, line int) (*edit, error) {
+func (d *doc) insertObjectMember(obj *jNode, key string, before, after hew.Path, value hew.Value, valueText string, line int) (*edit, error) {
 	afterIdx, beforeIdx, err := d.siblingIndicesObj(obj, before, after, line)
 	if err != nil {
 		return nil, err
 	}
 	newMember := jsonQuote(key) + ": " + valueText
+	d.note(obj, hew.Segment{Kind: hew.SegKey, Name: key}, value, afterIdx)
 	return insertIntoObj(d.src, obj, afterIdx, beforeIdx, newMember), nil
+}
+
+// pendingAdd is one insertion this Apply has already planned, kept because a
+// later placement may name it: §9.1 step 5 chains a run of `+` lines, each
+// placed after the one above it (corpus jsonc/add-with-leading-comment pins
+// the shape), and a node this patch is adding is not in the parsed document
+// for resolveFull to find. Landing at the SAME child index puts this add
+// immediately after it, because equal-offset edits keep their list order.
+type pendingAdd struct {
+	container *jNode
+	seg       hew.Segment // the added member's key, for a map
+	value     hew.Value
+	idx       int
+}
+
+func (d *doc) note(container *jNode, seg hew.Segment, value hew.Value, idx int) {
+	d.pending = append(d.pending, pendingAdd{container: container, seg: seg, value: value, idx: idx})
+}
+
+// pendingIndex reports the child index a placement path names among this
+// Apply's own pending inserts. The most recent match wins, so a chain of three
+// `+` lines walks forward rather than collapsing onto the first.
+func (d *doc) pendingIndex(container *jNode, p hew.Path) (int, bool) {
+	seg := p.Segment(p.Len() - 1)
+	for i := len(d.pending) - 1; i >= 0; i-- {
+		pa := d.pending[i]
+		if pa.container != container {
+			continue
+		}
+		if (seg.Kind == hew.SegKey && pa.seg.Kind == hew.SegKey && seg.Name == pa.seg.Name) ||
+			segNamesValue(seg, pa.value) {
+			return pa.idx, true
+		}
+	}
+	return 0, false
+}
+
+// segNamesValue applies §4.2's key-match comparison to a value in hand, for a
+// node that is not in the document yet and so has no parsed node to compare.
+func segNamesValue(seg hew.Segment, v hew.Value) bool {
+	n := v.Node()
+	if n == nil || seg.Kind != hew.SegMatch {
+		return false
+	}
+	want := scalarToValue(seg.Value)
+	if seg.Name == "" {
+		return hew.NodeValue(n).Equal(want)
+	}
+	if n.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == seg.Name {
+			return hew.NodeValue(n.Content[i+1]).Equal(want)
+		}
+	}
+	return false
 }
 
 func (d *doc) siblingIndicesObj(obj *jNode, before, after hew.Path, line int) (afterIdx, beforeIdx int, err error) {
@@ -227,6 +285,9 @@ func (d *doc) siblingIndicesObj(obj *jNode, before, after hew.Path, line int) (a
 	if !after.IsZero() {
 		n, rerr := d.resolveFull("", after, line)
 		if rerr != nil {
+			if i, ok := d.pendingIndex(obj, after); ok {
+				return i, -1, nil
+			}
 			return 0, 0, rerr
 		}
 		for i, m := range obj.members {
@@ -249,16 +310,22 @@ func (d *doc) siblingIndicesObj(obj *jNode, before, after hew.Path, line int) (a
 	return afterIdx, beforeIdx, nil
 }
 
-func (d *doc) insertArrayElement(arr *jNode, before, after hew.Path, valueText string, line int) (*edit, error) {
+func (d *doc) insertArrayElement(arr *jNode, before, after hew.Path, value hew.Value, valueText string, line int) (*edit, error) {
 	afterIdx, beforeIdx := -1, -1
 	if !after.IsZero() {
 		n, rerr := d.resolveFull("", after, line)
-		if rerr != nil {
-			return nil, rerr
-		}
-		for i, e := range arr.elems {
-			if e.value == n {
-				afterIdx = i
+		switch {
+		case rerr != nil:
+			i, ok := d.pendingIndex(arr, after)
+			if !ok {
+				return nil, rerr
+			}
+			afterIdx = i
+		default:
+			for i, e := range arr.elems {
+				if e.value == n {
+					afterIdx = i
+				}
 			}
 		}
 	}
@@ -273,6 +340,7 @@ func (d *doc) insertArrayElement(arr *jNode, before, after hew.Path, valueText s
 			}
 		}
 	}
+	d.note(arr, hew.Segment{}, value, afterIdx)
 	return insertIntoArr(d.src, arr, afterIdx, beforeIdx, valueText), nil
 }
 

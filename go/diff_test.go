@@ -343,6 +343,24 @@ func TestDiffPrependUsesBefore(t *testing.T) {
 	}
 }
 
+// A forward-looking placement must not name a sibling that is itself being
+// added: mutations execute in order, so it is not in the document yet and the
+// applier would have nothing to resolve.
+func TestDiffPlacementNeverNamesALaterAdd(t *testing.T) {
+	old := dseq(dstr("alpha"))
+	new := dseq(dstr("a1"), dstr("a2"), dstr("alpha"))
+	got := summarize(diffOK(t, old, new, DiffOptions{}))
+	want := strings.Join([]string{
+		"test /=alpha =alpha",
+		"add / =a1 before:/=alpha",
+		"add / =a2 after:/=a1",
+		"",
+	}, "\n")
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // Placement must skip a REMOVED sibling: it will not be there to insert after.
 func TestDiffPlacementSkipsRemovedSiblings(t *testing.T) {
 	old := dmap("a", dnum("1"), "gone", dnum("2"))

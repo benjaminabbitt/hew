@@ -85,8 +85,9 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 
 // doc is a parsed JSON target: the source bytes and the tree.
 type doc struct {
-	src  []byte
-	root *jNode
+	src     []byte
+	root    *jNode
+	pending []pendingAdd
 }
 
 func parseDoc(src []byte) (*doc, error) {

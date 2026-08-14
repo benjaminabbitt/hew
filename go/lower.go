@@ -356,8 +356,17 @@ func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i, pairedWith int, q 
 
 // placement derives an added node's position from the context around it
 // (§6.2), as a relative placement and never a numeric index (§9.1 step 5):
-// after the nearest preceding after-image sibling, else before the nearest
-// following one, else nothing, meaning the end of the container.
+// after the nearest preceding sibling, else before the nearest following one,
+// else nothing, meaning the end of the container.
+//
+// The two scans are not symmetric, because the anchor has to exist in the
+// document AT THE MOMENT this add runs, and transforms run in body order.
+// Looking BACK, the after-image is the right test: a preceding `+` line has
+// already been inserted, a preceding `-` line has already gone, and the
+// address to name is the after-image one. Looking FORWARD, nothing below has
+// happened yet, so the BEFORE-image is the right test and the before-image
+// address is the one that resolves — naming a `+` line further down would
+// hand the applier a path to a node it has not created (HEW013).
 func (l *lowerer) placement(path Path, nodes []*mirrorEntry, i int) (before, after Path, err error) {
 	for j := i - 1; j >= 0; j-- {
 		if !nodes[j].node() || !nodes[j].inAfter() {
@@ -367,10 +376,10 @@ func (l *lowerer) placement(path Path, nodes []*mirrorEntry, i int) (before, aft
 		return Path{}, p, perr
 	}
 	for j := i + 1; j < len(nodes); j++ {
-		if !nodes[j].node() || !nodes[j].inAfter() {
+		if !nodes[j].node() || !nodes[j].inBefore() {
 			continue
 		}
-		p, perr := l.entryPath(path, nodes[j], false)
+		p, perr := l.entryPath(path, nodes[j], true)
 		return p, Path{}, perr
 	}
 	return Path{}, Path{}, nil

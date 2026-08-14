@@ -232,3 +232,61 @@ func TestValueLinesNilValue(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// A `before:` placement puts the added line ahead of the sibling it names —
+// the prepend shape §9.1 step 5 derives when there is no preceding sibling.
+func TestRenderPlacesAnAddBeforeItsSibling(t *testing.T) {
+	got := renderNative(t, FormatYAML,
+		Transform{Op: OpTest, Path: MustParsePath("/tags/=alpha"), Value: mustYAML(t, "alpha")},
+		Transform{Op: OpAdd, Path: MustParsePath("/tags"), Value: mustYAML(t, "aardvark"),
+			Before: MustParsePath("/tags/=alpha")},
+	)
+	if !strings.Contains(got, "+ - aardvark\n  - alpha") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+// Two adds naming the same sibling keep their authored order rather than
+// stacking up in reverse.
+func TestRenderChainsSeveralAddsAtOneSibling(t *testing.T) {
+	got := renderNative(t, FormatJSON,
+		Transform{Op: OpTest, Path: MustParsePath("/a/k"), Value: mustYAML(t, "1")},
+		Transform{Op: OpAdd, Path: MustParsePath("/a/x"), Value: mustYAML(t, "1"), After: MustParsePath("/a/k")},
+		Transform{Op: OpAdd, Path: MustParsePath("/a/y"), Value: mustYAML(t, "2"), After: MustParsePath("/a/k")},
+	)
+	if !strings.Contains(got, `+ "x": 1`+"\n"+`+ "y": 2`) {
+		t.Fatalf("got:\n%s", got)
+	}
+	before := renderNative(t, FormatJSON,
+		Transform{Op: OpTest, Path: MustParsePath("/a/k"), Value: mustYAML(t, "1")},
+		Transform{Op: OpAdd, Path: MustParsePath("/a/x"), Value: mustYAML(t, "1"), Before: MustParsePath("/a/k")},
+		Transform{Op: OpAdd, Path: MustParsePath("/a/y"), Value: mustYAML(t, "2"), Before: MustParsePath("/a/k")},
+	)
+	if !strings.Contains(before, `+ "x": 1`+"\n"+`+ "y": 2`+"\n"+`  "k": 1`) {
+		t.Fatalf("got:\n%s", before)
+	}
+}
+
+// A comment address whose value is not the `{comment: …}` wrapper still
+// renders as a comment line, falling back to the value's own text rather than
+// printing the wrapper.
+func TestRenderCommentWithABareValue(t *testing.T) {
+	got := renderNative(t, FormatYAML,
+		Transform{Op: OpTest, Path: MustParsePath("/a/#0"), Value: mustYAML(t, "bare text")},
+	)
+	if !strings.Contains(got, "  # bare text") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func TestRenderQuotesATargetWithASpace(t *testing.T) {
+	out, err := Render(TransformList{Target: "my file.yaml", Format: FormatYAML,
+		Transform: []Transform{{Op: OpTest, Path: MustParsePath("/a/k"), Value: mustYAML(t, "1")}}},
+		RenderOptions{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(string(out), `--- "my file.yaml" format=yaml`) {
+		t.Fatalf("got:\n%s", out)
+	}
+}

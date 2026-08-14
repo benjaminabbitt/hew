@@ -152,8 +152,10 @@ func targetToken(s string) string {
 	return s
 }
 
-// anchorFor computes the hunk anchor a transform renders under.
-func anchorFor(t Transform) Path {
+// anchorFor computes the hunk anchor a transform renders under. owned is the
+// set of anchors some MUTATION in the same list already claims; it decides the
+// one ambiguous case, see testAnchor.
+func anchorFor(t Transform, owned map[string]bool) Path {
 	switch t.Op {
 	case OpAdd:
 		if !t.After.IsZero() {
@@ -178,7 +180,7 @@ func anchorFor(t Transform) Path {
 		if t.Exhaustive || freeAssert(t) {
 			return t.Path
 		}
-		return testAnchor(t.Path)
+		return testAnchor(t.Path, owned)
 	default: // remove, replace, copy(rejected before this is called on it)
 		if p, ok := t.Path.Parent(); ok {
 			return p
@@ -187,25 +189,33 @@ func anchorFor(t Transform) Path {
 	}
 }
 
-// testAnchor computes a plain test's hunk anchor. Normally that is the
-// test's own parent (a map field, or a scalar sequence element). But a
-// keyed-element field test (§9.1 step 2's "one test per listed field") is
-// TWO segments deeper than the sequence's own container — path
-// .../name=github/name — so its parent is the ELEMENT (.../name=github),
-// not the sequence; the anchor needs to go one level further up so every
-// field test for the same element lands in the same rendered hunk.
-func testAnchor(path Path) Path {
-	if n := path.Len(); n >= 2 && path.Segment(n-2).Kind == SegMatch {
-		if p, ok := path.Parent(); ok {
-			if gp, ok2 := p.Parent(); ok2 {
-				return gp
-			}
+// testAnchor computes a plain test's hunk anchor. Normally that is the test's
+// own parent (a map field, or a scalar sequence element).
+//
+// A path two segments below a sequence — .../name=github/command — is
+// genuinely ambiguous, and both readings are things the notation writes:
+//
+//	@@ /mcpServers @@                  a subset-matched context line for the
+//	  - name: github                   element, §9.1 step 2's "one test per
+//	                                   listed field"
+//	@@ /mcpServers/name=github @@      a body line of the element's OWN hunk,
+//	  command: npx                     which is where an inner edit anchors
+//
+// owned settles it: if some mutation in the same list already anchors at the
+// element, the element has a hunk and the test belongs in it; otherwise the
+// test is a subset line and hoists to the sequence, so that every field test
+// for one element lands in the same rendered hunk.
+func testAnchor(path Path, owned map[string]bool) Path {
+	parent, ok := path.Parent()
+	if !ok {
+		return path
+	}
+	if n := path.Len(); n >= 2 && path.Segment(n-2).Kind == SegMatch && !owned[parent.String()] {
+		if gp, ok2 := parent.Parent(); ok2 {
+			return gp
 		}
 	}
-	if p, ok := path.Parent(); ok {
-		return p
-	}
-	return path
+	return parent
 }
 
 // freeAssert reports a `?` assertion that carries its own path rather than
@@ -220,18 +230,32 @@ func freeAssert(t Transform) bool {
 // instead of being exiled to a hunk of its own (which would reorder the list
 // and break RT2). It falls back to its own path when the list is nothing but
 // assertions — an assert-only hunk (§7.4).
-func hostAnchor(ts []Transform, i int) Path {
+func hostAnchor(ts []Transform, i int, owned map[string]bool) Path {
 	for j := i - 1; j >= 0; j-- {
 		if !freeAssert(ts[j]) {
-			return anchorFor(ts[j])
+			return anchorFor(ts[j], owned)
 		}
 	}
 	for j := i + 1; j < len(ts); j++ {
 		if !freeAssert(ts[j]) {
-			return anchorFor(ts[j])
+			return anchorFor(ts[j], owned)
 		}
 	}
-	return anchorFor(ts[i])
+	return anchorFor(ts[i], owned)
+}
+
+// ownedAnchors collects the anchors some mutation — or a container-scoped
+// assertion — already claims, which is what testAnchor needs to settle a
+// keyed-element path's two readings.
+func ownedAnchors(ts []Transform) map[string]bool {
+	owned := map[string]bool{}
+	for i := range ts {
+		if ts[i].Op == OpTest && !ts[i].Exhaustive && !freeAssert(ts[i]) {
+			continue
+		}
+		owned[anchorFor(ts[i], nil).String()] = true
+	}
+	return owned
 }
 
 // groupByAnchor buckets transforms by their hunk anchor, preserving
@@ -240,13 +264,14 @@ func groupByAnchor(ts []Transform) (map[string][]Transform, []Path, error) {
 	groups := map[string][]Transform{}
 	var order []Path
 	seen := map[string]bool{}
+	owned := ownedAnchors(ts)
 	for i, t := range ts {
 		if t.Op == OpCopy {
 			return nil, nil, ErrInexpressible
 		}
-		a := anchorFor(t)
+		a := anchorFor(t, owned)
 		if freeAssert(t) {
-			a = hostAnchor(ts, i)
+			a = hostAnchor(ts, i, owned)
 		}
 		key := a.String()
 		if !seen[key] {
@@ -354,44 +379,52 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			}
 			getEntry(rel[0]).replace = t
 		case OpAdd:
+			var key string
 			var seg Segment
 			if rel, ok := relSegs(anchor, t.Path); ok && len(rel) == 1 {
-				seg = rel[0]
+				seg, key = rel[0], rel[0].String()
 			} else {
 				seg = Segment{Kind: syntheticKind, Index: syntheticN}
+				key = fmt.Sprintf("+%d", syntheticN)
 				syntheticN++
 			}
-			var after, before *Segment
-			if !t.After.IsZero() {
-				if rel, ok := relSegs(anchor, t.After); ok && len(rel) == 1 {
-					after = &rel[0]
+			// A placement names a sibling by ADDRESS; the body knows it by slot
+			// key, and a sequence element added by this same hunk has no
+			// address of its own to be keyed by (its transform addresses the
+			// container). slotFor bridges the two.
+			slotFor := func(p Path) (string, bool) {
+				rel, ok := relSegs(anchor, p)
+				if !ok || len(rel) != 1 {
+					return "", false
 				}
+				return resolveSlot(order, bySeg, rel[0]), true
 			}
-			if !t.Before.IsZero() {
-				if rel, ok := relSegs(anchor, t.Before); ok && len(rel) == 1 {
-					before = &rel[0]
-				}
-			}
-			key := seg.String()
 			e := &contentEntry{seg: seg, add: t}
 			bySeg[key] = e
-			switch {
-			case after != nil:
-				target := after.String()
-				if chained, ok := chainAfter[target]; ok {
-					target = chained
+			switch target, ok := slotFor(t.After); {
+			case !t.After.IsZero() && ok:
+				dest := target
+				if chained, has := chainAfter[target]; has {
+					dest = chained
 				}
-				order = insertAfter(order, target, key)
-				chainAfter[after.String()] = key
-			case before != nil:
-				target := before.String()
-				if chained, ok := chainBefore[target]; ok {
-					target = chained
-				}
-				order = insertBefore(order, target, key)
-				chainBefore[before.String()] = key
+				order = insertAfter(order, dest, key)
+				chainAfter[target] = key
 			default:
-				order = append(order, key)
+				target, ok := slotFor(t.Before)
+				if t.Before.IsZero() || !ok {
+					order = append(order, key)
+					continue
+				}
+				// The second add sharing one `before:` sibling goes AFTER the
+				// first, not ahead of it: both land in front of the named
+				// sibling, in the order the list writes them, which is the
+				// order the applier will produce.
+				if chained, has := chainBefore[target]; has {
+					order = insertAfter(order, chained, key)
+				} else {
+					order = insertBefore(order, target, key)
+				}
+				chainBefore[target] = key
 			}
 		default:
 			return nil, ErrInexpressible
@@ -558,6 +591,49 @@ func qualLines(ts ...*Transform) []string {
 // sequence-container add): the Segment exists only to hold this add's slot
 // in the rendered body order, and is never itself rendered as a key.
 const syntheticKind SegmentKind = 250
+
+// resolveSlot maps a placement's sibling segment to the body slot that holds
+// it. Ordinarily the segment IS the key. The exception is a sequence element
+// this same hunk adds: its slot is synthetic, because its transform addresses
+// the container rather than the element, so a later sibling naming it by
+// key-match is matched against the added VALUE — the same §4.2 comparison the
+// applier will make, and the same one the parser makes when it re-derives
+// placements from the rendered body.
+func resolveSlot(order []string, bySeg map[string]*contentEntry, seg Segment) string {
+	key := seg.String()
+	if _, ok := bySeg[key]; ok || seg.Kind != SegMatch {
+		return key
+	}
+	for _, k := range order {
+		e := bySeg[k]
+		if e != nil && e.add != nil && e.seg.Kind == syntheticKind && valueMatchesSegment(e.add.Value, seg) {
+			return k
+		}
+	}
+	return key
+}
+
+// valueMatchesSegment applies §4.2's key-match comparison to a value in hand,
+// as resolve.go's matchesSegment applies it to a parsed target node.
+func valueMatchesSegment(v Value, seg Segment) bool {
+	n := v.Node()
+	if n == nil {
+		return false
+	}
+	want := seg.Value.Value()
+	if seg.Name == "" {
+		return NodeValue(n).Equal(want)
+	}
+	if n.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == seg.Name {
+			return NodeValue(n.Content[i+1]).Equal(want)
+		}
+	}
+	return false
+}
 
 func insertAfter(order []string, target, key string) []string {
 	for i, k := range order {
