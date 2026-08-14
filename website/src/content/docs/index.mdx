@@ -1,0 +1,103 @@
+---
+title: hew
+description: A structure-aware replacement for patch(1) and diff(1) — for JSON, JSONC, YAML, TOML and HCL.
+template: splash
+hero:
+  tagline: A patch that reads like a diff and addresses nodes, not lines. It survives reordering and reformatting — and it fails loudly, by name, rather than misapplying.
+  actions:
+    - text: See it run
+      link: /hew/examples/first-patch/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/benjaminabbitt/hew
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```diff
+provider "aws" {
+-   region  = "us-west-1"
++   region  = "us-west-2"
+    profile = "default"
+}
+```
+
+That is a complete `.hew` patch, and it is doing something no unified diff can. It has no
+line numbers. `profile = "default"` is not there to help a matcher find its place — it is
+an **assertion** that the block still says that. Reorder the file, reformat it, add
+twenty unrelated attributes, and this patch still applies. Change `profile` and it
+refuses, names the node, and writes nothing.
+
+## The one property everything else serves
+
+> A hunk that does not match its target is an **error with a named cause and a location**.
+> Never a no-op. Never a best-effort apply. Never a fuzzy line-offset guess.
+
+<CardGrid>
+  <Card title="No fuzz factor" icon="warning">
+    hew has no analogue of `patch --fuzz`. Context either matches or the apply fails.
+    There is no dial that trades correctness for convenience.
+  </Card>
+  <Card title="Atomic per file" icon="approve-check">
+    Either every hunk against a file applies or none does. No `.rej` files, no
+    partially-patched output, nothing to clean up after a failure.
+  </Card>
+  <Card title="Already-applied is a failure" icon="error">
+    Strict is the default: re-applying a patch fails loudly. Convergence is a legitimate
+    need, so it is a *visible choice* — `! idempotent`, in the patch, where a reviewer
+    sees it.
+  </Card>
+  <Card title="Reordering is invisible" icon="random">
+    Keys sorted, list elements moved, whitespace redone, comments edited — none of it is
+    something a hew patch asserted, so none of it can break one.
+  </Card>
+</CardGrid>
+
+## What it tolerates, and what it refuses
+
+The two columns are the whole design. Everything in the left column is a thing that
+routinely breaks a `patch(1)` hunk and is simply not visible to hew. Everything in the
+right column is a thing that *should* stop an automated edit and get a person's
+attention.
+
+| Invisible to a patch | Fails loudly, by name |
+|---|---|
+| Keys reordered | A context value has drifted (`HEW010`) |
+| Keyed-array elements reordered | The node the patch asserted is missing (`HEW013`) |
+| Reformatting, re-indentation | The address matches more than one node (`HEW012`) |
+| Comments added or edited | The patch is already applied (`HEW011`) |
+| Unrelated edits elsewhere in the file | Adding a key that already exists (`HEW014`) |
+
+## Five formats, one notation
+
+JSON, JSONC, YAML, TOML and HCL, with Markdown managed blocks under evaluation. A body
+line in a hunk *is* a line of the target's own syntax, so a YAML patch looks like YAML
+and an HCL patch looks like HCL — there is no intermediate language to learn and no
+second grammar for hard cases. The operations the mirror grammar genuinely cannot say —
+node moves and copies — are written in the IR instead, which
+[had to exist anyway](/hew/architecture/).
+
+## Two verbs
+
+```console
+$ hew apply -i change.hew          # apply a patch; 0 applied, 1 refused, 2 trouble
+$ hew diff HEAD:config.yaml config.yaml   # produce one, against the working tree or git
+```
+
+`hew apply` also speaks to machines: `--ops` prints the resolved RFC 6901 op list for
+interop, `--record` writes a receipt of exactly what was executed and against which
+bytes, and `--dry-run` tells you whether a patch still fits before you let it near a
+file.
+
+## The standard is the corpus
+
+hew is spec-first. The normative definition is
+[`docs/hew-spec.md`](https://github.com/benjaminabbitt/hew/blob/main/docs/hew-spec.md);
+the *executable* definition is [`corpus/`](https://github.com/benjaminabbitt/hew/tree/main/corpus) —
+input/patch/expected triples, expected-failure cases and CLI-contract cases that every
+implementation must pass. An implementation is conformant exactly insofar as it passes
+that directory, which is what makes "port it to Rust" a port rather than a
+rewrite-and-diverge. [More about the standard →](/hew/standard/)
