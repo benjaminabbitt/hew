@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -425,10 +426,29 @@ func (e *Engine) runCLI(c *Case, seam Seam, scratch string, snap map[string][]by
 		}
 	}
 	if c.ExpectedRecord != "" {
-		// Deliberate loud gap: asserting an application record needs digest
-		// recomputation over the fixtures (§9.7, record_digest_fields), which
-		// lands with the CLI. Failing beats passing vacuously.
-		probs = append(probs, "expected_record assertion not implemented (spec §9.7); M10")
+		recordFile := recordArgValue(c.Argv, "--record")
+		if recordFile == "" {
+			return e.outcome(c, seam, StatusCorpusError, "expected_record set but argv has no --record flag")
+		}
+		wantFixture, ok := snap[c.ExpectedRecord]
+		if !ok {
+			return e.outcome(c, seam, StatusCorpusError, "missing expected_record fixture "+c.ExpectedRecord)
+		}
+		gotBytes, err := os.ReadFile(filepath.Join(scratch, recordFile))
+		if err != nil {
+			probs = append(probs, "reading record file "+recordFile+": "+err.Error())
+		} else {
+			wantV, werr := recordDigestZeroed(wantFixture, c.RecordDigestFields)
+			gotV, gerr := recordDigestZeroed(gotBytes, c.RecordDigestFields)
+			switch {
+			case werr != nil:
+				probs = append(probs, "expected_record fixture: "+werr.Error())
+			case gerr != nil:
+				probs = append(probs, "record file "+recordFile+": "+gerr.Error())
+			case !reflect.DeepEqual(wantV, gotV):
+				probs = append(probs, fmt.Sprintf("record mismatch (digest fields excluded):\nwant: %#v\ngot:  %#v", wantV, gotV))
+			}
+		}
 	}
 	if c.Expected != "" {
 		want, ok := snap[c.Expected]

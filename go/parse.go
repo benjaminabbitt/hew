@@ -358,6 +358,7 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 	var members []member
 	var freeAsserts []Transform
 	exhaustive := false
+	exhaustiveLine := headerLine
 
 	for idx, bl := range body {
 		switch bl.margin {
@@ -394,6 +395,7 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 			}
 			if a.kind == "exhaustive" {
 				exhaustive = true
+				exhaustiveLine = bl.line
 				continue
 			}
 			tr, err := lowerFreeAssertion(anchor, bl.line, a)
@@ -433,7 +435,7 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 	out = append(out, freeAsserts...)
 	if exhaustive {
 		n := listedCount
-		out = append(out, Transform{Op: OpTest, Path: anchor, Exhaustive: true, Count: &n, PatchLine: headerLine})
+		out = append(out, Transform{Op: OpTest, Path: anchor, Exhaustive: true, Count: &n, PatchLine: exhaustiveLine})
 	}
 
 	// Steps 4-5. Group members into runs bounded by context lines: within a
@@ -579,7 +581,7 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 	isMapEntry := !dashElement && val.Kind == yaml.MappingNode && len(val.Content) == 2 && !strings.HasPrefix(text, "{")
 	if isMapEntry {
 		key := val.Content[0].Value
-		v := NodeValue(cloneNode(val.Content[1]))
+		v := canonicalValue(val.Content[1])
 		return member{bl: bl, seg: Segment{Kind: SegKey, Name: key}, value: v, isField: true}, nil
 	}
 
@@ -591,7 +593,7 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 		for i := 0; i+1 < len(val.Content); i += 2 {
 			name := val.Content[i].Value
 			names = append(names, name)
-			fields = append(fields, fieldTest{seg: Segment{Kind: SegKey, Name: name}, value: NodeValue(cloneNode(val.Content[i+1]))})
+			fields = append(fields, fieldTest{seg: Segment{Kind: SegKey, Name: name}, value: canonicalValue(val.Content[i+1])})
 		}
 		idName := identityField(names)
 		var idScalar Scalar
@@ -602,7 +604,7 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 			}
 		}
 		seg := Segment{Kind: SegMatch, Name: idName, Value: idScalar}
-		return member{bl: bl, seg: seg, fields: fields, value: NodeValue(cloneNode(val)), isField: false}, nil
+		return member{bl: bl, seg: seg, fields: fields, value: canonicalValue(val), isField: false}, nil
 	}
 
 	// A bare scalar (or other opaque value) sequence element, addressed by
@@ -612,7 +614,7 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 		return member{}, parseErr(bl.line, "", "%v", err)
 	}
 	seg := Segment{Kind: SegMatch, Value: sc}
-	return member{bl: bl, seg: seg, value: NodeValue(cloneNode(val)), isField: false}, nil
+	return member{bl: bl, seg: seg, value: canonicalValue(val), isField: false}, nil
 }
 
 // identityField picks the sequence-element identity field among a keyed
@@ -641,6 +643,30 @@ func identityField(names []string) string {
 // not the source token's own style — a JSON string is always source-quoted
 // (`"github"`) but the segment `/servers/name=github` is written unquoted,
 // which is what json/keyed-array-add and json/array-remove-element pin.
+// canonicalValue builds a Transform's Value from a parsed body node,
+// clearing quoting/flow style so the .hewt serialization is canonical
+// rather than an accident of how the body happened to be authored (a JSON
+// body always quotes strings; the mirror grammar's own values don't have
+// to). Without this, a JSON-sourced "value: localhost" would marshal back
+// as the source-quoted "value: \"localhost\"", failing byte comparison
+// against a hand-authored transforms.hewt fixture that (correctly) has no
+// reason to quote it — json/add-key and json/roundtrip-basic's render seam
+// both pin this.
+func canonicalValue(n *yaml.Node) Value {
+	return NodeValue(resetStyle(cloneNode(n)))
+}
+
+func resetStyle(n *yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	n.Style = 0
+	for _, c := range n.Content {
+		resetStyle(c)
+	}
+	return n
+}
+
 func scalarOfNode(n *yaml.Node) (Scalar, error) {
 	if n.Kind != yaml.ScalarNode {
 		return Scalar{}, fmt.Errorf("value %q is not addressable: only scalars and flow objects are supported as sequence elements", n.Value)
@@ -732,7 +758,7 @@ func lowerFreeAssertion(anchor Path, line int, a questionAssertion) (Transform, 
 		if err := yaml.Unmarshal([]byte(a.value), &n); err != nil || len(n.Content) == 0 {
 			return Transform{}, parseErr(line, path.String(), "? expect: malformed value %q", a.value)
 		}
-		return Transform{Op: OpTest, Path: path, Value: NodeValue(cloneNode(n.Content[0])), PatchLine: line}, nil
+		return Transform{Op: OpTest, Path: path, Value: canonicalValue(n.Content[0]), PatchLine: line}, nil
 	case "count":
 		i, err := strconv.Atoi(a.value)
 		if err != nil {
