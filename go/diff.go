@@ -427,6 +427,8 @@ func (a addressing) identities(children []DiffChild) []string {
 		switch {
 		case c.Comment:
 			out[i] = "#" + c.Text
+		case c.Label:
+			out[i] = "l" + c.Key
 		case !a.seq:
 			out[i] = "k" + c.Key
 		case a.field != "":
@@ -452,6 +454,8 @@ func (a addressing) childPath(path Path, c DiffChild, index, commentIndex int) P
 	switch {
 	case c.Comment:
 		return path.Append(Segment{Kind: SegComment, Index: commentIndex})
+	case c.Label:
+		return path.Append(Segment{Kind: SegLabel, Name: c.Key})
 	case !a.seq:
 		return path.Append(Segment{Kind: SegKey, Name: c.Key})
 	case a.field != "":

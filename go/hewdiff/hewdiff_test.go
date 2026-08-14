@@ -34,9 +34,12 @@ func diffText(t *testing.T, old, new string, format hew.FormatID, opt hew.DiffOp
 // killer of its own when the corpus suite is not running.
 func TestDiffMatchesCorpusRoundTrips(t *testing.T) {
 	root := filepath.Join("..", "..", "corpus")
-	for _, format := range []string{"json", "jsonc", "yaml"} {
-		t.Run(format, func(t *testing.T) {
-			dir := filepath.Join(root, format, "roundtrip-basic")
+	// The extension is the file's, not the format's: HCL's is ".tf".
+	for _, c := range []struct{ format, ext string }{
+		{"json", "json"}, {"jsonc", "jsonc"}, {"yaml", "yaml"}, {"toml", "toml"}, {"hcl", "tf"},
+	} {
+		t.Run(c.format, func(t *testing.T) {
+			dir := filepath.Join(root, c.format, "roundtrip-basic")
 			read := func(name string) string {
 				b, err := os.ReadFile(filepath.Join(dir, name))
 				if err != nil {
@@ -44,8 +47,8 @@ func TestDiffMatchesCorpusRoundTrips(t *testing.T) {
 				}
 				return string(b)
 			}
-			got := diffText(t, read("old."+format), read("new."+format), hew.FormatID(format),
-				hew.DiffOptions{Target: "new." + format})
+			got := diffText(t, read("old."+c.ext), read("new."+c.ext), hew.FormatID(c.format),
+				hew.DiffOptions{Target: "new." + c.ext})
 			if want := read("expected.hew"); got != want {
 				t.Fatalf("diff != expected.hew\n--- got\n%s\n--- want\n%s", got, want)
 			}
@@ -65,7 +68,7 @@ func TestDiffOfIdenticalDocumentsIsEmpty(t *testing.T) {
 }
 
 func TestDiffRejectsUnknownFormat(t *testing.T) {
-	_, err := Diff([]byte("a"), []byte("b"), hew.FormatTOML, hew.DiffOptions{Target: "t.toml"})
+	_, err := Diff([]byte("a"), []byte("b"), hew.FormatMarkdown, hew.DiffOptions{Target: "t.toml"})
 	he, ok := hewerr.As(err)
 	if !ok || he.Code != hewerr.CodeUnsupportedFormat || he.Component != hewerr.ComponentDiffer {
 		t.Fatalf("want HEW021 from the differ, got %v", err)

@@ -299,27 +299,17 @@ func (r *run) insert(b *bodyNode, text string, isBlock bool, t hew.Transform) ([
 	blank := isBlock && b.open == rootBody
 
 	if !t.After.IsZero() || !t.Before.IsZero() {
-		p := t.After
-		if p.IsZero() {
-			p = t.Before
-		}
-		rf, he, _ := r.resolve(p, t)
+		pos, he := r.placeAt(b, t)
 		if he != nil {
 			return nil, he
 		}
-		if rf.item == nil || rf.parent != b {
-			return nil, r.err(hewerr.CodeNoMatch, p.String(), t.PatchLine,
-				"placement sibling is not a child of the target body")
-		}
-		pos := rf.item.end
-		if t.After.IsZero() {
-			pos = rf.item.start
-		}
+		r.remember(b, t, pos)
 		return []edit{{start: pos, end: pos, text: text + "\n", blank: blank}}, nil
 	}
 
 	if len(b.items) > 0 {
 		pos := b.items[len(b.items)-1].end
+		r.remember(b, t, pos)
 		return []edit{{start: pos, end: pos, text: text + "\n", blank: blank}}, nil
 	}
 	// An empty body. `features {}` has no line to append after, so the braces
@@ -334,6 +324,64 @@ func (r *run) insert(b *bodyNode, text string, isBlock bool, t hew.Transform) ([
 	}
 	return []edit{{start: b.innerStart, end: b.innerEnd,
 		text: "\n" + text + "\n" + strings.Repeat(" ", closeIndent)}}, nil
+}
+
+// placeAt is the offset a placed add lands at: just past the sibling it names,
+// or just before it for a `before:`.
+func (r *run) placeAt(b *bodyNode, t hew.Transform) (int, *hewerr.Error) {
+	p := t.After
+	if p.IsZero() {
+		p = t.Before
+	}
+	rf, he, _ := r.resolve(p, t)
+	if he != nil || rf.item == nil || rf.parent != b {
+		// The sibling may be one this same patch is adding: §9.1 step 5 chains
+		// a run of `+` lines, each placed after the one above it. Such a
+		// sibling is in no parse of the target, but it IS in this run's pending
+		// inserts, and landing at the SAME offset puts this add immediately
+		// behind it, because equal-offset edits keep their list order.
+		if pos, ok := r.pendingAt(b, t.After); ok {
+			return pos, nil
+		}
+		if he != nil {
+			return 0, he
+		}
+		return 0, r.err(hewerr.CodeNoMatch, p.String(), t.PatchLine,
+			"placement sibling is not a child of the target body")
+	}
+	if t.After.IsZero() {
+		return rf.item.start, nil
+	}
+	return rf.item.end, nil
+}
+
+// pendingAdd is one insertion this run has already planned: the body it lands
+// in, the address it creates, and where.
+type pendingAdd struct {
+	body *bodyNode
+	path hew.Path
+	pos  int
+}
+
+func (r *run) remember(b *bodyNode, t hew.Transform, pos int) {
+	r.pending = append(r.pending, pendingAdd{body: b, path: t.Path, pos: pos})
+}
+
+// pendingAt reports the offset of an add this run has already planned at the
+// given path. The most recent match wins, so a chain of three `+` lines walks
+// forward rather than collapsing onto the first. Only `after:` is consulted:
+// a forward placement never names an added sibling, because it would not be
+// in the document yet (§9.1 step 5).
+func (r *run) pendingAt(b *bodyNode, p hew.Path) (int, bool) {
+	if p.IsZero() {
+		return 0, false
+	}
+	for i := len(r.pending) - 1; i >= 0; i-- {
+		if r.pending[i].body == b && r.pending[i].path.Equal(p) {
+			return r.pending[i].pos, true
+		}
+	}
+	return 0, false
 }
 
 // --- remove -----------------------------------------------------------------

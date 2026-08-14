@@ -350,6 +350,9 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 
 	for i := range ts {
 		t := &ts[i]
+		if err := checkLabelBody(anchor, *t); err != nil {
+			return nil, err
+		}
 		switch t.Op {
 		case OpTest:
 			if t.Exhaustive || t.Absent || t.Count != nil || t.NodeKind != nil {
@@ -510,7 +513,22 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("hew: render: hunk at %s has no body lines", anchor)
 	}
-	return lines, nil
+	return dial.alignLines(lines), nil
+}
+
+// checkLabelBody refuses a transform whose first step below the anchor is an
+// HCL label. A label is half of a block's `(type, labels)` address (§4.3), and
+// the mirror grammar writes a block as `type "label" { … }` in the container
+// that holds it — there is no body line that spells a label on its own. Saying
+// so is Appendix C's rule: what the notation cannot express is refused, never
+// approximated by a line that would read as something else (§9.4-R6).
+func checkLabelBody(anchor Path, t Transform) error {
+	rel, ok := relSegs(anchor, t.Path)
+	if !ok || len(rel) == 0 || rel[0].Kind != SegLabel {
+		return nil
+	}
+	return fmt.Errorf("%w: %s addresses an HCL block by its label, which the mirror grammar writes as a `type \"label\" { … }` body in %s's own container, not as a body line of %s (§8.5, Appendix C)",
+		ErrInexpressible, t.Path, anchor, anchor)
 }
 
 // groupSurface reads the one TOML surface directive a hunk may carry. The
@@ -689,6 +707,9 @@ type dialect struct {
 	native bool
 	json   bool   // JSON/JSONC: quoted keys, quoted strings, flow collections
 	block  bool   // YAML: "- " sequence markers and block-style values
+	eq     bool   // TOML/HCL: members are `key = value` (§8.4, §8.5)
+	quote  bool   // TOML/HCL: a string is always written quoted
+	align  bool   // HCL: `=` lines up within a run of member lines (§8.5)
 	marker string // standalone comment marker, trailing space included
 }
 
@@ -701,9 +722,66 @@ func dialectFor(style FragmentStyle, format FormatID) dialect {
 		return dialect{native: true, json: true, marker: "// "}
 	case FormatYAML:
 		return dialect{native: true, block: true, marker: "# "}
+	case FormatTOML:
+		return dialect{native: true, eq: true, quote: true, marker: "# "}
+	case FormatHCL:
+		return dialect{native: true, eq: true, quote: true, align: true, marker: "# "}
 	default:
 		return dialect{native: true, marker: "# "}
 	}
+}
+
+// alignMark is the placeholder an aligning dialect writes where a run of
+// member lines' `=` signs must line up. alignLines replaces every one of
+// them, so it never reaches the output.
+const alignMark = "\x00"
+
+// sep is the member separator: TOML and HCL write `key = value`, everything
+// else `key: value`. An aligning dialect defers the padding to alignLines,
+// which is the only place a line's width can be compared with its neighbours'.
+func (d dialect) sep() string {
+	switch {
+	case d.align:
+		return alignMark + "= "
+	case d.eq:
+		return " = "
+	}
+	return ": "
+}
+
+// alignLines reproduces hclfmt's rule inside a rendered hunk: within a run of
+// consecutive member lines the `=` signs line up one column past the widest
+// name, and any other line — a comment, an annotation, a block header — breaks
+// the run (§8.5). Doing it here rather than per line is the point: the padding
+// is a property of the run, not of the member, which is why hcl/roundtrip-basic
+// widens an ADDED `region` to sit under the `=` of the context line above it.
+func (d dialect) alignLines(lines []string) []string {
+	if !d.align {
+		return lines
+	}
+	for i := 0; i < len(lines); {
+		end, width := i, -1
+		for end < len(lines) {
+			at := strings.Index(lines[end], alignMark)
+			if at < 0 {
+				break
+			}
+			if at > width {
+				width = at
+			}
+			end++
+		}
+		if end == i {
+			i++
+			continue
+		}
+		for j := i; j < end; j++ {
+			at := strings.Index(lines[j], alignMark)
+			lines[j] = lines[j][:at] + strings.Repeat(" ", width-at+1) + lines[j][at+len(alignMark):]
+		}
+		i = end
+	}
+	return lines
 }
 
 // memberLines renders one context/"-"/"+" body entry for a direct-child
@@ -715,7 +793,7 @@ func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
 	case SegKey:
 		body := d.valueLines(v)
 		if !d.isBlock(v) {
-			return d.marginate(margin, []string{d.key(seg.Name) + ": " + body[0]})
+			return d.marginate(margin, []string{d.key(seg.Name) + d.sep() + body[0]})
 		}
 		// A block collection lives under its key, not after it, even when it
 		// happens to be one line long — `env: GITHUB_TOKEN: x` is not YAML.
@@ -789,6 +867,14 @@ func (d dialect) valueLines(v Value) []string {
 		return []string{"null"}
 	case d.json:
 		return []string{jsonText(n)}
+	case d.quote && n.Kind == yaml.ScalarNode:
+		// TOML and HCL have no bare-string spelling: `project = old-project`
+		// is not a string in either grammar, so a string is written quoted
+		// whether or not the neutral dialect would need to.
+		if n.ShortTag() == "!!str" {
+			return []string{strconv.Quote(n.Value)}
+		}
+		return []string{n.Value}
 	case d.isBlock(v):
 		return blockLines(n)
 	case d.block && n.Kind == yaml.ScalarNode:

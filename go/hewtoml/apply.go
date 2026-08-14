@@ -77,6 +77,11 @@ type run struct {
 	target    string
 	all       []hew.Transform
 	converged map[string]bool
+
+	// pending is the insertions this run has already planned, which is what
+	// lets a `+` line be placed after another `+` line of the same hunk (§9.1
+	// step 5) even though that sibling is in no parse of the target.
+	pending []pendingAdd
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
