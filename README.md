@@ -1,7 +1,7 @@
 # hew
 
 A structure-aware replacement for `patch(1)` and `diff(1)` for structured files —
-JSON, JSONC, YAML, TOML, HCL (and, under evaluation, Markdown managed blocks).
+JSON, JSONC, YAML, TOML (and, under evaluation, Markdown managed blocks).
 
 A `.hew` patch reads like a unified diff — the patch mirrors the document's own
 shape, with `+`/`-` margins in place and surrounding context — but it addresses

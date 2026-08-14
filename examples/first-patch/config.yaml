@@ -1,0 +1,3 @@
+server:
+  host: api.example.com
+  timeout: 30

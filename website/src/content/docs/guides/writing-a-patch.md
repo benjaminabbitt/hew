@@ -38,7 +38,7 @@ idempotent: true
 ```
 
 `--- ` names the target and, optionally, its format. Format is inferred from the
-extension when it is not stated (`.json`, `.jsonc`, `.yaml`/`.yml`, `.toml`, `.tf`/`.hcl`,
+extension when it is not stated (`.json`, `.jsonc`, `.yaml`/`.yml`, `.toml`,
 `.md`), so `format=` is for the cases where the extension lies — a `.conf` that is really
 TOML, a file read from stdin. `hew apply -t OTHER` overrides the target from the command
 line, which is how a patch generated from one copy of a file gets applied to another.
@@ -60,7 +60,6 @@ text. The grammar is small:
 | `/service` | the `service` member of a mapping |
 | `/servers/0` | element 0 of an array, by position |
 | `/servers/name=github` | the element of `servers` whose `name` is `github` — by **identity** |
-| `/provider/"aws"` | an HCL block by its label |
 | `/` | the document root |
 
 Prefer identity over position wherever the document offers one. `/servers/0` is a claim
@@ -93,12 +92,10 @@ verbosity dial**. A hunk with less context is a *weaker* patch, not a tidier one
 ## Body lines are the target's own syntax
 
 A body line, minus its margin and one space, is a line of the target format. A YAML
-patch's bodies are YAML; an HCL patch's bodies are HCL. There is no intermediate value
+patch's bodies are YAML; a TOML patch's bodies are TOML. There is no intermediate value
 language, which is why you can read a hew patch for a format you have never patched
 before.
 
-The one rule worth knowing per format is HCL's: a body line containing a top-level `=` is
-an attribute, and a body line ending in `{` is a block. That is the entire
 attribute-versus-block disambiguation.
 
 ## Subset matching

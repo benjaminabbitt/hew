@@ -1,0 +1,8 @@
+hew: 1
+
+--- config.yaml format=yaml
+
+@@ /server @@
+  host: api.example.com
+- timeout: 30
++ timeout: 60
