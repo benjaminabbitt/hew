@@ -553,15 +553,25 @@ func TestApplyRecordThatCannotBeResolvedLeavesTheTargetUntouched(t *testing.T) {
 
 // detectFormat knows the extension, but no binding exists for it yet: that is
 // HEW021 too, and by a different branch than an undetectable extension.
+// --ops projects the executed list onto RFC 6901, which needs the format's
+// Binding.Document. HCL is the one appliable format that ships no reader — its
+// addressing consumes a segment tuple, which the one segment / one child Node
+// contract cannot express — so it is what a "known format, no binding for the
+// thing --ops needs" case looks like now.
+//
+// This was a YAML case until YAML gained a reader, at which point --ops began
+// working on it. If HCL gains one too this test FAILS rather than quietly
+// passing, and its premise has to be rebuilt on whatever is genuinely missing
+// then.
 func TestApplyOpsKnownFormatWithoutABindingExitsTwo(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "target.yaml", "server:\n  host: localhost\n")
-	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- target.yaml\n\n@@ /server @@\n- host: localhost\n+ host: elsewhere\n")
+	writeFile(t, dir, "target.tf", "terraform {\n  required_version = \">= 1.6\"\n}\n")
+	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- target.tf\n\n@@ /terraform @@\n- required_version = \">= 1.6\"\n+ required_version = \">= 1.7\"\n")
 	exit, _, stderr := run(t, dir, "apply", "--ops", "patch.hew")
 	if exit != 2 || !strings.Contains(stderr, "HEW021") {
 		t.Fatalf("want exit 2 with HEW021, got %d: %q", exit, stderr)
 	}
-	if !strings.Contains(stderr, `no binding for format "yaml"`) {
+	if !strings.Contains(stderr, `no binding for format "hcl"`) {
 		t.Fatalf("stderr should name the missing binding: %q", stderr)
 	}
 }

@@ -7,8 +7,9 @@ import (
 // init registers the YAML binding (Appendix A.6, O35).
 func init() {
 	hew.Register(hew.FormatYAML, hew.Binding{
-		Applier: Apply,
-		Differ:  DiffTree,
+		Applier:  Apply,
+		Differ:   DiffTree,
+		Document: Document,
 		Detect: hew.DetectRule{
 			Extensions: []string{".yaml", ".yml"},
 		},
