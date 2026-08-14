@@ -149,7 +149,9 @@ that show why hew is not `patch(1)` with a structural parser: they *survive*, an
 **Round trip** (`*/roundtrip-basic`) — one per implement format, pinning
 `apply(parse(render(diff(old, new))), old) == new` byte for byte. A failure anywhere in the
 four components fails this, which is why the seam decomposition above matters: RT1 says
-*something* is wrong, the seams say *what*.
+*something* is wrong, the seams say *what*. A format may carry a second round-trip case where
+one address shape is worth pinning end to end on its own — `hcl/two-label-roundtrip` is the
+`resource "type" "name"` tuple (§4.3), whose anchor the differ has to spell in full.
 
 ## Severability
 
@@ -170,14 +172,14 @@ fixture, so dropping the dialect is the removal of one directory.
 
 | Directory | Cases |
 |---|---|
-| `json/` | 18 |
+| `json/` | 22 |
 | `jsonc/` | 5 |
-| `yaml/` | 24 |
+| `yaml/` | 25 |
 | `toml/` | 8 |
-| `hcl/` | 9 |
+| `hcl/` | 12 |
 | `markdown/` | 7 (severable) |
-| `cli/` | 12 |
-| **total** | **83** |
+| `cli/` | 17 |
+| **total** | **96** |
 
 Three families pin the human's 2026-08-14 rulings specifically: the reapply pair
 (`yaml/reapply-not-idempotent`, `json/reapply-add-exists`) and the pragma pair

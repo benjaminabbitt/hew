@@ -1,0 +1,20 @@
+name: hcl/two-label-edit
+seams: [parse, apply-ir, e2e]
+kind: ok
+format: hcl
+ops: [OP-01]
+why: |
+  Terraform's shape — `resource "type" "name"` — is a TWO-label tuple, and §4.3 says an
+  address step consumes a name and ALL the label segments that qualify it. So
+  `/resource/"aws_s3_bucket"/"assets"` is one step spelled in three segments, and the
+  adjacent `resource "aws_s3_bucket" "logs"` shares the type and the whole first label
+  without sharing the address.
+
+  The fixture is arranged so the expected bytes catch both ways of getting this wrong.
+  The addressed block is the SECOND of the two, so a binding that stopped consuming
+  labels after the first and took the first match would rewrite `logs`. And both blocks
+  carry the same `acl = "private"`, so a binding that matched on the type-plus-first-label
+  prefix and applied to every match would rewrite both. Byte comparison of the sibling is
+  the whole assertion; the `parse` seam pins the IR spelling of the address alongside it,
+  three segments deep at `/resource/"aws_s3_bucket"/"assets"/acl`.
+spec: "§4.3, §8.5, §11 OP-01"

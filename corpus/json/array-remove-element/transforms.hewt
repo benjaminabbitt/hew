@@ -3,7 +3,13 @@ target: target.json
 format: json
 transforms:
   - op: test
+    path: /tags/=alpha
+    value: alpha
+  - op: test
     path: /tags/=beta
     value: beta
+  - op: test
+    path: /tags/=gamma
+    value: gamma
   - op: remove
     path: /tags/=beta

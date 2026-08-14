@@ -3,4 +3,6 @@ hew: 1
 --- target.json format=json
 
 @@ /tags @@
+  "alpha"
 - "beta"
+  "gamma"
