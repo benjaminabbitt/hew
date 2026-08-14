@@ -14,10 +14,10 @@ type CatalogOp struct {
 }
 
 var (
-	opBlockRE  = regexp.MustCompile(`(?m)^#### `)
-	opIDRE     = regexp.MustCompile(`OP-\d+`)
-	statusRE   = regexp.MustCompile(`\*\*Status\*\*\s+(\w+)`)
-	opTableRE  = regexp.MustCompile(`(?m)^\|\s*(OP-\d+)\s*\|[^|\n]*\|[^|\n]*\|\s*(\w+)\s*\|`)
+	opBlockRE = regexp.MustCompile(`(?m)^#### `)
+	opIDRE    = regexp.MustCompile(`OP-\d+`)
+	statusRE  = regexp.MustCompile(`\*\*Status\*\*\s+(\w+)`)
+	opTableRE = regexp.MustCompile(`(?m)^\|\s*(OP-\d+)\s*\|[^|\n]*\|[^|\n]*\|\s*(\w+)\s*\|`)
 )
 
 // LoadCatalog extracts the §11 catalog from the spec. Entries appear in two
@@ -82,9 +82,9 @@ func indexByte(b []byte, c byte) int {
 // catalog op, which v0 ops have no case, and which case ops: references name
 // no catalog entry (typo guard).
 type Coverage struct {
-	CasesPerOp   map[string]int
-	UncoveredV0  []string // v0-tier ops with zero cases
-	UnknownRefs  []string // "case: OP-xx" references not in the catalog
+	CasesPerOp  map[string]int
+	UncoveredV0 []string // v0-tier ops with zero cases
+	UnknownRefs []string // "case: OP-xx" references not in the catalog
 }
 
 func ComputeCoverage(catalog []CatalogOp, cases []*Case) Coverage {

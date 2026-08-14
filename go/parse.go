@@ -65,8 +65,8 @@ type parser struct {
 	i     int // 0-based index into lines; current line is lines[i]
 }
 
-func (p *parser) lineNo() int  { return p.i + 1 }
-func (p *parser) done() bool   { return p.i >= len(p.lines) }
+func (p *parser) lineNo() int { return p.i + 1 }
+func (p *parser) done() bool  { return p.i >= len(p.lines) }
 func (p *parser) peek() string {
 	if p.done() {
 		return ""
