@@ -8,10 +8,10 @@ import (
 	"github.com/hew-format/hew/internal/hewerr"
 )
 
-// corpusCase loads patch.hew and (if present) transforms.hewt from the
-// shared corpus, walking up from the package directory to find it — the
-// same repo-root discovery the conformance harness uses.
-func corpusCase(t *testing.T, rel string) (patch, transforms []byte, dir string) {
+// corpusDir resolves a corpus case's directory, walking up from the package
+// directory to find the repo root — the same discovery the conformance
+// harness uses.
+func corpusDir(t *testing.T, rel string) string {
 	t.Helper()
 	root, err := os.Getwd()
 	if err != nil {
@@ -20,8 +20,7 @@ func corpusCase(t *testing.T, rel string) (patch, transforms []byte, dir string)
 	for {
 		cand := filepath.Join(root, "corpus", rel)
 		if st, err := os.Stat(cand); err == nil && st.IsDir() {
-			dir = cand
-			break
+			return cand
 		}
 		parent := filepath.Dir(root)
 		if parent == root {
@@ -29,6 +28,14 @@ func corpusCase(t *testing.T, rel string) (patch, transforms []byte, dir string)
 		}
 		root = parent
 	}
+}
+
+// corpusCase loads patch.hew and (if present) transforms.hewt from a corpus
+// case directory.
+func corpusCase(t *testing.T, rel string) (patch, transforms []byte, dir string) {
+	t.Helper()
+	dir = corpusDir(t, rel)
+	var err error
 	patch, err = os.ReadFile(filepath.Join(dir, "patch.hew"))
 	if err != nil {
 		t.Fatalf("reading patch.hew: %v", err)

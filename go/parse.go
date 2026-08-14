@@ -541,6 +541,17 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 	if text == "" {
 		return member{}, parseErr(bl.line, "", "empty body line")
 	}
+	// A sequence element may be spelled in YAML's own block-sequence style
+	// ("- beta", per the spec's own §5 worked example for /tags) rather than
+	// as a bare value; strip the marker before classifying the element
+	// itself. A multi-line block-style element (its fields continued on
+	// FOLLOWING body lines rather than one flow-style line) is out of scope:
+	// every JSON-family fixture, and the single-line YAML cases this
+	// implementation targets, write nested element content in flow style.
+	dashElement := strings.HasPrefix(text, "- ")
+	if dashElement {
+		text = strings.TrimSpace(text[2:])
+	}
 	if strings.HasPrefix(text, "#") {
 		txt := strings.TrimPrefix(strings.TrimPrefix(text, "#"), " ")
 		seg := Segment{Kind: SegComment, Index: *commentOrdinal}
@@ -561,7 +572,11 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 	}
 	val := n.Content[0]
 
-	isMapEntry := val.Kind == yaml.MappingNode && len(val.Content) == 2 && !strings.HasPrefix(text, "{")
+	// A dash-prefixed line is always a sequence element, even when its
+	// remaining text happens to parse as a single "key: value" pair — that
+	// shape means a keyed element subset-matched by its one listed field
+	// (routed below), not a map field of the anchor itself.
+	isMapEntry := !dashElement && val.Kind == yaml.MappingNode && len(val.Content) == 2 && !strings.HasPrefix(text, "{")
 	if isMapEntry {
 		key := val.Content[0].Value
 		v := NodeValue(cloneNode(val.Content[1]))
