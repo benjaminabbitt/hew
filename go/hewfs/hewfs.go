@@ -23,21 +23,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/afero"
 
-	"github.com/benjaminabbitt/hew/go"
+	hew "github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/hewdiff"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
-
-// defaultFileMode is the mode a target created by hew gets. An EXISTING
-// target keeps its own mode: a patch tool that silently widened permissions on
-// every apply would be a security regression disguised as a write.
-const defaultFileMode fs.FileMode = 0o644
 
 // WriteOptions controls a write path (Appendix A.8).
 type WriteOptions struct {
@@ -311,43 +305,11 @@ func ReversalPatch(after, before []byte, format hew.FormatID, target string) ([]
 	})
 }
 
-// WriteAtomic is §10.5's write: a temp file in the destination's own directory,
-// then a rename over the destination. No backup file is written, and a failed
-// write leaves the destination byte-identical.
-//
-// The temp file is a SIBLING of the destination deliberately — a rename across
-// filesystems is not atomic anywhere, and a temp directory is a different
-// filesystem often enough that using one would silently degrade the guarantee.
-// An existing destination keeps its mode; a new one gets 0644.
+// WriteAtomic is §10.5's write, kept on hewfs as A.8 spells it. The commit
+// itself lives in the core as hew.WriteAtomic and is shared with Doc.Write:
+// two file-writing surfaces, one commit rule.
 func WriteAtomic(fsys afero.Fs, path string, data []byte) error {
-	mode := defaultFileMode
-	if st, err := fsys.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	dir := filepath.Dir(path)
-	tmp, err := afero.TempFile(fsys, dir, "."+filepath.Base(path)+".hew*")
-	if err != nil {
-		return ioErr(path, "creating a temporary file beside the target: %v", err)
-	}
-	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		fsys.Remove(name)
-		return ioErr(path, "writing the temporary file: %v", err)
-	}
-	if err := tmp.Close(); err != nil {
-		fsys.Remove(name)
-		return ioErr(path, "closing the temporary file: %v", err)
-	}
-	if err := fsys.Chmod(name, mode); err != nil {
-		fsys.Remove(name)
-		return ioErr(path, "setting the temporary file's mode: %v", err)
-	}
-	if err := fsys.Rename(name, path); err != nil {
-		fsys.Remove(name)
-		return ioErr(path, "renaming the temporary file over the target: %v", err)
-	}
-	return nil
+	return hew.WriteAtomic(fsys, path, data)
 }
 
 // readTarget reads one file section's target and settles its format (§8.0):

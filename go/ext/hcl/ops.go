@@ -171,7 +171,7 @@ func ordinalPrefix(p hew.Path) (hew.Path, bool) {
 	segs := p.Segments()
 	for i, s := range segs {
 		if s.Ordinal != nil {
-			return hew.NewPath(segs[:i+1]...), true
+			return hew.RootPath().Append(segs[:i+1]...), true
 		}
 	}
 	return hew.Path{}, false
@@ -280,7 +280,7 @@ func (r *run) container(t hew.Transform, p hew.Path) (*bodyNode, string, []strin
 		}
 		labels = append(labels, s.Name)
 	}
-	rf, he, _ := r.resolve(hew.NewPath(segs[:k]...), t)
+	rf, he, _ := r.resolve(hew.RootPath().Append(segs[:k]...), t)
 	if he != nil {
 		return nil, "", nil, he
 	}

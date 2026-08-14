@@ -277,7 +277,7 @@ func (r *run) assignLine(keys []string, t hew.Transform) (string, *hewerr.Error)
 func (r *run) nearestAncestor(p hew.Path, line int) (*ref, []hew.Segment, *hewerr.Error) {
 	segs := p.Segments()
 	for j := len(segs) - 1; j > 0; j-- {
-		rf, he, final := r.resolve(hew.NewPath(segs[:j]...), line)
+		rf, he, final := r.resolve(hew.RootPath().Append(segs[:j]...), line)
 		if he == nil {
 			return rf, segs[j:], nil
 		}

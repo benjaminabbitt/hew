@@ -858,7 +858,7 @@ func withOrdinal(p Path, ord int, show string) (Path, error) {
 	if p.IsRelative() {
 		return NewRelativePath(segs...), nil
 	}
-	return NewPath(segs...), nil
+	return RootPath().Append(segs...), nil
 }
 
 // checkLabels performs the redundant `label=[…]` cross-check of §7.2: when
