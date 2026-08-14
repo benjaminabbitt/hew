@@ -3109,10 +3109,11 @@ addressed with the same string a hunk anchor is addressed with, so the thing a r
 in a `.hew` file and the thing a programmer types in Go are the same artifact:
 
 ```go
-// At takes a LITERAL path, optionally with typed holes. A bad path, or a hole
-// count that does not match the arguments, is HEW001 at this call.
-func (d *Doc) At(path string, fill ...Segment) *Sel
-func (d *Doc) AtPath(p Path) *Sel      // the pre-parsed form
+// At parses pattern — and ONLY pattern — as a §4 path with holes, filling
+// each "{}" with the next SegmentArg. A malformed pattern, or a hole count
+// that does not match the argument count, is HEW001 at this call.
+func (d *Doc) At(pattern string, args ...SegmentArg) *Sel
+func (d *Doc) AtPath(p Path) *Sel      // the fully pre-built form
 ```
 
 ```go
@@ -3120,13 +3121,78 @@ doc.At("/mcpServers/name=github/command").Replace("npx")
 ```
 
 **Values that come from variables go in through typed holes, never through the string**
-([O43](#p5--the-api-ratification-2026-08-14)). `{}` in the path is a placeholder filled by one
-`Segment` argument, positionally:
+([O43](#p5--the-api-ratification-2026-08-14)):
 
 ```go
 doc.At("/mcpServers/{}/command", hew.MatchKey("name", name)).Replace(cmd)
 doc.At("/dependencies/{}", hew.Key(pkg)).Set(version)
 ```
+
+#### The substitution model, normatively
+
+1. **`At` parses the pattern and nothing else.** The literal spans between holes go through the
+   §4 grammar exactly as a hunk anchor does. Each `{}` consumes the **next** `SegmentArg`
+   positionally.
+2. **A hole is filled with a structural `Segment` value, slotted into the parsed skeleton.**
+   It is not substituted into the text and re-parsed. There is no intermediate string in which
+   the caller's data and the path grammar coexist.
+3. Therefore, the invariant, and it is the reason this design was chosen over any escaping
+   scheme:
+
+> **User data supplied through a typed constructor is never parsed as path text.** It enters
+> the path as struct data, so there is no escaping step to get wrong and **no injection
+> channel** — a value cannot introduce a segment boundary, a key-match, an ordinal, or an
+> optional marker, because by the time it exists it is already one segment and the grammar has
+> already been applied to everything around it.
+
+The precedent is `database/sql`: parameters travel out-of-band from the statement text, and a
+`?` placeholder is not a paste site. Same mechanism, same reason.
+
+**`SegmentArg` is a sealed interface** — it carries an unexported method, so it is implementable
+only inside the module, and a caller cannot supply something that pretends to be a segment.
+Its constructors are the typed ones:
+
+```go
+type SegmentArg interface{ segmentArg() }   // sealed
+
+func Key(name string) SegmentArg                     // §4.1
+func Index(i int) SegmentArg                         // §4.1
+func MatchKey(field, value string) SegmentArg        // §4.2, always a quoted string scalar (O42)
+func MatchKeyNumber(field, literal string) SegmentArg
+func MatchKeyBool(field string, v bool) SegmentArg
+func MatchKeyNull(field string) SegmentArg
+func Label(s string) SegmentArg                      // §4.3 — or the quoted-segment
+                                                     // constructor, once O48 restructures
+                                                     // labels into quoted segments
+```
+
+An address that is programmatic all the way down needs no pattern at all: build a `Path` from
+the same constructors and hand it to **`doc.AtPath(p)`**, which is the third entry point beside
+a literal pattern and a pattern with holes.
+
+**Every `string` parameter above is opaque data.** `Key("a/b")`, `Key("8080")`, `Key("{}")` and
+`MatchKey("name", "x=y")` all name exactly what they say; none of them can become two segments
+or a different segment form.
+
+**This is sound only because [O41](#p5--the-addressing-language-review-2026-08-14) made
+canonical rendering a bijection.** A structural segment holding hostile data is safe in memory
+for free — but the path is later *written out*, into a `.hew` file, a `.hewt` document, or an
+error message, and then read back. Without O41's rule that a key whose bare spelling would not
+reparse identically must render quoted, the injection the typed hole prevented at construction
+would simply happen at serialization. The two rulings are one mechanism with two halves.
+
+#### The pattern language
+
+`At`'s first argument is **§4 plus holes**, a language `At` owns rather than one §4 defines.
+The distinction has a consequence worth stating: **`{}` is a perfectly legal key spelling in
+the bare §4 grammar**, so a document with a literal `{}` key cannot be addressed by writing
+`{}` in a pattern. Use the quoted form — `doc.At(`/x/"{}"`)` — or build the path with
+`AtPath`. This is the only place the pattern language diverges from §4, and it diverges by
+addition only.
+
+**A hole/argument count mismatch is an immediate error, not a partial path.** Too few arguments
+does not leave a hole unfilled and too many does not silently drop one; either is `HEW001` at
+the `At` call, before any selection or operation is recorded.
 
 **The unit of substitution is a typed segment, and this is the whole point.** A segment knows
 whether it is a key, a label, a match field or a match value, so it knows how to render itself
@@ -3146,35 +3212,32 @@ is why the two obvious alternatives are recorded as **rejected**:
 guarding against it: `At("/deps/" + pkg)` is broken for `@scope/pkg`, for `8080`, and for `-`,
 in the silent way §4.1's bijection rule exists to eliminate. Use a hole.
 
-Paths that are computed wholesale — built in a loop, or stored — use the typed segment
-constructors directly, thin named wrappers over the `Segment` literals A.1 already exports:
+Paths that are computed wholesale — built in a loop, or stored, or assembled from more parts
+than a pattern reads well with — use the **same** constructors, passed to `NewPath` and then to
+`AtPath`. There is one constructor set, not two:
 
 ```go
-func Key(name string) Segment                        // §4.1
-func Index(i int) Segment                            // §4.1
-func Append() Segment                                // §4.1's "-"
-func Label(s string) Segment                         // §4.3
-func Heading(level int, text string) Segment         // §4.5
-func Block(kind BlockKind, ord int) Segment          // §4.5
-func Marker(name string) Segment                     // §4.5
-func Comment(ord int) Segment                        // §4.5b
-func TrailingComment() Segment                       // §4.5b's "#t"
-func Optional(s Segment) Segment                     // §4.4's trailing `?`
+// The remaining segment forms, beyond the SegmentArg list above.
+func Append() SegmentArg                             // §4.1's "-"
+func Heading(level int, text string) SegmentArg      // §4.5
+func Block(kind BlockKind, ord int) SegmentArg       // §4.5
+func Marker(name string) SegmentArg                  // §4.5
+func Comment(ord int) SegmentArg                     // §4.5b
+func TrailingComment() SegmentArg                    // §4.5b's "#t"
+func Optional(s SegmentArg) SegmentArg               // §4.4's trailing `?`
+func MatchValue(value string) SegmentArg             // §4.2  ="value"
+func MatchValueNumber(literal string) SegmentArg     // §4.2  =8080
 
-// Key-match, with the comparison's TYPE visible at the construction site
-// (O42). The plain spelling takes a string and produces a quoted string
-// scalar, because a string is what a caller almost always has and a silent
-// re-decode to a number is the failure §4.2 names.
-func MatchKey(field, value string) Segment           // §4.2  name="value"
-func MatchKeyNumber(field, literal string) Segment   // §4.2  name=8080
-func MatchKeyBool(field string, v bool) Segment      // §4.2  name=true
-func MatchKeyNull(field string) Segment              // §4.2  name=null
-func MatchValue(value string) Segment                // §4.2  ="value"
-func MatchValueNumber(literal string) Segment        // §4.2  =8080
+func NewPath(args ...SegmentArg) Path
 
 p := hew.NewPath(hew.Key("mcpServers"), hew.MatchKey("name", "github"), hew.Key("command"))
 doc.AtPath(p).Replace("npx")
 ```
+
+(`Heading`, `Block` and `Marker` are Markdown's, and move to `ext/markdown` with the rest of its
+vocabulary under [O48](#p5--the-format-isolation-audit-2026-08-14); `Label` likewise becomes the
+quoted-segment constructor once labels are restructured. The `SegmentArg` contract is what lets
+that happen without changing `At`.)
 
 `MatchKey(field, value string)` deliberately does **not** take an `any` and guess. A
 `MatchKey("port", "8080")` that inferred "this looks numeric" would address a different node
@@ -4164,7 +4227,7 @@ fixes addresses that are wrong on disk today.
 |---|---|---|
 | **O41** | `Path.String()` is not injective: a key like `@scope/pkg` renders `/@scope~1pkg` and reparses as a **marker**; a digit-only key reparses as an **index**; `-` as **append**; a trailing `?` flips a match into create-if-absent; an empty key vanishes into the root. | **A quoted-key segment form, plus a normative canonical-rendering rule** (§4, §4.1). A quoted segment resolves **by container kind** — block set → label (§4.3, unchanged), mapping → key — and `String()` MUST emit it for any key whose bare spelling would not reparse as the same segment. **`String()`↔`ParsePath` becomes a stated bijection.** This overturns one clause of [O5](#ratified-by-the-coordinator-2026-08-14)'s reasoning ("quoting collides with the label syntax") and not its decision: the two contexts are disjoint, because a container is a block set or a mapping and never both, and the resolver knows which at every step. **This is a live defect, not a hypothesis**: the differ builds key segments straight from the target's own keys and `.hewt` stores every address as this text, so a `package.json` with a scoped dependency produces a transform list whose addresses already mean something else. Also corrected here: §4.1's "RFC 6901, unchanged" was false at the root — hew spells the document `/` where RFC 6901 spells it `""`, and RFC's empty-key member had no hew spelling at all until this form. |
 | **O42** | `Scalar.pathString()` quotes only when `Quoted` is set, so a programmatic string scalar `"8080"` renders `name=8080` and re-decodes as a **number**. | **Force-quote any string scalar whose bare rendering would not reparse identically** (§4.2) — the same bijection rule as O41, one level down. And in the API (A.0), `MatchKey(field, value string)` always produces a quoted string scalar, with `MatchKeyNumber`/`MatchKeyBool`/`MatchKeyNull` for typed comparisons, so **the comparison's type is visible at the construction site** rather than inferred from a value's shape. The differ already dodges this by quoting every string it emits, which is the fix generalized rather than invented. |
-| **O43** | How does a caller get a runtime value into a path? | **Typed holes: `doc.At("/servers/{}", hew.MatchKey("name", v))`** (A.0). The unit of substitution is a **typed segment**, never an escaped string, because a segment knows whether it is a key, a label, a field or a value and a raw string does not. String concatenation into `At` is documented as a **defect**, not guarded against. Recorded **rejected**: printf-style character-level escaping (an escaper cannot know which of the four things its argument stands for, and they escape differently), and concatenation-detection heuristics (false positives on legitimately-computed paths train the reader to route around the warning). |
+| **O43** | How does a caller get a runtime value into a path? | **Typed holes: `At(pattern string, args ...SegmentArg)`** (A.0). Normatively: `At` parses **only the pattern** — literal spans go through the §4 grammar — and each `{}` consumes the next arg as a **structural `Segment` value slotted into the parsed skeleton**, never substituted into text and re-parsed. The invariant that follows is the ruling's whole point: **user data supplied through a typed constructor is never parsed as path text.** It enters as struct data, so there is no escaping step and **no injection channel** — a value cannot introduce a segment boundary, a key-match, an ordinal or an optional marker. The precedent is `database/sql`: parameters travel out-of-band from the statement text, and a placeholder is not a paste site. `SegmentArg` is a **sealed interface** (unexported method, implementable only inside the module); its constructors are `Key`, `Index`, `MatchKey` (always a quoted string scalar, [O42](#p5--the-addressing-language-review-2026-08-14)), `MatchKeyNumber`/`Bool`/`Null`, and `Label` (or the quoted-segment constructor once [O48](#p5--the-format-isolation-audit-2026-08-14) restructures labels) — and **every string parameter to them is opaque data**. An address that is programmatic all the way down skips the pattern entirely: build a `Path` from the same constructors and pass it to `doc.AtPath(p)`. **Soundness depends on [O41](#p5--the-addressing-language-review-2026-08-14)**: a structural segment holding hostile data is safe in memory for free, but the path is later written into a `.hew`, a `.hewt` or an error message and read back, so without canonical rendering's bijection the injection prevented at construction would simply move to serialization. The pattern language is **§4-plus-holes, owned by `At`** — and since `{}` is a legal *key* spelling in bare §4, a literal `{}` key needs the quoted form or `AtPath`. A hole/argument count mismatch is an **immediate error, not a partial path**. String concatenation into `At` is documented as a **defect**, not guarded against. Recorded **rejected**: printf-style character-level escaping (an escaper cannot know which of key/label/field/value its argument stands for, and they escape differently), and concatenation-detection heuristics (false positives on legitimately-computed paths train the reader to route around the warning). |
 | **O44** | Should v0 reserve the tokens its own named extensions would need? | **Yes, two** (§4.7). A key-match **field** ending `<`, `>` or `!` is `HEW001`, reserved for [O6](#ratified-by-the-coordinator-2026-08-14)'s comparison operators — `count>=5` **parses today** as a match on a field named `count>`, a working address a later `>=` would silently reinterpret. A bare `*` segment is `HEW001`, reserved for a wildcard. Both are affordable **only because O41 gives every literal a spelling**: `*` is a real key in `tsconfig.json`, written `/paths/"*"`. The quoted form is named as the permanent escape hatch for any token this spec reserves later, so a reservation can never make a real document unpatchable. |
 | **O45** | §6.4.3 rule 1 recommends key-match addressing as the mitigation for repeated HCL blocks, but §4.2 restricted key-match to sequences and no binding implements it over block sets. | **Extend §4.2 to same-`(type, labels)` block sets** — `/resource/"aws_instance"/name="web"`. The spec was recommending a remedy for its own most dangerous construct ([O25](#residual--genuinely-open)) without providing a spelling for it. Extending strictly *reduces* ordinal usage: the ordinal stays legal and stays the visible admission §4.3 says it is, but stops being forced wherever the blocks differ in any attribute. Implementation pending. |
 | **O46** | A key-match that hits nothing reports "no match", which sends the author looking for an element that is in front of them. | **`HEW013` MUST name the nearest miss and its type** (§10.3) — `1 element has version="1.0" (string) — quote the value to match a string`. Because §4.2 compares after decoding, a match can fail for a reason that is invisible in the address, and the remedy (quote the value) is not guessable from "no match". |
