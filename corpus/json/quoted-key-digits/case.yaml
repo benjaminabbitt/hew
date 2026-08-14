@@ -1,0 +1,16 @@
+name: json/quoted-key-digits
+seams: [parse, apply-ir, e2e]
+kind: ok
+format: json
+ops: [OP-01]
+why: |
+  RULED O41. A digit-only object key — ordinary in a port map, a status-code
+  table, a year-keyed config — renders bare as `/ports/8080` and reparses as an
+  INDEX, which against a mapping is not merely a different node but a different
+  KIND of address. The quoted form says "literal key".
+
+  This is the case that shows the rule is about the key's SHAPE, not about which
+  characters need escaping: 8080 contains nothing an escape could act on. That
+  is why `~0`/`~1`/`~2` cannot fix this class and a literal spelling had to
+  exist.
+spec: "§4, §4.1"

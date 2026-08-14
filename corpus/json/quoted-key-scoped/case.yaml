@@ -1,0 +1,17 @@
+name: json/quoted-key-scoped
+seams: [parse, apply-ir, e2e, render]
+kind: ok
+format: json
+ops: [OP-01]
+why: |
+  RULED O41. `@scope/pkg` is an ordinary npm dependency key and a hostile hew
+  address: bare, it renders `/dependencies/@scope~1pkg`, which REPARSES AS A
+  MARKER SEGMENT — a different node, silently. The quoted form is the literal
+  spelling, and inside it `/` is literal, so this path has two segments and not
+  three.
+
+  The `render` seam is here on purpose: it makes this case pin the bijection
+  itself, not just the parser. render(ir) -> parse(...) must return the same IR,
+  which it cannot unless the renderer emits the quoted form for a key whose bare
+  spelling would not survive the round trip (§4.1's canonical-rendering rule).
+spec: "§4, §4.1"

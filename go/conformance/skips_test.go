@@ -52,4 +52,22 @@ var skipRules = []harness.SkipRule{
 	// carries the wall clock. See newBinding's RunCLI hook, which drops env
 	// on the floor and says so.
 	{Case: "cli/record-pinned-time", Seam: "cli", Reason: "P5: ratified, implementation pending — O37 (HEW_APPLIED_AT pins the record's applied_at; the CLI reads no environment)"},
+
+	// O41 — the quoted-key segment, and the canonical-rendering rule that makes
+	// String()/ParsePath a bijection. Unlike every other rule in this table,
+	// these cover a LIVE DEFECT and not just an unbuilt feature: path.go has no
+	// quoted-key form at all (a quoted segment is unconditionally a label), and
+	// escapeKey escapes only ~ / =, so a key whose SHAPE collides with another
+	// segment form has no spelling that survives a render/reparse round trip.
+	// json/diff-scoped-key is the defect's producer end — diff.go builds
+	// SegKey straight from document keys — and is why these cases declare both
+	// the producing and the consuming seams.
+	{Case: "json/quoted-key-scoped", Seam: "*", Reason: "P5: ratified, implementation pending — O41 (quoted-key segment; \"@scope/pkg\" currently reparses as a marker)"},
+	{Case: "json/quoted-key-digits", Seam: "*", Reason: "P5: ratified, implementation pending — O41 (quoted-key segment; a digit-only key currently reparses as an index)"},
+	{Case: "json/diff-scoped-key", Seam: "*", Reason: "P5: ratified, implementation pending — O41 (LIVE DEFECT: the differ emits /@scope~1pkg, which reparses as a marker)"},
+
+	// O44 — reserved tokens. `count>=5` parses today as a match on a field
+	// named "count>", so the parser has to start refusing it before O6's
+	// operators can ever be added compatibly.
+	{Case: "json/reserved-match-operator", Seam: "*", Reason: "P5: ratified, implementation pending — O44 (a key-match field ending < > ! is reserved for O6's operators)"},
 }

@@ -1,0 +1,7 @@
+hew: 1
+
+--- target.json format=json
+
+@@ /servers/count>=5 @@
+- "name": "alpha"
++ "name": "beta"

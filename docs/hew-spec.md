@@ -275,15 +275,29 @@ A hew path addresses a node. It is **RFC 6901 JSON Pointer plus four extensions*
 that the common config edit is expressible without positional indices.
 
 ```
-hewpath   := "/" | ( "/" segment )+
-segment  := key | index | "-" | keymatch | label | heading | block | marker
+hewpath  := "/" | ( "/" segment )+
+segment  := key | quoted | index | "-" | keymatch | label | heading | block | marker | comment
+quoted   := '"' ( char | '\"' | '\\' )* '"'
 ```
 
 There is **no ordinal segment**. Selecting among same-shaped siblings that a path cannot
 distinguish is an annotation (§7.2), not an address — so that a path is always a statement
 about identity and never about position in the file.
 
-### 4.1 Key and index segments (RFC 6901, unchanged)
+**A quoted segment is the literal form**, and it is what makes the grammar closed: every other
+segment form is recognized by its shape, so a key whose text happens to have one of those
+shapes needs a spelling that says "this is literal text, not a form". §4.1 gives the rule and
+[O41](#p5--the-api-ratification-2026-08-14) gives the reasoning. Quoting is **container-kind
+resolved**: against an HCL block set a quoted segment is a label (§4.3, unchanged), against a
+mapping it is a key. The two contexts are disjoint — a container is one or the other — so one
+spelling serves both without ambiguity.
+
+**Path splitting is quote-aware.** A `/` inside a quoted segment is literal, so
+`/dependencies/"@scope/pkg"` is two segments, not three. (Splitting on `/` before honouring
+quotes is the defect this rule exists to prevent, and it is one an implementation reaches for
+first.)
+
+### 4.1 Key and index segments (RFC 6901, with two stated differences)
 
 ```
 /server/timeout          object key "timeout" under object key "server"
@@ -293,7 +307,49 @@ about identity and never about position in the file.
 
 Escapes: `~0` = `~`, `~1` = `/`, **and Hew adds `~2` = `=`** so that an object key containing
 a literal `=` cannot be mistaken for a key-match segment. (Extending RFC 6901's escape set is
-a compatibility decision — [O5](#decisions-and-residual-open-questions).)
+a compatibility decision — [O5](#ratified-by-the-coordinator-2026-08-14).)
+
+**Two differences from RFC 6901 at the root, stated because the heading used to claim there
+were none.** RFC 6901 spells the whole document `""` and spells *the member whose key is the
+empty string* `/`. Hew spells the document root `/`, which it must — a hew path is written on
+a `@@` line and in a `--- ` target's neighbourhood, where an empty token is unreadable and
+unreviewable. The consequence is that **RFC 6901's empty-key member has no bare hew spelling
+at all**, which is one of the holes the quoted form closes: it is written `/""`.
+
+#### The quoted-key form
+
+**Ratified ([O41](#p5--the-api-ratification-2026-08-14)).** A double-quoted segment is a
+**literal**. Against a mapping it is an object key; against an HCL block set it is a label
+(§4.3, unchanged). Escapes inside the quotes are `\"` and `\\`; `~0`/`~1`/`~2` are neither
+needed nor interpreted there, because nothing inside quotes is being disambiguated.
+
+```
+/dependencies/"@scope/pkg"       the key "@scope/pkg" — NOT a marker segment
+/versions/"8080"                 the key "8080" — NOT an index
+/flags/"-"                       the key "-" — NOT the append position
+/paths/"*"                       the key "*" — a real tsconfig key (§4.7)
+/x/""                            the empty-string key (RFC 6901's "/")
+/x/"code:0"                      the key "code:0" — NOT a Markdown block ordinal
+/x/"a?"                          the key "a?" — NOT an optional segment
+```
+
+**The canonical-rendering rule, and it is normative.** An implementation that renders a path
+back to text MUST emit the quoted form for any key whose bare spelling would not reparse as
+the same segment. Concretely, a key is rendered quoted when it is empty, or is entirely
+digits, or is exactly `-`, or begins with `@`, `#` or `"`, or has the `<blockkind>:<n>` shape
+of §4.5, or has the `#<n>`/`#t` shape of §4.5b, or ends with `?`, or ends with a `[<n>]`
+ordinal, or would otherwise be recognized as another segment form. Everything else renders
+bare, so ordinary paths are unchanged and stay readable.
+
+> **`String()` and `ParsePath` are a bijection on keys.** Rendering a path and reparsing it
+> MUST yield the identical path, for every key any target document can contain.
+
+This is not a style rule. The `.hewt` serialization (§9.6) stores every address as this text,
+and the differ builds key segments straight from the target document's own keys — so without
+the rule, a `package.json` with a scoped dependency produces a transform list whose addresses
+silently mean something else. That is the failure this ruling closes, and
+[O41](#p5--the-api-ratification-2026-08-14) records that it is a live defect, not a
+hypothetical one.
 
 ### 4.2 Key-match segments — `name=value`
 
@@ -306,14 +362,43 @@ only proven answer to keyed-array addressing:
 /servers/enabled=true              non-string scalars compare after format-native decoding
 ```
 
-- The container must be a sequence. The field must be a direct child of each element.
+- The container must be a sequence, **or an HCL set of same-`(type, labels)` blocks** — see
+  below. The field must be a direct child of each element.
 - **Exactly one element must match**, or `HEW012 ambiguous-match` / `HEW013 no-match`. This is
   the loud-staleness rule applied to addressing: an array that grew a duplicate key is a
   drifted array and Hew says so by name.
 - Values are compared **after decoding**: `port=8080` matches the number `8080` and the string
   `"8080"` is written `port="8080"`. Booleans and null are bare tokens `true`/`false`/`null`.
 - Only equality is defined in v0. No regex, no substring, no numeric comparison
-  ([O6](#decisions-and-residual-open-questions)).
+  ([O6](#ratified-by-the-coordinator-2026-08-14)).
+- A field name may itself be quoted (§4.1) when its bare spelling would not survive:
+  `/deps/"@scope/pkg"=1.0.0`.
+
+**Rendering a match value is subject to the same bijection rule as a key**
+([O42](#p5--the-api-ratification-2026-08-14)). The decoded-comparison rule above means the
+*spelling* of a value carries its type, so an implementation MUST force-quote any string
+scalar whose bare rendering would not reparse to an identical scalar — anything that would
+read back as a number, a boolean, `null`, or an empty token. A programmatically-built
+`name=8080` that meant the **string** `"8080"` and reparses as the **number** `8080` addresses
+a different element, or none; there is no error, only the wrong node. The differ already
+sidesteps this by quoting every string it emits, which is the fix generalized.
+
+**Key-match over HCL block sets** ([O45](#p5--the-api-ratification-2026-08-14)). §6.4.3 rule 1
+recommends key-match addressing as the mitigation for repeated HCL blocks — the construct
+[O25](#residual--genuinely-open) names as the one place hew can silently patch the wrong node
+— and until now §4.2 restricted key-match to sequences, so the recommended remedy had no
+spelling. A set of blocks sharing a `(type, labels)` tuple is therefore an addressable
+container for key-match, matched on a direct attribute:
+
+```
+/resource/"aws_instance"/name="web"      among identically-labelled blocks, the one whose
+                                          name attribute is "web"
+```
+
+The uniqueness rule is unchanged (`HEW012`/`HEW013`), and the effect is to **strictly reduce**
+how often an ordinal annotation is the only option: an ordinal remains legal, and remains the
+admission §4.3 says it is, but it stops being forced wherever the blocks differ in any
+attribute. Implementation pending.
 
 **The empty-field form — `/tags/=gamma`.** With no field name, the segment matches the
 element that *is* the value, addressing scalar sequences by content rather than by index:
@@ -343,6 +428,15 @@ written as **quoted segments** following the block-type segment:
 A quoted segment is a label; an unquoted segment is an attribute name or a nested block type.
 That is the whole disambiguation rule, and it works because HCL attribute names are bare
 identifiers.
+
+This is unchanged by [O41](#p5--the-api-ratification-2026-08-14)'s quoted-key form, and the
+two do not collide: a quoted segment resolves **by the kind of container it is applied to**,
+which the resolver knows at every step. Against a block set it is a label, here; against a
+mapping it is a key, §4.1. O5's original rationale — "quoting the whole segment collides with
+the label syntax HCL needs, which would make the address grammar ambiguous" — assumed the two
+uses could meet, and they cannot: a container is a block set or a mapping, never both. O5's
+*decision* stands (the `~2` escape is kept, and it is what keeps ordinary keys unquoted); only
+that one clause of its reasoning is overturned.
 
 **A repeated `(type, labels)` tuple is `HEW012 ambiguous-match` unless the hunk carries an
 ordinal annotation** (§7.2). The path stays an identity statement; the ordinal is a separate,
@@ -397,6 +491,30 @@ removed or replaced as a node (OP-32, OP-33) and are why the mirror grammar's
 comment-attachment spelling (OP-31) needs no IR qualifier of its own — it desugars into an
 `add` at a comment address.
 
+**The ordinal is a selector on a `test`, `remove` or `replace`, and a POSITION on an `add`**
+([O47](#p5--the-api-ratification-2026-08-14)). This is the one place the two readings of a
+number diverge, and the spec previously left it to be guessed. On an `add`, `#<n>` names the
+index the new comment **takes**, and `#-` appends — the same append spelling §4.1 gives a
+sequence, for the same reason. Existing comments at that index and after shift down; the
+placement is otherwise governed by `before:`/`after:` exactly as any other add.
+
+A worked example, with the container's comments numbered before and after:
+
+```jsonc
+// before                       addresses          // after `add` at /server/#1
+{                                                  {
+  // pinned by ops     -> /server/#0                 // pinned by ops     -> #0
+  // do not reformat   -> /server/#1                 // reviewed 2026-08  -> #1  <- added
+  "timeout": 30 // sec -> /server/timeout/#t         // do not reformat   -> #2  <- shifted
+}                                                  }
+```
+
+`/server/#1` on a `remove` deletes "do not reformat". `/server/#1` on an `add` inserts *above*
+it. Both are the same address; the op decides whether the number selects or positions, which
+is what makes `#-` worth having — an append needs no such decision. `#t` is never an `add`
+position (a member has at most one trailing comment); an `add` at `#t` where one already
+exists is `HEW014`, and `! upsert` replaces it.
+
 ### 4.6 Relative paths in annotations
 
 Inside a hunk, an annotation's path may begin with `.` meaning "relative to the enclosing
@@ -406,6 +524,30 @@ hunk's anchor":
 @@ /server @@
 ? expect ./port = 8080
 ```
+
+### 4.7 Reserved in v0
+
+**Ratified ([O44](#p5--the-api-ratification-2026-08-14)).** Two spellings are `HEW001` in v0
+even though nothing yet uses them, because they are the spellings the extensions this spec
+already names would have to take:
+
+| Reserved | Reserved for | Literal spelling |
+|---|---|---|
+| A key-match **field** ending `<`, `>` or `!` | Comparison operators, the [O6](#ratified-by-the-coordinator-2026-08-14) extension | `/x/"count>"=5` |
+| A bare `*` segment | A wildcard segment | `/paths/"*"` |
+
+The first is not speculative tidiness: `count>=5` **parses today** as a match on a field named
+`count>` against the value `5`, which is a working address that a later `>=` operator would
+silently reinterpret. Refusing it now costs a field name nobody has, and not refusing it costs
+a v1 that cannot add operators without breaking v0 patches.
+
+The second is the same trade with a real literal behind it — `*` is a genuine key in a
+`tsconfig.json` `paths` map — which is exactly why this reservation is affordable only now
+that [O41](#p5--the-api-ratification-2026-08-14) gives every literal a spelling.
+
+**The quoted form is the permanent escape hatch**: any token this spec reserves, now or later,
+remains addressable as a literal by quoting it, so a reservation can never make a real
+document unpatchable.
 
 ---
 
@@ -632,7 +774,11 @@ If no field satisfies all three, the sequence has no identity and Hew addresses 
 
 1. If the block has a distinguishing child attribute, **address it by that attribute
    instead** of by ordinal — a hew path may descend into the block and assert
-   (`? expect ./alias = "east"`).
+   (`? expect ./alias = "east"`), and, since
+   [O45](#p5--the-api-ratification-2026-08-14), may *select* the block by that attribute:
+   `/provider/"aws"/alias="east"`. Until O45 this rule recommended a mitigation that §4.2 did
+   not actually offer a spelling for, which is why the ruling extends key-match to
+   same-`(type, labels)` block sets. Implementation pending.
 2. **An ordinal-addressed transform MUST carry at least one distinguishing assert** — a
    context line or a `? expect` on a child that differs between the same-label siblings. A
    patch that carries `! match ord=` with no distinguishing assert is `HEW001`. The reason is
@@ -912,6 +1058,13 @@ format-agnostic.
 
 Explicit `format=` on the target line always wins. Ambiguity without an explicit declaration
 is `HEW021 unsupported-format` — Hew never sniffs content to guess.
+
+**The table above is a non-normative record of the shipped defaults**
+([O4](#ratified-by-the-coordinator-2026-08-14), finished by
+[O48](#p5--the-format-isolation-audit-2026-08-14)). What is normative is the *mechanism*: each
+format extension carries its own `DetectRule` (Appendix A.6), detection reads the **name** and
+never the content, and an explicit `format=` always wins. A hard-coded name list in a standard
+ages badly; one in an extension's detection table is a default.
 
 ### 8.1 JSON
 
@@ -1212,7 +1365,94 @@ open:
 - Markdown is the only format whose `NodeKind` set includes `KindSection`; nothing else reads
   it.
 
+**[O48](#p5--the-format-isolation-audit-2026-08-14) strengthens this from an audit into a
+deletion.** With `SegHeading`, `SegBlock`, `SegMarker`, `BlockKind` and `KindSection` relocated
+to `ext/markdown` (§8.8), the core retains **no Markdown vocabulary at all** — the two
+cross-references named above stop existing rather than staying guarded. Dropping the family
+becomes removing `ext/markdown/` and `corpus/markdown/`, and severability stops being a claim
+a reader has to verify.
+
 Tracked as [O29](#residual--genuinely-open).
+
+### 8.8 Format isolation — what the core is allowed to know
+
+**Ruled (human, 2026-08-14), [O48](#p5--the-format-isolation-audit-2026-08-14): format-specific
+constructs in the core are held to an absolute minimum, every one is challenged, and whatever
+survives as genuinely format-specific lives in a per-format extension package** — layout
+`ext/<format>`, not in the core package and not in the core grammar.
+
+The premise is the one §9 already states and this section enforces: the core is a notation, an
+IR and an execution model. A format is a *plugin*. Every format-specific token the core
+grammar knows is a token the Rust port must reimplement, a token an INI or XML extension
+(§12) cannot introduce without a spec revision, and — for Markdown specifically — a token that
+makes [O29](#residual--genuinely-open)'s "severable" claim weaker than it sounds.
+
+#### The design direction
+
+**The core grammar defines only universal lexical shapes.** Five, and they are the ones every
+tree-shaped format has: `key`, `index`, `-` (append), `key-match`, and the quoted segment
+(§4.1). Everything else is a **sigil-or-shape segment whose interpretation is supplied by the
+registered extension**:
+
+```
+segment := key | quoted | index | "-" | keymatch | extension-claimed
+```
+
+An extension registers the segment shapes it claims; the core lexes a segment into
+`(raw token)` and offers it to the active format's extension before defaulting to `key`. The
+quoted segment already works exactly this way and is the proof the mechanism is sound: one
+lexical form, interpreted as a label against an HCL block set and as a key against a mapping,
+resolved by the container the resolver is already standing on (§4.1, O41).
+
+**Format-specific qualifiers move behind an extension-owned mechanism, and the wire format does
+not move with them.** `anchor:` and `surface:` keep the `.hewt` spelling §9.6 defines, byte for
+byte. What changes is *who owns them*: the extension declares the qualifier keys it
+understands and validates their values, so an unknown qualifier is `HEW001` at parse
+([O9](#ratified-by-the-coordinator-2026-08-14)'s fail-loud) and a known-but-unsupported one is
+`HEW020` at apply (§9.3, unchanged).
+
+#### The audit
+
+Every format-specific element currently in the core, with a verdict.
+
+| Element | Format(s) | Verdict | Rationale |
+|---|---|---|---|
+| `SegKey`, `SegIndex`, `SegAppend`, `SegMatch` | all | **keep in core** | Genuinely universal: every format in the implement tier and both documented-only families (§12) have keyed containers and ordered containers. RFC 6901 is the evidence — these are the shapes a format-neutral pointer standard needed. |
+| Quoted segment (§4.1) | all | **keep in core** | A *literal* is universal; what a literal means is not. The core lexes it; the container's kind decides label-or-key, and the container comes from the extension. This is the pattern every other row below is measured against. |
+| `SegLabel` | HCL | **restructure** | There is no such thing as a label segment. There is a *quoted segment* resolved against a block set, which is the same lexical form as a quoted key resolved against a mapping. The distinct kind disappears from the core; `ext/hcl` supplies "quoted, against a block set, means label". §4.3's text and every existing path spelling are unchanged. |
+| `SegHeading`, `SegBlock`, `SegMarker` | Markdown | **relocate to `ext/markdown`** | The clearest case in the audit. `# text`, `code:0` and `@name` are prose-document vocabulary with no meaning in any config format, and they are three of the four things §8.7.4 has to name when it argues Markdown is severable. Moving them means **the core loses all Markdown vocabulary**, and O29's severability stops being a claim the reader has to audit — dropping the family becomes deleting a directory. |
+| `BlockKind` (para/code/list/table/quote/html) | Markdown | **relocate to `ext/markdown`** | A closed enum of prose block types in a config-patching core. It exists solely to give `SegBlock` its kinds and moves with it. |
+| `SegComment`, `CommentValue` | JSONC, YAML, TOML, HCL (not JSON) | **restructure** | The awkward one, and the audit should say so rather than round it to a neat answer: it is neither universal nor single-format. It is **capability**-scoped — "does this format have comment nodes" — which JSON answers no and §8.1 already enforces as `HEW020`. Ruling: the `#` form leaves the core segment vocabulary like the others, and the four comment-capable extensions share one `ext/comment` helper. Shared code, not core vocabulary — the distinction the whole ruling turns on. |
+| `NodeKind.KindBlock`, `KindSection` | HCL, Markdown | **restructure** | `KindMap`/`KindSeq`/`KindScalar` are universal and stay. The other two become **extension-declared kind names**: `? kind` (OP-28) carries a string, and the active extension validates it against the set it declares. An unknown kind is `HEW001`, exactly as today; the `.hewt` spelling is unchanged. |
+| `Transform.Anchor` | YAML | **restructure — ownership moves, spelling does not** | The `anchor:` key stays exactly as §9.6 defines it, because §9.6 is normative and the corpus pins those bytes. `ext/yaml` declares and validates it. See the tension below. |
+| `Transform.Surface` | TOML | **restructure — same** | Same treatment, `ext/toml`. |
+| `FormatID.Valid()`'s six-format switch | all | **restructure** | A live defect found by this audit, not just a layering complaint: `Valid()` hardcodes the six v0 formats, so a correctly-registered seventh extension is rejected by the *parser* before any binding is consulted. Validity must be a registry lookup (A.6), which is what makes §12's "documented-only" families addable without touching the core. |
+| §8.0's detection table | all | **relocate to the extensions** | Already half-ruled by [O4](#ratified-by-the-coordinator-2026-08-14) ("the mechanism is normative; the list is binding data") and [O35](#p5--the-api-ratification-2026-08-14) (each binding carries its `DetectRule`). This ruling finishes it: §8.0's table becomes a **non-normative record of the shipped defaults**, and the normative statement is the mechanism plus "detection reads the name, never the content". |
+| Binding packages `hewjson`, `hewjsonc`, `hewyaml`, `hewtoml`, `hewhcl`, `hewmarkdown` | each | **relocate: rename to `ext/<format>`** | The isolation should be visible in the import path. `github.com/benjaminabbitt/hew/go/ext/yaml` says what `hewyaml` only implies, and a reviewer scanning imports can see at a glance whether the core has grown a format dependency. **This is a breaking rename**, landing with the rest of the P5 implementation; consumers pinned at `v0.1.0` are unaffected until they upgrade. |
+
+#### The tensions, recorded rather than forced
+
+Two places where a construct cannot move cleanly, and the honest answer is to say where the
+line fell and why.
+
+1. **`Transform`'s serialized fields cannot leave the one IR.** §9 is built on a single
+   `TransformList` that the parser, renderer, differ and every applier all speak, and §9.6
+   pins its serialization byte-for-byte. A truly extension-owned qualifier would be an opaque
+   bag the core cannot validate, cannot canonicalize deterministically, and cannot round-trip
+   through RT2 — which would trade a layering win for a conformance loss. So the ruling stops
+   at **ownership**: the field's *meaning and validation* belong to `ext/yaml` and `ext/toml`,
+   its *spelling and ordering* stay in §9.6. The core still knows two format-specific key
+   names. That is the residue, and it is deliberate.
+
+2. **Path parsing becomes format-aware, which trades against §9's "the parser knows no format
+   mechanics".** An extension-claimed segment form can only be resolved once the active format
+   is known — which it is, from the `--- ` target line (§2.2), before any hunk is read. The
+   line this ruling draws: the parser performs no format **mechanics** — it opens no target,
+   parses no document, and does no I/O, all of which §9 actually requires — but it does
+   consult a registered extension's **segment grammar**, which is data of the same kind as
+   §8.0's detection rules. A patch whose format is unknown at parse time already cannot be
+   lowered ([O9](#ratified-by-the-coordinator-2026-08-14), `HEW021`), so nothing new becomes
+   unparseable.
 
 ---
 
@@ -1756,6 +1996,18 @@ hew: config.yaml:/server/timeout: HEW010 stale-target
 
 Human-readable diagnostics go to **stderr**; `--format-out json` emits one JSON object per
 error on stdout. (ctxloom's diagnostic channel split, applied to the CLI.)
+
+**A `HEW013` from a key-match that hit nothing MUST name its nearest miss, with the miss's
+type** ([O46](#p5--the-api-ratification-2026-08-14)). Because §4.2 compares after decoding, a
+match can fail for a reason invisible in the address — the element is there and its field
+differs only in scalar *type* — and "no element matched" sends the author looking for a
+missing element that is in front of them:
+
+```
+hew: package.json:/deps/version=1.0: HEW013 no-match
+  patch.hew:4: no element of /deps has version=1.0 (number)
+  package.json:9: 1 element has version="1.0" (string) — quote the value to match a string
+```
 
 ### 10.4 First error wins
 
@@ -2745,13 +2997,19 @@ not code. **It is now ratified**, in two halves that must be read differently:
   each as pending with the ruling that decided it. A rule that stops matching is deleted;
   that is how this half becomes the first half.
 
-**Package path:** `github.com/benjaminabbitt/hew/go`, with format bindings at `.../hewjson`,
-`hewjsonc`, `hewyaml`, `hewtoml`, `hewhcl`, `hewmarkdown`, the differ front end at `hewdiff`,
-and the CLI at `cmd/hew`. **The core package imports no host project** — not ctxloom, not
-anything else: it is a standard's reference implementation and a Rust port's peer. Filesystem
-and git integration live in `hewfs` and the CLI's `hewsource`, never in the core. (This
-supersedes the draft's `github.com/ctxloom/ctxloom/internal/hew` path, which named the
-extraction that has since happened.)
+**Package path:** `github.com/benjaminabbitt/hew/go`, with **format extensions at
+`.../ext/json`, `ext/jsonc`, `ext/yaml`, `ext/toml`, `ext/hcl`, `ext/markdown`**
+([O48](#p5--the-format-isolation-audit-2026-08-14) — the isolation is visible in the import
+path, and a reviewer scanning imports can see whether the core has grown a format dependency),
+the differ front end at `hewdiff`, and the CLI at `cmd/hew`. **The core package imports no host
+project** — not ctxloom, not anything else: it is a standard's reference implementation and a
+Rust port's peer. Filesystem and git integration live in `hewfs` and the CLI's `hewsource`,
+never in the core. (This supersedes the draft's `github.com/ctxloom/ctxloom/internal/hew` path,
+which named the extraction that has since happened.)
+
+**The `ext/<format>` layout is a breaking rename** of the shipped `hewjson`/`hewyaml`/… packages
+and lands with the rest of the P5 implementation. Consumers pinned at `v0.1.0` are unaffected
+until they upgrade.
 
 **The four components map to four entry points**, and the type that connects them is
 `TransformList`:
@@ -2811,34 +3069,78 @@ addressed with the same string a hunk anchor is addressed with, so the thing a r
 in a `.hew` file and the thing a programmer types in Go are the same artifact:
 
 ```go
-func (d *Doc) At(path string) *Sel     // parses a §4 path; a bad path is HEW001, at this call
-func (d *Doc) AtPath(p Path) *Sel      // the pre-parsed form, for programmatic construction
+// At takes a LITERAL path, optionally with typed holes. A bad path, or a hole
+// count that does not match the arguments, is HEW001 at this call.
+func (d *Doc) At(path string, fill ...Segment) *Sel
+func (d *Doc) AtPath(p Path) *Sel      // the pre-parsed form
 ```
 
 ```go
 doc.At("/mcpServers/name=github/command").Replace("npx")
 ```
 
-Paths that are computed rather than written are built from typed segment constructors — thin
-named wrappers over the `Segment` literals A.1 already exports — and never by string
-concatenation, which would put escaping (`~0`, `~1`, `~2` — §4.1, [O5](#ratified-by-the-coordinator-2026-08-14))
-in the caller's hands:
+**Values that come from variables go in through typed holes, never through the string**
+([O43](#p5--the-api-ratification-2026-08-14)). `{}` in the path is a placeholder filled by one
+`Segment` argument, positionally:
 
 ```go
-func Key(name string) Segment                    // §4.1
-func Index(i int) Segment                        // §4.1
-func Append() Segment                            // §4.1's "-"
-func MatchKey(field string, v any) Segment       // §4.2  name=value
-func MatchValue(v any) Segment                   // §4.2  =value
-func Label(s string) Segment                     // §4.3
-func Heading(level int, text string) Segment     // §4.5
-func Block(kind BlockKind, ord int) Segment      // §4.5
-func Marker(name string) Segment                 // §4.5
-func Optional(s Segment) Segment                 // §4.4's trailing `?`
+doc.At("/mcpServers/{}/command", hew.MatchKey("name", name)).Replace(cmd)
+doc.At("/dependencies/{}", hew.Key(pkg)).Set(version)
+```
+
+**The unit of substitution is a typed segment, and this is the whole point.** A segment knows
+whether it is a key, a label, a match field or a match value, so it knows how to render itself
+under §4.1's canonical rule and §4.2's value-typing rule. A *string* knows none of that, which
+is why the two obvious alternatives are recorded as **rejected**:
+
+- **printf-style character-level escaping** (`hew.Escapef("/deps/%s", pkg)`) — rejected. An
+  escaper receives a raw string and cannot know whether it is standing in for a key, a label,
+  a match field or a match value, and those escape differently (`~2` matters in a field and
+  not in a quoted key; a string value must force-quote, §4.2). An escaper that cannot tell
+  them apart escapes for the wrong one silently.
+- **detecting concatenation and warning** — rejected. It cannot be done without false
+  positives on legitimately-computed literal paths, and a warning that fires on correct code
+  trains the reader to route around it, which is worse than no warning.
+
+**String concatenation into `At` is a defect**, and the spec says so plainly rather than
+guarding against it: `At("/deps/" + pkg)` is broken for `@scope/pkg`, for `8080`, and for `-`,
+in the silent way §4.1's bijection rule exists to eliminate. Use a hole.
+
+Paths that are computed wholesale — built in a loop, or stored — use the typed segment
+constructors directly, thin named wrappers over the `Segment` literals A.1 already exports:
+
+```go
+func Key(name string) Segment                        // §4.1
+func Index(i int) Segment                            // §4.1
+func Append() Segment                                // §4.1's "-"
+func Label(s string) Segment                         // §4.3
+func Heading(level int, text string) Segment         // §4.5
+func Block(kind BlockKind, ord int) Segment          // §4.5
+func Marker(name string) Segment                     // §4.5
+func Comment(ord int) Segment                        // §4.5b
+func TrailingComment() Segment                       // §4.5b's "#t"
+func Optional(s Segment) Segment                     // §4.4's trailing `?`
+
+// Key-match, with the comparison's TYPE visible at the construction site
+// (O42). The plain spelling takes a string and produces a quoted string
+// scalar, because a string is what a caller almost always has and a silent
+// re-decode to a number is the failure §4.2 names.
+func MatchKey(field, value string) Segment           // §4.2  name="value"
+func MatchKeyNumber(field, literal string) Segment   // §4.2  name=8080
+func MatchKeyBool(field string, v bool) Segment      // §4.2  name=true
+func MatchKeyNull(field string) Segment              // §4.2  name=null
+func MatchValue(value string) Segment                // §4.2  ="value"
+func MatchValueNumber(literal string) Segment        // §4.2  =8080
 
 p := hew.NewPath(hew.Key("mcpServers"), hew.MatchKey("name", "github"), hew.Key("command"))
 doc.AtPath(p).Replace("npx")
 ```
+
+`MatchKey(field, value string)` deliberately does **not** take an `any` and guess. A
+`MatchKey("port", "8080")` that inferred "this looks numeric" would address a different node
+than the one the caller named, with no error anywhere; and the number case is rare enough that
+spelling it `MatchKeyNumber` costs one word and buys a reader who can see, at the call site,
+which comparison is being made.
 
 **There is deliberately no navigation vocabulary** — no `doc.Key("mcpServers").Match("name",
 "github")` method chain. It would be a second address language, differing from the first in
@@ -3249,26 +3551,31 @@ unnoticed. A registry with one entry point makes "which formats can this build a
 answerable, and answerable is what a `--format` error message needs.
 
 ```go
-package hewyaml   // and hewjson, hewjsonc, hewtoml, hewhcl, hewmarkdown
+package yaml   // ext/yaml; likewise ext/json, ext/jsonc, ext/toml, ext/hcl, ext/markdown
 
 func init() { hew.Register(hew.FormatYAML, hew.Binding{ /* … */ }) }
 
-// Document is the binding's read-only view, exported so a caller that already
-// knows the format can skip detection.
+// Document is the extension's read-only view, exported so a caller that
+// already knows the format can skip detection.
 func Document(name string, src []byte) (hew.Document, error)
 ```
 
 ```go
-import _ "github.com/benjaminabbitt/hew/go/hewall"   // every v0 binding
-import _ "github.com/benjaminabbitt/hew/go/hewjson"  // or exactly the ones you want
+import _ "github.com/benjaminabbitt/hew/go/ext/all"   // every v0 extension
+import _ "github.com/benjaminabbitt/hew/go/ext/json"  // or exactly the ones you want
 ```
+
+A `Binding` also carries what [O48](#p5--the-format-isolation-audit-2026-08-14) moved out of
+the core: the segment forms this format claims (§8.8), the node-kind names it declares, and
+the transform qualifier keys it owns. Registration is therefore the single place a format
+announces everything the core would otherwise have had to know about it.
 
 **Precedent, and the alternative that was rejected.** Import-for-effect registration is Go's
 own answer to this problem — `image/png`, `database/sql`, `net/http/pprof` — and it is the one
 that lets a program pay for the formats it uses: a tool that only edits `.json` should not link
-an HCL parser. `hewall` exists so the common case is still one import.
+an HCL parser. `ext/all` exists so the common case is still one import.
 
-The alternative — **explicit registration**, `hew.Register(hew.FormatYAML, hewyaml.Binding())`
+The alternative — **explicit registration**, `hew.Register(hew.FormatYAML, yaml.Binding())`
 at program start — was considered and **rejected**. It reads better in isolation, and it fails
 in the only way that matters: a program that forgets one line gets `HEW021 unsupported-format`
 for a `.yaml` file it can plainly see, at runtime, from a library that was linked and ready.
@@ -3789,6 +4096,31 @@ that are specified here and **not yet built**; O38 and O39 amend behaviour that 
 | **O38** | What does `hew diff` emit for identical inputs, and what does `hew apply` do with it? | **A preamble-only patch, which applies as a no-op** (B.2.2, §9.4-R8, §10.2 amended). Emitting zero bytes produces a file `apply` then refuses as `HEW001`, turning "nothing changed" into an error one command later. §10.2's line moves to *did the author say which file this is about*: `hew: 1` + a `--- ` line + no hunks is a complete statement and exits 0; zero bytes, or a preamble with no file section, stays `HEW001`. |
 | **O39** | Which side does `hew diff old new` stamp on the `--- ` line? | **The OLD side** (B.2.1, §9.4-R7). `patch(1)`'s convention, and what RT1 already says in symbols — the patch is a function *from* old, so naming its result would name a file the applier never opens. Corollaries ruled here so nothing guesses: a git anchor renders as its **path component** (`HEAD:config.yaml` → `--- config.yaml`), because a `--- ` line is a target path ([O13](#ratified-by-the-coordinator-2026-08-14)) and a revision is not one; a stdin old side falls back to the new side's label, and both-stdin is a usage error. |
 | **O40** | How does a caller undo an apply, given `hew revert` is deferred? | **`hew apply --reversal [FILE]`** (A.8, B.1). On successful mutation, also write `diff(after → before)` as a real `.hew` with real context lines — default `<target>.undo.hew`, opt-in always. The reversal artifact **is** the revert story: applying it is the undo. It is deliberately the cheap half of [O14](#ruled-by-the-human-2026-08-14) — it needs no inversion rules because it inverts nothing, it diffs two byte images that both existed. It is not a backup and does not weaken §10.5: a backup is an opaque copy, a reversal patch is a reviewable statement that refuses to apply to a file that has drifted. |
+
+### P5 — the addressing-language review, 2026-08-14
+
+A critical review of §4 ran in parallel with the API ratification and found one **live
+defect** and six gaps. **The human ruled all seven.** O41 is not a design improvement — it
+fixes addresses that are wrong on disk today.
+
+| # | Question | Ruling |
+|---|---|---|
+| **O41** | `Path.String()` is not injective: a key like `@scope/pkg` renders `/@scope~1pkg` and reparses as a **marker**; a digit-only key reparses as an **index**; `-` as **append**; a trailing `?` flips a match into create-if-absent; an empty key vanishes into the root. | **A quoted-key segment form, plus a normative canonical-rendering rule** (§4, §4.1). A quoted segment resolves **by container kind** — block set → label (§4.3, unchanged), mapping → key — and `String()` MUST emit it for any key whose bare spelling would not reparse as the same segment. **`String()`↔`ParsePath` becomes a stated bijection.** This overturns one clause of [O5](#ratified-by-the-coordinator-2026-08-14)'s reasoning ("quoting collides with the label syntax") and not its decision: the two contexts are disjoint, because a container is a block set or a mapping and never both, and the resolver knows which at every step. **This is a live defect, not a hypothesis**: the differ builds key segments straight from the target's own keys and `.hewt` stores every address as this text, so a `package.json` with a scoped dependency produces a transform list whose addresses already mean something else. Also corrected here: §4.1's "RFC 6901, unchanged" was false at the root — hew spells the document `/` where RFC 6901 spells it `""`, and RFC's empty-key member had no hew spelling at all until this form. |
+| **O42** | `Scalar.pathString()` quotes only when `Quoted` is set, so a programmatic string scalar `"8080"` renders `name=8080` and re-decodes as a **number**. | **Force-quote any string scalar whose bare rendering would not reparse identically** (§4.2) — the same bijection rule as O41, one level down. And in the API (A.0), `MatchKey(field, value string)` always produces a quoted string scalar, with `MatchKeyNumber`/`MatchKeyBool`/`MatchKeyNull` for typed comparisons, so **the comparison's type is visible at the construction site** rather than inferred from a value's shape. The differ already dodges this by quoting every string it emits, which is the fix generalized rather than invented. |
+| **O43** | How does a caller get a runtime value into a path? | **Typed holes: `doc.At("/servers/{}", hew.MatchKey("name", v))`** (A.0). The unit of substitution is a **typed segment**, never an escaped string, because a segment knows whether it is a key, a label, a field or a value and a raw string does not. String concatenation into `At` is documented as a **defect**, not guarded against. Recorded **rejected**: printf-style character-level escaping (an escaper cannot know which of the four things its argument stands for, and they escape differently), and concatenation-detection heuristics (false positives on legitimately-computed paths train the reader to route around the warning). |
+| **O44** | Should v0 reserve the tokens its own named extensions would need? | **Yes, two** (§4.7). A key-match **field** ending `<`, `>` or `!` is `HEW001`, reserved for [O6](#ratified-by-the-coordinator-2026-08-14)'s comparison operators — `count>=5` **parses today** as a match on a field named `count>`, a working address a later `>=` would silently reinterpret. A bare `*` segment is `HEW001`, reserved for a wildcard. Both are affordable **only because O41 gives every literal a spelling**: `*` is a real key in `tsconfig.json`, written `/paths/"*"`. The quoted form is named as the permanent escape hatch for any token this spec reserves later, so a reservation can never make a real document unpatchable. |
+| **O45** | §6.4.3 rule 1 recommends key-match addressing as the mitigation for repeated HCL blocks, but §4.2 restricted key-match to sequences and no binding implements it over block sets. | **Extend §4.2 to same-`(type, labels)` block sets** — `/resource/"aws_instance"/name="web"`. The spec was recommending a remedy for its own most dangerous construct ([O25](#residual--genuinely-open)) without providing a spelling for it. Extending strictly *reduces* ordinal usage: the ordinal stays legal and stays the visible admission §4.3 says it is, but stops being forced wherever the blocks differ in any attribute. Implementation pending. |
+| **O46** | A key-match that hits nothing reports "no match", which sends the author looking for an element that is in front of them. | **`HEW013` MUST name the nearest miss and its type** (§10.3) — `1 element has version="1.0" (string) — quote the value to match a string`. Because §4.2 compares after decoding, a match can fail for a reason that is invisible in the address, and the remedy (quote the value) is not guessable from "no match". |
+| **O47** | At a comment address, is `#<n>` on an `add` a selector or a position? | **A selector on `test`/`remove`/`replace`; a POSITION on `add`, with `#-` to append** (§4.5b, with the per-projection worked example the section lacked). The two readings genuinely diverge only here, and leaving it to be guessed means two conformant implementations insert in different places. `#t` is never an `add` position — a member has one trailing comment, so an `add` where one exists is `HEW014` and `! upsert` replaces it. |
+
+### P5 — the format-isolation audit, 2026-08-14
+
+**Ruled by the human, 2026-08-14.** One ruling, and it is architectural rather than a point
+fix — it changes where a whole class of construct lives.
+
+| # | Question | Ruling |
+|---|---|---|
+| **O48** | How much may the core know about any particular format? | **As close to nothing as the design allows, every construct challenged, and whatever genuinely survives as format-specific lives in `ext/<format>`** (§8.8, with the full audit table). The core grammar keeps five universal lexical shapes — key, index, append, key-match, quoted — and everything else becomes an **extension-claimed segment form** whose interpretation the registered format supplies. The quoted segment (O41) is the proof the mechanism works: one lexical form, label against a block set and key against a mapping, resolved by the container the resolver already has. Verdicts in brief: `SegLabel` **restructured** (it was never a kind, only a quoted segment against a block set); `SegHeading`/`SegBlock`/`SegMarker`/`BlockKind` **relocated to `ext/markdown`**, which is what turns [O29](#residual--genuinely-open)'s severability claim into deleting a directory; `SegComment` **restructured** into the `#` form plus a shared `ext/comment` helper, because comment addressing is capability-scoped, not universal and not single-format; `KindBlock`/`KindSection` **restructured** into extension-declared kind names; `Anchor`/`Surface` **restructured so ownership moves and the `.hewt` spelling does not**; §8.0's detection table **relocated** to the extensions and demoted to non-normative; and the binding packages **renamed `hew<format>` → `ext/<format>`** so the isolation is visible in the import path (breaking, landing with the P5 implementation; consumers pinned at `v0.1.0` are unaffected until they upgrade). The audit also found a **live defect**: `FormatID.Valid()` hardcodes the six v0 formats, so a correctly-registered seventh extension is refused by the parser before any binding is consulted — validity must be a registry lookup, which is what makes §12's documented-only families addable without a core change. Two tensions are recorded rather than forced: `Transform`'s serialized fields cannot leave the one IR without losing deterministic canonicalization and RT2, so the core retains two format-specific *key names*; and path parsing becomes format-aware, which the ruling reconciles with §9 by drawing the line at mechanics (no target, no document, no I/O) rather than at knowledge of a segment grammar. |
 
 ### Residual — genuinely open
 

@@ -1,0 +1,8 @@
+hew: 1
+
+--- target.json format=json
+
+@@ /ports @@
+- "8080": "http"
++ "8080": "http-alt"
+  "8443": "https"

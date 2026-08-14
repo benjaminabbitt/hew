@@ -1,0 +1,13 @@
+hew-transforms: 1
+target: target.json
+format: json
+transforms:
+  - op: test
+    path: /ports/"8080"
+    value: http
+  - op: replace
+    path: /ports/"8080"
+    value: http-alt
+  - op: test
+    path: /ports/"8443"
+    value: https
