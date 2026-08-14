@@ -1,0 +1,19 @@
+name: cli/diff-old-target
+seams: [cli]
+kind: cli
+format: yaml
+argv: ["diff", "before.yaml", "after.yaml"]
+exit: 0
+stdout: expected.hew
+ops: [OP-01]
+why: |
+  RULED O39. `hew diff <old> <new>` stamps the OLD side's label on the `--- `
+  line, patch(1)-style: the patch applies to old, so the file it names is the
+  one an applier will open. Naming the new side would produce a patch that,
+  applied to the file it names, is guaranteed to fail.
+
+  This case exists because the two descriptors in cli/diff-git-anchor
+  (`HEAD:config.yaml` and `config.yaml`) resolve to the SAME label, so that case
+  cannot tell the two rules apart. Distinct names are what make the ruling
+  assertable at the CLI seam at all.
+spec: "§9.4-R7, Appendix B.2.1"

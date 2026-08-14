@@ -1,0 +1,20 @@
+name: cli/apply-no-hunks-noop
+seams: [cli]
+kind: cli
+format: yaml
+argv: ["apply", "-i", "patch.hew"]
+exit: 0
+stdout: ""
+target_unchanged: true
+why: |
+  RULED O38. A well-formed patch whose file section carries no hunks applies as
+  a NO-OP: exit 0, the target byte-unchanged, nothing written. This is the exact
+  artifact `hew diff` produces for two identical inputs (Appendix B.2.2), and
+  the reason it must apply cleanly is composition — `hew diff a b > p.hew &&
+  hew apply p.hew` must not become an error the day the answer is "no change".
+
+  The counterpart case is cli/empty-patch-exit-2, which is still HEW001: §10.2's
+  line now falls at "did the author say which file this is about". A preamble
+  plus a `--- ` line is a complete statement about a named file; a preamble
+  alone is an unfinished patch.
+spec: "§10.2, §9.4-R8, Appendix B.2.2"

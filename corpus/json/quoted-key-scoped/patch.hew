@@ -1,0 +1,8 @@
+hew: 1
+
+--- target.json format=json
+
+@@ /dependencies @@
+  "lodash": "4.17.21"
+- "@scope/pkg": "1.2.0"
++ "@scope/pkg": "2.0.0"

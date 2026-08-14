@@ -8,4 +8,8 @@ why: |
   it. Doubles as scenario 2 of the §8.7 evaluation: if this case is not clearly
   better than the equivalent unified diff, that is evidence for dropping the
   dialect.
+
+  Ruling O39: the `--- ` line names the OLD side, not the new one. The patch
+  applies to old — which is literally what this case's apply-ir and e2e seams
+  do with it — so naming new.* named a file the applier never opens.
 spec: "§9.4, §13.5, §8.7.2"

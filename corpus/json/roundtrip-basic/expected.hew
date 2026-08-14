@@ -1,6 +1,6 @@
 hew: 1
 
---- new.json format=json
+--- old.json format=json
 
 @@ /server @@
   "port": 8080

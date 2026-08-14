@@ -6,4 +6,8 @@ ops: [OP-01, OP-02]
 why: |
   RT1 for TOML. Also pins that the differ does not restructure surfaces: the dotted
   key stays dotted and the table stays a table (§8.4 rule 1, OP-39 deferred).
+
+  Ruling O39: the `--- ` line names the OLD side, not the new one. The patch
+  applies to old — which is literally what this case's apply-ir and e2e seams
+  do with it — so naming new.* named a file the applier never opens.
 spec: "§9.4, §13.5"

@@ -1,0 +1,13 @@
+hew-transforms: 1
+target: target.json
+format: json
+transforms:
+  - op: test
+    path: /dependencies/lodash
+    value: 4.17.21
+  - op: test
+    path: /dependencies/"@scope/pkg"
+    value: 1.2.0
+  - op: replace
+    path: /dependencies/"@scope/pkg"
+    value: 2.0.0

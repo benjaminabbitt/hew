@@ -46,9 +46,14 @@ type RecordFixtures struct {
 //   - applied_at, a wall clock. The runner requires it to be present and RFC
 //     3339 UTC, then drops it.
 //
+// pinnedAppliedAt INVERTS the second rule for a case that pins the clock
+// through its env: block (§13.4, ruling O37). There, applied_at is no longer a
+// wall clock at all — it is the assertion — so the fixture must pin it, the
+// pin and the fixture must agree, and the record must equal both.
+//
 // Everything else compares structurally, so a missing or extra field is a
 // failure.
-func CheckRecord(want, got []byte, digestFields []string, fx RecordFixtures) []string {
+func CheckRecord(want, got []byte, digestFields []string, fx RecordFixtures, pinnedAppliedAt string) []string {
 	var wantV, gotV any
 	if err := yaml.Unmarshal(want, &wantV); err != nil {
 		return []string{"expected_record fixture: " + err.Error()}
@@ -57,7 +62,14 @@ func CheckRecord(want, got []byte, digestFields []string, fx RecordFixtures) []s
 		return []string{"record file: " + err.Error()}
 	}
 
-	probs := checkAppliedAt(wantV, gotV)
+	// Exactly one of these runs: a pinned clock is not a wall clock, and the
+	// two checks make opposite demands of the fixture.
+	var probs []string
+	if pinnedAppliedAt != "" {
+		probs = checkPinnedAppliedAt(wantV, gotV, pinnedAppliedAt)
+	} else {
+		probs = checkAppliedAt(wantV, gotV)
+	}
 	for _, f := range digestFields {
 		probs = append(probs, checkDigestField(f, gotV, fx)...)
 		parts := strings.Split(f, ".")
@@ -107,6 +119,75 @@ func checkAppliedAt(wantV, gotV any) []string {
 		probs = append(probs, "record applied_at is not UTC (§9.7): "+ts.Format(time.RFC3339))
 	}
 	return probs
+}
+
+// checkPinnedAppliedAt is checkAppliedAt's inverse, for a case whose env:
+// block pins the clock (ruling O37). Three demands, all of which have to hold
+// before "pinned" means anything:
+//
+//   - the fixture MUST pin applied_at — a case that sets HEW_APPLIED_AT and
+//     then leaves the field unpinned asserts nothing at all;
+//   - the fixture's pin and the env's pin must agree, or the case contradicts
+//     itself and is a corpus error;
+//   - the record must carry that same instant.
+//
+// Comparison is on the normalized RFC 3339 UTC rendering, not on the raw
+// scalar, because §9.7 leaves the YAML spelling free: an unquoted timestamp is
+// YAML's own type and decodes to time.Time, a quoted one stays a string, and
+// both are legal ways to write the same instant. Normalizing is what makes the
+// assertion about the instant rather than about the quoting.
+func checkPinnedAppliedAt(wantV, gotV any, pinned string) []string {
+	var probs []string
+	pinnedTS, ok := normalizeTimestamp(pinned)
+	if !ok {
+		return []string{"corpus error: env pins applied_at to " + pinned + ", which is not RFC 3339"}
+	}
+
+	rawWant, hasWant := lookupPath(wantV, []string{appliedAtKey})
+	deletePath(wantV, []string{appliedAtKey})
+	switch {
+	case !hasWant:
+		probs = append(probs, "corpus error: this case pins applied_at through env:, so expected_record MUST pin it too — otherwise the pin asserts nothing")
+	default:
+		wantTS, ok := normalizeTimestamp(rawWant)
+		switch {
+		case !ok:
+			probs = append(probs, fmt.Sprintf("corpus error: expected_record's applied_at is %v, which is not RFC 3339", rawWant))
+		case wantTS != pinnedTS:
+			probs = append(probs, "corpus error: expected_record pins applied_at to "+wantTS+" but env pins "+pinnedTS)
+		}
+	}
+
+	rawGot, hasGot := lookupPath(gotV, []string{appliedAtKey})
+	deletePath(gotV, []string{appliedAtKey})
+	if !hasGot {
+		return append(probs, "record is missing applied_at (§9.7)")
+	}
+	gotTS, ok := normalizeTimestamp(rawGot)
+	if !ok {
+		return append(probs, fmt.Sprintf("record applied_at is %v, want an RFC 3339 timestamp", rawGot))
+	}
+	if gotTS != pinnedTS {
+		probs = append(probs, "record applied_at is "+gotTS+", but the run pinned "+pinnedTS+" (§9.7, O37)")
+	}
+	return probs
+}
+
+// normalizeTimestamp renders a decoded YAML scalar as RFC 3339 UTC. It accepts
+// both spellings §9.7 allows — a bare timestamp (YAML's own type) and a quoted
+// string — and reports false for anything that is not an RFC 3339 instant.
+func normalizeTimestamp(raw any) (string, bool) {
+	switch v := raw.(type) {
+	case time.Time:
+		return v.UTC().Format(time.RFC3339), true
+	case string:
+		ts, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return "", false
+		}
+		return ts.UTC().Format(time.RFC3339), true
+	}
+	return "", false
 }
 
 // checkDigestField recomputes one record_digest_fields entry from the

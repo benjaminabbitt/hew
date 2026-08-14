@@ -1,0 +1,19 @@
+name: json/diff-scoped-key
+seams: [diff, parse, apply-ir, e2e]
+kind: ok
+format: json
+ops: [OP-01]
+why: |
+  RULED O41, and this case is the one that pins the LIVE DEFECT rather than the
+  design. The differ builds key segments straight from the target document's own
+  keys, and every address it produces is stored as text — in `.hewt` and in the
+  rendered `.hew`. So a package.json with a scoped dependency does not merely
+  render awkwardly: `hew diff` emits `/dependencies/@scope~1pkg`, which reparses
+  as a MARKER segment, and the resulting patch addresses a node that does not
+  exist. No error is raised anywhere along that path.
+
+  The four declared seams are deliberate: `diff` pins what the differ writes,
+  `parse` pins that it reads back as the same IR, and `apply-ir`/`e2e` pin that
+  applying it reaches the intended key. A defect that spans producer and
+  consumer has to be pinned at both ends, or a matched pair of bugs passes.
+spec: "§4.1, §9.4-R1"

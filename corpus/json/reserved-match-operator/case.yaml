@@ -1,0 +1,18 @@
+name: json/reserved-match-operator
+seams: [parse]
+kind: error
+format: json
+error: HEW001
+error_seam: parse
+error_path: /servers/count>=5
+message_contains: ["HEW001", "reserved", "count>"]
+why: |
+  RULED O44. `count>=5` parses TODAY as a key-match on a field literally named
+  `count>` against the value 5 — a working address that O6's future comparison
+  operators would silently reinterpret as "count >= 5". Reserving field names
+  ending `<`, `>` and `!` now costs a field name nobody has; not reserving them
+  costs a v1 that cannot add operators without changing what v0 patches mean.
+
+  The reservation is affordable only because O41 gave every literal a spelling:
+  a genuine field named `count>` is still addressable, as `/servers/"count>"=5`.
+spec: "§4.7, §4.2"

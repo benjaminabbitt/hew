@@ -1,6 +1,6 @@
 hew: 1
 
---- new.toml format=toml
+--- old.toml format=toml
 
 @@ /tool/ctxloom @@
 - timeout = 30

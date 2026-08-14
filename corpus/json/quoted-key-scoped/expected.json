@@ -1,0 +1,7 @@
+{
+  "name": "myapp",
+  "dependencies": {
+    "lodash": "4.17.21",
+    "@scope/pkg": "2.0.0"
+  }
+}

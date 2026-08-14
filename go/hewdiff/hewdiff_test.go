@@ -47,8 +47,11 @@ func TestDiffMatchesCorpusRoundTrips(t *testing.T) {
 				}
 				return string(b)
 			}
+			// The label is the OLD side's (§9.4-R7, ruling O39): the patch
+			// applies to old, and this same expected.hew is what the case's
+			// apply-ir and e2e seams apply to old.
 			got := diffText(t, read("old."+c.ext), read("new."+c.ext), hew.FormatID(c.format),
-				hew.DiffOptions{Target: "new." + c.ext})
+				hew.DiffOptions{Target: "old." + c.ext})
 			if want := read("expected.hew"); got != want {
 				t.Fatalf("diff != expected.hew\n--- got\n%s\n--- want\n%s", got, want)
 			}

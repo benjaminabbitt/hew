@@ -1,0 +1,5 @@
+{
+  "servers": [
+    { "name": "alpha", "count": 5 }
+  ]
+}

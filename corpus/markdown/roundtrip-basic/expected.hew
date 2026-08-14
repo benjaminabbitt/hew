@@ -1,6 +1,6 @@
 hew: 1
 
---- new.md format=markdown
+--- old.md format=markdown
 
 @@ /@ctxloom:context @@
 - Old managed content.

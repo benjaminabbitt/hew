@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -37,6 +39,25 @@ var validSeams = map[Seam]bool{
 }
 
 var validKinds = map[string]bool{"ok": true, "error": true, "cli": true}
+
+// envAllowed is the closed set a case's `env:` block may name: the two
+// variables the spec itself declares environment-readable (§9.7's applied_at
+// pinning, Appendix B.1, ruling O37). Everything else about hew's behaviour is
+// reachable only through argv and the files, and the corpus must not be able
+// to pin more than the spec promises.
+var envAllowed = map[string]bool{"HEW_APPLIED_AT": true, "SOURCE_DATE_EPOCH": true}
+
+// PinnedAppliedAt returns the instant this case pins applied_at to, or "".
+// HEW_APPLIED_AT wins over SOURCE_DATE_EPOCH, which is §9.7's own precedence.
+func (m *Manifest) PinnedAppliedAt() string {
+	if v := m.Env["HEW_APPLIED_AT"]; v != "" {
+		return v
+	}
+	if v := m.Env["SOURCE_DATE_EPOCH"]; v != "" {
+		return epochToRFC3339(v)
+	}
+	return ""
+}
 
 // Manifest is a decoded case.yaml. Decoding is strict (KnownFields): an
 // unrecognized manifest field is a corpus error, never a silent pass-through
@@ -66,6 +87,11 @@ type Manifest struct {
 	Expected        string   `yaml:"expected"` // post-run in-place comparison fixture
 	Requires        string   `yaml:"requires"` // e.g. "git-fixture"
 	Fixture         string   `yaml:"fixture"`  // documentation ONLY; never executed as shell
+
+	// Env pins the run's environment (spec §13.4, ruling O37). Deliberately
+	// restricted to envAllowed: a corpus that could reach any environment
+	// variable could pin behaviour the spec never promised.
+	Env map[string]string `yaml:"env"`
 
 	// Multi-target cli cases (spec §10.5, ruling O12): these name their
 	// targets explicitly because a two-target patch has no sole target.*
@@ -129,6 +155,18 @@ func (m *Manifest) Validate(relName string) error {
 			probs = append(probs, "cli case missing argv/exit")
 		}
 	}
+	for _, k := range sortedEnvKeys(m.Env) {
+		switch {
+		case !envAllowed[k]:
+			probs = append(probs, fmt.Sprintf("env: %q is not one of the variables the spec declares environment-readable (§13.4)", k))
+		case m.Kind != "cli":
+			probs = append(probs, "env: is meaningful only on a cli case")
+		case k == "SOURCE_DATE_EPOCH" && epochToRFC3339(m.Env[k]) == "":
+			probs = append(probs, fmt.Sprintf("env: SOURCE_DATE_EPOCH %q is not an integer number of seconds", m.Env[k]))
+		case k == "HEW_APPLIED_AT" && !validRFC3339UTC(m.Env[k]):
+			probs = append(probs, fmt.Sprintf("env: HEW_APPLIED_AT %q is not an RFC 3339 UTC timestamp (§9.7)", m.Env[k]))
+		}
+	}
 	if m.Requires != "" {
 		if _, ok := fixtureBuilders[m.Requires]; !ok {
 			probs = append(probs, fmt.Sprintf("unknown requires %q", m.Requires))
@@ -174,6 +212,37 @@ func (m *Manifest) StderrCode() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// epochToRFC3339 renders a SOURCE_DATE_EPOCH value as RFC 3339 UTC, or ""
+// if it is not an integer number of seconds.
+func epochToRFC3339(v string) string {
+	secs, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	if err != nil {
+		return ""
+	}
+	return time.Unix(secs, 0).UTC().Format(time.RFC3339)
+}
+
+// validRFC3339UTC reports whether v is an RFC 3339 timestamp at zero offset.
+// §9.7 requires UTC, so a corpus fixture that pins a non-UTC instant is
+// pinning something the spec does not allow an implementation to emit.
+func validRFC3339UTC(v string) bool {
+	ts, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return false
+	}
+	_, offset := ts.Zone()
+	return offset == 0
+}
+
+func sortedEnvKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SortedSeams returns the declared seams in a stable execution order.

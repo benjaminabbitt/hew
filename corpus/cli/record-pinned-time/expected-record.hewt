@@ -1,0 +1,17 @@
+hew-record: 1
+applied_at: "2026-08-14T09:31:07Z"
+patch:
+  source: patch.hew
+targets:
+  - target: target.json
+    format: json
+    committed: true
+    transforms:
+      - op: test
+        path: /mcpServers/0/name
+        value: ctxloom
+      - op: add
+        path: /mcpServers/1
+        value:
+          name: taskloom
+          command: taskloom

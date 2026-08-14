@@ -4,11 +4,18 @@ kind: cli
 format: yaml
 argv: ["apply", "-i", "patch.hew"]
 exit: 2
-stderr_contains: ["HEW001", "no hunks"]
+stderr_contains: ["HEW001", "empty patch is refused"]
 target_unchanged: true
 why: |
-  cli.runConfigWrite's refuse-empty-patch rule, promoted to the format. A file
-  section with no hunks is HEW001 at the PARSER seam — an empty patch is a mistake,
-  never a successful no-op. This is the silent-no-op discipline applied to the
-  patch itself rather than to the target.
-spec: "§10.2"
+  cli.runConfigWrite's refuse-empty-patch rule, promoted to the format. A patch
+  that names NO FILE SECTION is HEW001 at the PARSER seam — it is an unfinished
+  patch, and a generating tool that emitted nothing must not be able to pass
+  that off as a successful apply.
+
+  AMENDED by ruling O38, which moved this line. This case used to carry a
+  preamble AND a `--- ` target line with no hunks, which is now the legal
+  no-op that `hew diff` emits for two identical inputs (Appendix B.2.2) — see
+  cli/apply-no-hunks-noop, which pins the other side of the same line. The
+  fixture here is now the genuinely empty patch the rule was always about: a
+  preamble and nothing else, saying nothing about any file.
+spec: "§10.2, Appendix B.2.2"
