@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -438,16 +437,14 @@ func (e *Engine) runCLI(c *Case, seam Seam, scratch string, snap map[string][]by
 		if err != nil {
 			probs = append(probs, "reading record file "+recordFile+": "+err.Error())
 		} else {
-			wantV, werr := recordDigestZeroed(wantFixture, c.RecordDigestFields)
-			gotV, gerr := recordDigestZeroed(gotBytes, c.RecordDigestFields)
-			switch {
-			case werr != nil:
-				probs = append(probs, "expected_record fixture: "+werr.Error())
-			case gerr != nil:
-				probs = append(probs, "record file "+recordFile+": "+gerr.Error())
-			case !reflect.DeepEqual(wantV, gotV):
-				probs = append(probs, fmt.Sprintf("record mismatch (digest fields excluded):\nwant: %#v\ngot:  %#v", wantV, gotV))
+			fx := RecordFixtures{
+				Pre: func(name string) ([]byte, bool) { b, ok := snap[name]; return b, ok },
+				Post: func(name string) ([]byte, bool) {
+					b, rerr := os.ReadFile(filepath.Join(scratch, name))
+					return b, rerr == nil
+				},
 			}
+			probs = append(probs, CheckRecord(wantFixture, gotBytes, c.RecordDigestFields, fx)...)
 		}
 	}
 	if c.Expected != "" {

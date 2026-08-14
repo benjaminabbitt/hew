@@ -4,6 +4,7 @@
 package hewcli
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -46,6 +47,13 @@ type staged struct {
 	format hew.FormatID
 	before []byte
 	after  []byte
+}
+
+// patchInput is the patch as read, retained because §9.7's record ties itself
+// to the exact bytes that produced it (patch.digest).
+type patchInput struct {
+	source string // the path as given, or "-" for stdin
+	bytes  []byte
 }
 
 type applyFlags struct {
@@ -164,35 +172,39 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 		return 2
 	}
 
+	inputs := f.transformsFiles
+	fromTransforms := len(inputs) > 0
+	if !fromTransforms {
+		inputs = f.patchFiles
+	}
+	// §9.7's record names ONE patch source and one digest of it. Rather than
+	// invent a spelling for several, refuse the combination loudly.
+	if f.record != "" && len(inputs) > 1 {
+		fmt.Fprintln(stderr, "hew: usage error: --record names a single patch source (§9.7); pass one patch per invocation")
+		return 2
+	}
+
 	var tls []hew.TransformList
-	if len(f.transformsFiles) > 0 {
-		for _, tf := range f.transformsFiles {
-			src, rerr := readInput(dir, tf, stdin)
-			if rerr != nil {
-				fmt.Fprintf(stderr, "hew: %s: %v\n", tf, rerr)
-				return 2
-			}
-			more, perr := hew.UnmarshalTransformStream(src)
-			if perr != nil {
-				printErr(stderr, perr)
-				return exitFor(perr)
-			}
-			tls = append(tls, more...)
+	var read []patchInput
+	for _, in := range inputs {
+		src, rerr := readInput(dir, in, stdin)
+		if rerr != nil {
+			fmt.Fprintf(stderr, "hew: %s: %v\n", in, rerr)
+			return 2
 		}
-	} else {
-		for _, pf := range f.patchFiles {
-			src, rerr := readInput(dir, pf, stdin)
-			if rerr != nil {
-				fmt.Fprintf(stderr, "hew: %s: %v\n", pf, rerr)
-				return 2
-			}
-			more, perr := hew.Parse(src)
-			if perr != nil {
-				printErr(stderr, perr)
-				return exitFor(perr)
-			}
-			tls = append(tls, more...)
+		read = append(read, patchInput{source: in, bytes: src})
+		var more []hew.TransformList
+		var perr error
+		if fromTransforms {
+			more, perr = hew.UnmarshalTransformStream(src)
+		} else {
+			more, perr = hew.Parse(src)
 		}
+		if perr != nil {
+			printErr(stderr, perr)
+			return exitFor(perr)
+		}
+		tls = append(tls, more...)
 	}
 
 	if f.target != "" {
@@ -209,11 +221,7 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 	}
 
 	if f.ops {
-		// Appendix A.1's Resolve (abstract IR -> concrete RFC 6901 form) is
-		// not implemented in this slice: flagged as deferred in the P2
-		// report. --ops needs exactly that projection.
-		fmt.Fprintln(stderr, "hew: --ops: resolved op-list projection not implemented (§9.2, deferred to a later slice)")
-		return 2
+		return runOps(tls, dir, stdout, stderr)
 	}
 	if f.transformsOut != "" {
 		out, merr := hew.MarshalTransformStream(tls)
@@ -230,15 +238,10 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 
 	var results []staged
 	for _, tl := range tls {
-		before, rerr := os.ReadFile(filepath.Join(dir, tl.Target))
+		before, format, rerr := readTarget(dir, tl)
 		if rerr != nil {
-			e := &hewerr.Error{Code: hewerr.CodeTargetPath, Component: hewerr.ComponentResolver, Target: tl.Target, Detail: rerr.Error()}
-			printErr(stderr, e)
-			return 2
-		}
-		format := tl.Format
-		if format == "" {
-			format = detectFormat(tl.Target)
+			printErr(stderr, rerr)
+			return exitFor(rerr)
 		}
 		var after []byte
 		var aerr error
@@ -251,8 +254,7 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 			aerr = &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: tl.Target,
 				Detail: "no format declared and none inferred from the target's extension (§8.0)"}
 		default:
-			aerr = &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: tl.Target,
-				Detail: fmt.Sprintf("no binding for format %q (P3)", format)}
+			aerr = noBinding(tl.Target, format)
 		}
 		if aerr != nil {
 			printErr(stderr, aerr)
@@ -268,6 +270,22 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 	if f.output != "" && len(results) != 1 {
 		fmt.Fprintln(stderr, "hew: usage error: -o/--output requires exactly one file section")
 		return 2
+	}
+
+	// The record is BUILT before the commit and WRITTEN after it. Resolving
+	// the executed list can fail where the apply did not — an `? absent`
+	// assertion on a key-match that matches nothing is satisfied by the
+	// applier and has no RFC 6901 pointer at all — and a `--record` run that
+	// cannot produce its record must leave the target untouched (§10.5)
+	// rather than edit a file and then report failure.
+	var rec applicationRecord
+	if f.record != "" {
+		var berr error
+		rec, berr = buildRecord(read, results)
+		if berr != nil {
+			printErr(stderr, berr)
+			return exitFor(berr)
+		}
 	}
 
 	// Commit: every section staged successfully above, so every write here
@@ -290,7 +308,6 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 	}
 
 	if f.record != "" {
-		rec := buildRecord(f.patchFiles, results)
 		out, merr := marshalRecord(rec)
 		if merr != nil {
 			fmt.Fprintf(stderr, "hew: --record: %v\n", merr)
@@ -303,6 +320,77 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 	}
 
 	return 0
+}
+
+// runOps implements `--ops`: print the RESOLVED RFC 6901 op list (§9.2) for
+// every file section and write no target. It reads each target because
+// resolution is only meaningful against a concrete document, and it evaluates
+// nothing — a stale target still prints, because `--ops` reports addresses,
+// not an apply.
+func runOps(tls []hew.TransformList, dir string, stdout, stderr io.Writer) int {
+	var out bytes.Buffer
+	for _, tl := range tls {
+		target, format, rerr := readTarget(dir, tl)
+		if rerr != nil {
+			printErr(stderr, rerr)
+			return exitFor(rerr)
+		}
+		doc, derr := documentFor(tl.Target, format, target)
+		if derr != nil {
+			printErr(stderr, derr)
+			return exitFor(derr)
+		}
+		ops, oerr := hew.Resolve(tl, doc)
+		if oerr != nil {
+			printErr(stderr, oerr)
+			return exitFor(oerr)
+		}
+		out.Write(hew.MarshalResolvedOps(ops))
+	}
+	stdout.Write(out.Bytes())
+	return 0
+}
+
+// readTarget reads one file section's target and settles its format (§8.0).
+func readTarget(dir string, tl hew.TransformList) ([]byte, hew.FormatID, error) {
+	src, err := os.ReadFile(filepath.Join(dir, tl.Target))
+	if err != nil {
+		return nil, "", &hewerr.Error{Code: hewerr.CodeTargetPath, Component: hewerr.ComponentResolver,
+			Target: tl.Target, Detail: err.Error()}
+	}
+	format := tl.Format
+	if format == "" {
+		format = detectFormat(tl.Target)
+	}
+	return src, format, nil
+}
+
+// documentFor parses target bytes into the read-only view Resolve projects
+// against. It dispatches over exactly the formats that have a binding, so a
+// format hew cannot apply cannot silently produce an op list either.
+func documentFor(target string, format hew.FormatID, src []byte) (hew.Document, error) {
+	switch format {
+	case hew.FormatJSON:
+		doc, err := hewjson.Document(src)
+		if err != nil {
+			if he, ok := hewerr.As(err); ok {
+				he.Target = target
+			}
+			return nil, err
+		}
+		return doc, nil
+	default:
+		return nil, noBinding(target, format)
+	}
+}
+
+func noBinding(target string, format hew.FormatID) error {
+	if format == "" {
+		return &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: target,
+			Detail: "no format declared and none inferred from the target's extension (§8.0)"}
+	}
+	return &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: target,
+		Detail: fmt.Sprintf("no binding for format %q (P3)", format)}
 }
 
 func readInput(dir, path string, stdin io.Reader) ([]byte, error) {
