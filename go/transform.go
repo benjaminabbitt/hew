@@ -2,6 +2,7 @@ package hew
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
@@ -248,6 +249,86 @@ func (tl TransformList) Validate() error {
 		}
 	}
 	return nil
+}
+
+// --- the spellability guard -------------------------------------------------
+//
+// Every seam that turns a Path back into TEXT — MarshalTransforms and
+// MarshalTransformStream for .hewt, Render for .hew, and the differ, which
+// builds paths from raw document keys — runs this guard first. It is NOT part
+// of Validate: Validate also runs on the way IN, and inbound text that parsed
+// is spellable by construction (§4). The guard is the emitting side's, and it
+// exists so that a key the v0 grammar cannot spell is refused loudly instead
+// of written as an address that resolves somewhere else (§9.3).
+
+// checkSpellable reports the first path-valued field of tl the v0 §4 grammar
+// cannot spell, as HEW020 at comp.
+func (tl TransformList) checkSpellable(comp hewerr.Component) error {
+	for i := range tl.Transform {
+		if err := tl.Transform[i].checkSpellable(comp, tl.Target, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkSpellable walks one record's four path-valued fields in emission order.
+// An absent path has nothing to spell and is skipped by firstUnspellable.
+func (t Transform) checkSpellable(comp hewerr.Component, target string, i int) error {
+	for _, f := range []struct {
+		name string
+		path Path
+	}{
+		{keyPath, t.Path},
+		{keyFrom, t.From},
+		{keyBefore, t.Before},
+		{keyAfter, t.After},
+	} {
+		seg, bad := f.path.firstUnspellable()
+		if !bad {
+			continue
+		}
+		return inexpressiblePath(comp, target, f.name, i, f.path, seg)
+	}
+	return nil
+}
+
+// inexpressiblePath is HEW020 for a path v0 cannot spell. Path carries the
+// best-effort spelling — the very text that would have been written — so the
+// diagnostic shows the corruption it prevented, and Detail names the offending
+// datum as data rather than folding it into prose.
+func inexpressiblePath(comp hewerr.Component, target, field string, i int, p Path, seg Segment) error {
+	datum := seg.Name
+	if datum == "" {
+		datum = seg.String()
+	}
+	return &hewerr.Error{
+		Code:      hewerr.CodeInexpressible,
+		Component: comp,
+		Target:    target,
+		Path:      p.String(),
+		Detail: fmt.Sprintf("transform %d: %s: the v0 §4 path grammar cannot spell the %s %q: %s. "+
+			"A quoted-key segment form is ratified-pending (PR #1); until it lands hew refuses "+
+			"rather than emit a path that addresses something else (§9.3)",
+			i, field, seg.Kind, datum, spellFailure(seg)),
+	}
+}
+
+// spellFailure says how a segment's spelling betrays it, in the words a
+// reviewer needs to see why the refusal is not pedantry.
+func spellFailure(seg Segment) string {
+	spelling := strconv.Quote(seg.String())
+	got, err := parseSegment(seg.String(), true)
+	switch {
+	case err != nil:
+		return "its bare spelling " + spelling + " is not a legal segment"
+	case got.Kind != seg.Kind:
+		return "its bare spelling " + spelling + " re-reads as a " + got.Kind.String() +
+			" segment, not a " + seg.Kind.String()
+	case !seg.Equal(got):
+		return "its bare spelling " + spelling + " re-reads as a different " + seg.Kind.String() + " segment"
+	}
+	return "its bare spelling " + spelling + " does not survive in this position"
 }
 
 // Validate checks one record's field/op compatibility (§9.6: "fields whose
