@@ -1,0 +1,6 @@
+server:
+  host: localhost
+  port: 8080
+  retries: 5
+  timeout: 30
+  tls: true

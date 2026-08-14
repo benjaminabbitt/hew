@@ -1,0 +1,8 @@
+hew: 1
+
+--- target.yaml format=yaml
+
+@@ /server @@
+  tls: true
+- timeout: 30
+  host: localhost

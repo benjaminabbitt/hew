@@ -1,0 +1,15 @@
+name: yaml/tolerance-remove-reordered
+seams: [e2e]
+kind: ok
+format: yaml
+ops: [OP-05]
+why: |
+  TOLERANCE ROW: a removal against a mapping whose keys were wholesale
+  re-sorted (alphabetized) and grew an unrelated key since the patch was
+  written. The patch's context lines are in the OLD order — reversed relative
+  to the target — so patch(1)'s line/adjacency keying fails on every hunk,
+  while hew addresses nodes by path: a mapping context line asserts a key's
+  presence and value, never its position (§6.4.1), and the `-` line removes
+  the node wherever the sort put it. Content addressing is the whole claim;
+  this row pins it for deletion, not just replacement.
+spec: "§6.1, §6.4.1, §6.4.5"
