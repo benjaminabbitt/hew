@@ -393,7 +393,7 @@ func (p *parser) hunk() ([]Transform, error) {
 	if len(attrs) > 0 {
 		return nil, parseErr(ln.num, "", "unknown hunk attribute %q; v0 defines none (§2.3)", attrs[0])
 	}
-	anchor, err := ParseAuthoredPathIn(p.format, inner)
+	anchor, err := ParsePathIn(p.format, inner)
 	if err != nil {
 		if he, ok := hewerr.As(err); ok {
 			he.PatchLine = ln.num

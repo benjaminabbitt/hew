@@ -161,12 +161,6 @@ type Segment struct {
 	// rule that `?` is legal only on a hunk anchor is the .hew parser's to
 	// enforce — a Path merely carries the flag.
 	Optional bool
-
-	// Ordinal is the `[n]` selector, which selects among siblings a path
-	// cannot distinguish (§9.6, §11.10 reduction 4). It is IR-only: the
-	// notation spells the same choice as a visible `! match ord=`
-	// annotation (§7.2), so ParseAuthoredPath rejects it.
-	Ordinal *int
 }
 
 // IsQuoted reports whether this segment is the LITERAL form of §4.1 — the
@@ -188,7 +182,7 @@ func (s Segment) IsQuoted() bool {
 	return false
 }
 
-// Equal reports structural equality, following Ordinal by value. Quoting is
+// Equal reports structural equality. Quoting is
 // compared as IsQuoted answers it — the canonical spelling, so that a key
 // built as data and the same key read back from text are one segment.
 func (s Segment) Equal(o Segment) bool {
@@ -199,12 +193,8 @@ func (s Segment) Equal(o Segment) bool {
 		return false
 	}
 	switch {
-	case s.Ordinal == nil && o.Ordinal == nil:
-		return true
-	case s.Ordinal == nil || o.Ordinal == nil:
-		return false
 	}
-	return *s.Ordinal == *o.Ordinal
+	return true
 }
 
 // String renders the segment in the §4 notation, without a leading "/".
@@ -230,11 +220,6 @@ func (s Segment) String() string {
 		} else {
 			b.WriteString(strconv.Itoa(s.Index))
 		}
-	}
-	if s.Ordinal != nil {
-		b.WriteByte('[')
-		b.WriteString(strconv.Itoa(*s.Ordinal))
-		b.WriteByte(']')
 	}
 	if s.Optional {
 		b.WriteByte('?')
@@ -283,14 +268,12 @@ func mustQuoteKey(name string) bool {
 		return true
 	case strings.HasSuffix(name, "?"): // the optional flag (§4.4)
 		return true
-	case ordinalStart(name) > 0: // the IR-only [n] selector (§9.6)
-		return true
 	case blockOrdinalShape(name): // `<kind>:<n>` (§4.5)
 		return true
 	}
 	// The safety net, defined by the round trip itself: anything the core's
 	// own lexer reads back as another form, or as a different key.
-	got, err := parseSegment(escapeKey(name), true, coreScope)
+	got, err := parseSegment(escapeKey(name), coreScope)
 	return err != nil || got.Kind != SegKey || got.Name != name
 }
 
@@ -405,7 +388,7 @@ func mustQuoteScalar(text string) bool {
 	// value "opt" plus an optional flag, and `f=a[1]` as the value "a" plus an
 	// ordinal. Both are silent, and both are the value's problem to prevent.
 	esc := escapeKey(text)
-	return strings.HasSuffix(esc, "?") || ordinalStart("x="+esc) > 0
+	return strings.HasSuffix(esc, "?")
 }
 
 type pathOrigin uint8
@@ -486,16 +469,6 @@ func (p Path) Equal(o Path) bool {
 	return true
 }
 
-// HasOrdinal reports whether any segment carries an IR-only `[n]` selector.
-func (p Path) HasOrdinal() bool {
-	for _, s := range p.segs {
-		if s.Ordinal != nil {
-			return true
-		}
-	}
-	return false
-}
-
 // String renders the path in the §4 notation. The zero path renders as "",
 // the root path as "/", the relative root as ".".
 func (p Path) String() string {
@@ -549,7 +522,7 @@ func (s Segment) spellable() bool {
 	if strings.ContainsAny(s.Name, "\r\n") || strings.ContainsAny(s.Value.Text, "\r\n") {
 		return false
 	}
-	got, err := parseSegment(s.String(), true, buildScope)
+	got, err := parseSegment(s.String(), buildScope)
 	return err == nil && s.Equal(got)
 }
 
@@ -607,7 +580,7 @@ func (p Path) firstUnspellable() (Segment, bool) {
 // is the change to the §4 parsing API that registry.go's claimSegment note left
 // to O41's work package.
 //
-// The unscoped ParsePath/ParseAuthoredPath keep BUILD scope, because a caller
+// The unscoped ParsePath keeps BUILD scope, because a caller
 // with no target in hand — a test, a CLI argument, a program building an
 // address — has no active format to scope to, and refusing to parse without one
 // would make the notation unusable outside a patch. What build scope may never
@@ -629,28 +602,17 @@ var (
 // extension rather than all of them.
 func formatScope(f FormatID) scope { return scope{format: f} }
 
-// ParsePath parses a path in the full §4 grammar, including the IR-only `[n]`
-// ordinal selector. Malformed input is HEW001 at the parser component.
+// ParsePath parses a path in the full §4 grammar. Malformed input is HEW001
+// at the parser component.
 //
 // Extension-claimed segment shapes are BUILD-scoped here; ParsePathIn scopes
 // them to one format (§8.8).
-func ParsePath(s string) (Path, error) { return parsePath(s, true, buildScope) }
-
-// ParseAuthoredPath parses a path as it may appear in .hew notation. It
-// differs from ParsePath in one rule: an `[n]` ordinal selector is HEW001,
-// because the notation spells ordinal selection as a visible `! match ord=`
-// annotation so a reviewer sees the fragility (§7.2, §11.10 reduction 4).
-func ParseAuthoredPath(s string) (Path, error) { return parsePath(s, false, buildScope) }
+func ParsePath(s string) (Path, error) { return parsePath(s, buildScope) }
 
 // ParsePathIn is ParsePath with the segment-claim scope of §8.8: only the
 // extension registered for f may claim a token, so a JSON key that happens to
 // be spelled like a Markdown heading is a JSON key.
-func ParsePathIn(f FormatID, s string) (Path, error) { return parsePath(s, true, formatScope(f)) }
-
-// ParseAuthoredPathIn is ParseAuthoredPath, scoped to one format (§8.8).
-func ParseAuthoredPathIn(f FormatID, s string) (Path, error) {
-	return parsePath(s, false, formatScope(f))
-}
+func ParsePathIn(f FormatID, s string) (Path, error) { return parsePath(s, formatScope(f)) }
 
 // MustParsePath is ParsePath for paths known to be well-formed; it panics on
 // error. Intended for constants and tests.
@@ -671,7 +633,7 @@ func pathErr(path, detail string) error {
 	}
 }
 
-func parsePath(s string, allowOrdinal bool, sc scope) (Path, error) {
+func parsePath(s string, sc scope) (Path, error) {
 	if s == "" {
 		return Path{}, pathErr(s, "empty path")
 	}
@@ -701,7 +663,7 @@ func parsePath(s string, allowOrdinal bool, sc scope) (Path, error) {
 	parts := splitSegments(rest)
 	p.segs = make([]Segment, 0, len(parts))
 	for i, raw := range parts {
-		seg, err := parseSegment(raw, allowOrdinal, sc)
+		seg, err := parseSegment(raw, sc)
 		if err != nil {
 			return Path{}, pathErr(s, err.Error())
 		}
@@ -748,24 +710,12 @@ func splitSegments(rest string) []string {
 	return append(out, rest[start:])
 }
 
-func parseSegment(raw string, allowOrdinal bool, sc scope) (Segment, error) {
+func parseSegment(raw string, sc scope) (Segment, error) {
 	var seg Segment
 	body := raw
 	if strings.HasSuffix(body, "?") {
 		seg.Optional = true
 		body = body[:len(body)-1]
-	}
-	if i := ordinalStart(body); i > 0 {
-		if !allowOrdinal {
-			return seg, segErr("segment " + strconv.Quote(raw) +
-				`: "[n]" ordinal selectors are IR-only; write "! match ord=" in .hew notation (§7.2)`)
-		}
-		n, err := strconv.Atoi(body[i+1 : len(body)-1])
-		if err != nil {
-			return seg, segErr("segment " + strconv.Quote(raw) + ": ordinal selector out of range")
-		}
-		seg.Ordinal = &n
-		body = body[:i]
 	}
 
 	switch {
@@ -869,25 +819,6 @@ func parseSegment(raw string, allowOrdinal bool, sc scope) (Segment, error) {
 	}
 	seg.Kind, seg.Name = SegKey, key
 	return seg, nil
-}
-
-// ordinalStart returns the index of the "[" opening a trailing "[n]" selector,
-// or -1. A selector needs a non-empty segment before it, so index 0 never
-// starts one.
-func ordinalStart(body string) int {
-	if !strings.HasSuffix(body, "]") {
-		return -1
-	}
-	i := strings.LastIndexByte(body, '[')
-	if i <= 0 || i+1 == len(body)-1 {
-		return -1
-	}
-	for _, c := range body[i+1 : len(body)-1] {
-		if c < '0' || c > '9' {
-			return -1
-		}
-	}
-	return i
 }
 
 // isComment matches "#t" or "#" followed by digits (§4.5b). A segment

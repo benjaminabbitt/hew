@@ -190,21 +190,6 @@ func TestResolveMatchAmbiguous(t *testing.T) {
 	mustCode(t, err, hewerr.CodeAmbiguousMatch)
 }
 
-func TestResolveMatchOrdinalSelects(t *testing.T) {
-	doc := mustDoc(t, "servers: [{name: a}, {name: b}, {name: a}]")
-	ops := list(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath("/servers/name=a[1]")}), doc)
-	wantPaths(t, ops, "remove /servers/2")
-}
-
-func TestResolveMatchOrdinalOutOfRange(t *testing.T) {
-	doc := mustDoc(t, "servers: [{name: a}, {name: b}]")
-	err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath("/servers/name=a[1]")}), doc)
-	mustCode(t, err, hewerr.CodeNoMatch)
-	if !strings.Contains(err.Error(), "ordinal 1 selects nothing among 1 elements") {
-		t.Fatalf("message should count the matches: %v", err)
-	}
-}
-
 func TestResolveMatchOnNonSequence(t *testing.T) {
 	doc := mustDoc(t, servers)
 	err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath("/server/name=x")}), doc)
@@ -352,15 +337,6 @@ func TestResolveQuotedSegmentIsAKeyAgainstAMapping(t *testing.T) {
 	}
 }
 
-func TestResolveOrdinalOnNonMatchSegment(t *testing.T) {
-	doc := mustDoc(t, servers)
-	err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath("/server[0]")}), doc)
-	mustCode(t, err, hewerr.CodeInexpressible)
-	if !strings.Contains(err.Error(), "ordinal selector on a key segment") {
-		t.Fatalf("message: %v", err)
-	}
-}
-
 func TestResolveRejectsRelativeAndMissingPaths(t *testing.T) {
 	doc := mustDoc(t, servers)
 	rel := NewRelativePath(Segment{Kind: SegKey, Name: "port"})
@@ -391,20 +367,6 @@ func TestResolveRejectsMissingPathsOnCreatingOps(t *testing.T) {
 	err = resolveErrOf(t, tlOf(Transform{Op: OpTest, Path: Path{}, Absent: true}), doc)
 	mustCode(t, err, hewerr.CodeInexpressible)
 	if !strings.Contains(err.Error(), "missing path") {
-		t.Fatalf("message: %v", err)
-	}
-}
-
-func TestResolveNegativeOrdinal(t *testing.T) {
-	doc := mustDoc(t, "servers: [{name: a}]")
-	neg := -1
-	p := NewPath(
-		Segment{Kind: SegKey, Name: "servers"},
-		Segment{Kind: SegMatch, Name: "name", Value: Scalar{Kind: ScalarString, Text: "a"}, Ordinal: &neg},
-	)
-	err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: p}), doc)
-	mustCode(t, err, hewerr.CodeNoMatch)
-	if !strings.Contains(err.Error(), "ordinal -1 selects nothing") {
 		t.Fatalf("message: %v", err)
 	}
 }
@@ -565,16 +527,6 @@ func TestResolveAbsentTestOnInexpressibleSegment(t *testing.T) {
 	doc := mustDoc(t, servers)
 	err := resolveErrOf(t, tlOf(Transform{Op: OpTest, Path: MustParsePath("/server/#0"), Absent: true}), doc)
 	mustCode(t, err, hewerr.CodeInexpressible)
-}
-
-func TestResolveAbsentTestWithOrdinalOnTheNewNode(t *testing.T) {
-	doc := mustDoc(t, servers)
-	p := MustParsePath("/server/tls[0]")
-	err := resolveErrOf(t, tlOf(Transform{Op: OpTest, Path: p, Absent: true}), doc)
-	mustCode(t, err, hewerr.CodeInexpressible)
-	if !strings.Contains(err.Error(), "cannot address a node that does not exist") {
-		t.Fatalf("message: %v", err)
-	}
 }
 
 func TestResolveAppendUnderNonSequenceParent(t *testing.T) {

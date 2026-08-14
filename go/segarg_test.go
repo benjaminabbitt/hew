@@ -171,7 +171,7 @@ func TestHoleArgumentIsNeverParsedAsPathText(t *testing.T) {
 			t.Fatalf("Key(%q) produced %d segments", hostile, p.Len())
 		}
 		s := p.Segment(1)
-		if s.Kind != SegKey || s.Name != hostile || s.Optional || s.Ordinal != nil {
+		if s.Kind != SegKey || s.Name != hostile || s.Optional {
 			t.Fatalf("Key(%q) became %+v", hostile, s)
 		}
 	}
@@ -220,7 +220,7 @@ func TestAtErrorLeavesNoPartialPath(t *testing.T) {
 
 func TestAtMalformedPatternIsHEW001(t *testing.T) {
 	for _, pattern := range []string{
-		"", "no-leading-slash", "/a/x[99999999999999999999]", `/a/"unterminated`, "/a/#99999999999999999999",
+		"", "no-leading-slash", `/a/"unterminated`, "/a/#99999999999999999999",
 	} {
 		d := atDoc(t)
 		d.At(pattern)

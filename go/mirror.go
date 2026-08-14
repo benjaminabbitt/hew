@@ -17,7 +17,6 @@ import (
 //     member's children follow, indented (§8.1, §8.5);
 //   - a sequence element is `- item` (YAML) or a bare value line (a JSON
 //     array element, §8.1);
-//   - an HCL block is `type "label"… {` … `}` (§8.5);
 //   - a TOML table header is `[a.b]` / `[[a]]` and belongs to the child it
 //     introduces, not to the anchor (§8.4);
 //   - a comment is `#…` or `//…`, and is a node (§4.5b, §8.2);
@@ -33,7 +32,6 @@ const (
 	mSeqItem                   // "- …" sequence element
 	mScalar                    // a bare value line: a JSON array element
 	mComment                   // a comment node
-	mBlock                     // an HCL block: type, labels, body
 	mTable                     // a TOML [a.b] / [[a]] header and the lines it owns
 	mAnnot                     // a `?` or `!` annotation line (§7)
 )
@@ -47,7 +45,7 @@ type mirrorEntry struct {
 	line   int
 
 	key    string   // mKV
-	labels []string // mBlock: block type first, then labels; mTable: dotted components
+	labels []string // mTable: dotted components
 	array  bool     // mTable: the [[…]] array-of-tables spelling
 
 	inline   Value // mKV with an inline value, mScalar
@@ -59,7 +57,6 @@ type mirrorEntry struct {
 	// this entry (§7), and the container's entry list, which `? exhaustive`
 	// counts.
 	q        quals
-	ord      *ordAnnot
 	siblings []*mirrorEntry
 
 	// Comment ordinals within the parent container, one per projection (§5):
@@ -192,26 +189,6 @@ func (r *bodyReader) memberOrValue(e *mirrorEntry, bl bodyLine, text string) (*m
 		e.kind, e.key = mKV, key
 		if err := r.value(e, val, bl); err != nil {
 			return nil, err
-		}
-		return e, checkSubtreeMargins(e)
-	}
-	if labels, open, ok := blockHeader(text); ok {
-		e.kind, e.labels = mBlock, labels
-		if open {
-			kids, err := r.children(bl)
-			if err != nil {
-				return nil, err
-			}
-			e.children = kids
-		}
-		if len(e.children) == 0 {
-			// `features {}`, or a block whose body the author left empty:
-			// the block exists and has no members (§8.5).
-			v, err := parseMirrorValue("{}", bl.num)
-			if err != nil {
-				return nil, err
-			}
-			e.inline = v
 		}
 		return e, checkSubtreeMargins(e)
 	}
@@ -425,26 +402,6 @@ func memberSep(text string) (int, bool) {
 		}
 	}
 	return 0, false
-}
-
-// blockHeader reads an HCL block header — `type "label"… {` — into its type
-// and labels (§8.5). `features {}` is a block with an empty body.
-func blockHeader(text string) ([]string, bool, bool) {
-	body, open := strings.CutSuffix(text, "{")
-	if !open {
-		var empty bool
-		if body, empty = strings.CutSuffix(text, "{}"); !empty {
-			return nil, false, false
-		}
-	}
-	toks, err := splitTokens(body)
-	if err != nil || len(toks) == 0 || strings.Contains(toks[0], `"`) {
-		return nil, false, false
-	}
-	for i, tok := range toks {
-		toks[i] = unquoteAttr(tok)
-	}
-	return toks, open, true
 }
 
 // parseMirrorValue decodes a body line's value text. YAML's scalar

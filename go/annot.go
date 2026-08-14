@@ -3,8 +3,6 @@ package hew
 import (
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // The §7 annotation grammar. Annotation lines carry margin `?` (an assertion,
@@ -19,7 +17,6 @@ const (
 	verbCount      = "count"
 	verbKind       = "kind"
 
-	verbMatch      = "match"
 	verbAnchor     = "anchor"
 	verbSurface    = "surface"
 	verbOptional   = "optional"
@@ -56,7 +53,7 @@ func classifyAnnot(a annotation) (annotClass, error) {
 	switch a.verb {
 	case verbSurface:
 		return annotContainer, nil
-	case verbMatch, verbAnchor, verbOptional, verbIdempotent, verbStrict, verbUpsert, verbDefault:
+	case verbAnchor, verbOptional, verbIdempotent, verbStrict, verbUpsert, verbDefault:
 		return annotLine, nil
 	}
 	return 0, parseErr(a.line, "", "unknown directive %q (§7)", a.verb)
@@ -65,17 +62,8 @@ func classifyAnnot(a annotation) (annotClass, error) {
 // applyDirective folds one `!` directive onto the qualifier set it governs
 // (§9.1 step 6: directives emit no transform of their own, they ride the
 // affected transform as qualifiers).
-func applyDirective(a annotation, q *quals, ord **ordAnnot) error {
+func applyDirective(a annotation, q *quals) error {
 	switch a.verb {
-	case verbMatch:
-		o, err := parseMatch(a)
-		if err != nil {
-			return err
-		}
-		if *ord != nil {
-			return parseErr(a.line, "", "two `! match` annotations govern the same line (§7.2)")
-		}
-		*ord = o
 	case verbAnchor:
 		mode, err := oneArg(a)
 		if err != nil {
@@ -127,43 +115,6 @@ func parseSurface(a annotation) (Surface, error) {
 		return Surface(arg), nil
 	}
 	return "", parseErr(a.line, "", "`! surface` takes %q or %q, got %q (§8.4)", SurfaceTable, SurfaceDotted, arg)
-}
-
-// parseMatch reads `! match [label=[…]] ord=<n>` (§7.2). `ord` is required
-// and 0-based; `label=` is optional and redundant by design — the cheapest
-// possible guard on a fragile selector.
-func parseMatch(a annotation) (*ordAnnot, error) {
-	toks, err := splitTokens(a.rest)
-	if err != nil {
-		return nil, parseErr(a.line, "", "malformed `! match` annotation: %v (§7.2)", err)
-	}
-	o := &ordAnnot{ord: -1, line: a.line}
-	for _, tok := range toks {
-		key, val, ok := strings.Cut(tok, "=")
-		if !ok {
-			return nil, parseErr(a.line, "", "`! match` attribute %q is not key=value (§7.2)", tok)
-		}
-		switch key {
-		case "ord":
-			n, cerr := strconv.Atoi(val)
-			if cerr != nil || n < 0 {
-				return nil, parseErr(a.line, "", "`! match ord=` takes a non-negative integer, got %q (§7.2)", val)
-			}
-			o.ord = n
-		case "label":
-			var labels []string
-			if uerr := yaml.Unmarshal([]byte(val), &labels); uerr != nil {
-				return nil, parseErr(a.line, "", "`! match label=` takes a list of labels, got %q (§7.2)", val)
-			}
-			o.labels, o.hasLabels = labels, true
-		default:
-			return nil, parseErr(a.line, "", "unknown `! match` attribute %q; §7.2 defines label and ord", key)
-		}
-	}
-	if o.ord < 0 {
-		return nil, parseErr(a.line, "", "`! match` requires `ord=` (§7.2)")
-	}
-	return o, nil
 }
 
 // splitAssertion reads `<path> = <value>` from an assertion's arguments. The
