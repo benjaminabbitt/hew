@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1" # weekly mutation run, Monday 06:17 UTC
+
+jobs:
+  conformance:
+    name: corpus + unit + acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - uses: extractions/setup-just@v2
+
+      - name: corpus layout check
+        run: just check
+
+      - name: gofmt
+        run: test -z "$(gofmt -l go)" || { gofmt -l go; exit 1; }
+
+      - name: vet
+        working-directory: go
+        run: go vet ./...
+
+      # Unit tests + the corpus runner (all seams) + the godog acceptance
+      # suite — TestFeatures runs under `go test`, so one target covers all.
+      - name: tests (unit + corpus + godog)
+        run: just test-go
+
+      # Redundant with test-go by construction, but reported as its own step
+      # so an acceptance regression is legible from the checks list alone.
+      - name: acceptance criteria (godog, verbose)
+        run: just accept-go
+
+      - name: corpus report (verbose, with skip reasons)
+        run: just corpus-go
+
+  # Mutation testing is a milestone gate, not a per-commit one: ~45 min on a
+  # cold runner. Runs weekly and on demand; failure opens visibility, not a
+  # merge block.
+  mutation:
+    name: mutation (gremlins)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - uses: extractions/setup-just@v2
+      - name: mutate (unit-test killers)
+        run: just mutate-go ./...
