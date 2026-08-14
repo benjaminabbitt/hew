@@ -232,3 +232,137 @@ func mustErr(t *testing.T, src []byte) error {
 	}
 	return err
 }
+
+// --- target comment lines (§3, §8.2) ---------------------------------------
+
+func parseOne(t *testing.T, src string) []Transform {
+	t.Helper()
+	tls, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(tls) != 1 {
+		t.Fatalf("want 1 file section, got %d", len(tls))
+	}
+	return tls[0].Transform
+}
+
+func TestTargetCommentTextStripsEverySyntax(t *testing.T) {
+	for _, c := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"// x", "x", true},
+		{"//x", "x", true},
+		{"//  x", " x", true},
+		{"/* x */", "x", true},
+		{"/**/", "", true},
+		{"# x", "x", true},
+		{"#x", "x", true},
+		{"port: 8080", "", false},
+		{"/ x", "", false},
+	} {
+		got, ok := targetCommentText(c.in)
+		if ok != c.ok || got != c.want {
+			t.Errorf("targetCommentText(%q) = %q,%v; want %q,%v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestCommentValueRoundTrip(t *testing.T) {
+	v := commentValue("bumped by ctxloom")
+	got, ok := commentTextOf(v)
+	if !ok || got != "bumped by ctxloom" {
+		t.Fatalf("commentTextOf(commentValue(x)) = %q,%v", got, ok)
+	}
+	if got, ok := commentTextOf(Value{}); ok || got != "" {
+		t.Errorf("the absent value is not a comment: %q,%v", got, ok)
+	}
+	sc, err := ValueOf("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := commentTextOf(sc); !ok || got != "bare" {
+		t.Errorf("a bare scalar spells the same comment: %q,%v", got, ok)
+	}
+	seq, err := ValueOf([]int{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := commentTextOf(seq); ok {
+		t.Error("a sequence is not a comment node")
+	}
+}
+
+// TestAddedCommentAnchorsTheMemberBelowIt pins the lowering
+// corpus/jsonc/add-with-leading-comment's transforms.hewt fixture states: two
+// adds, the member placed after the comment node rather than after the
+// context line above them both (§8.2).
+func TestAddedCommentAnchorsTheMemberBelowIt(t *testing.T) {
+	ts := parseOne(t, "hew: 1\n\n--- t.jsonc format=jsonc\n\n@@ / @@\n  port: 8080\n"+
+		"+ // added by taskloom\n+ telemetry: false\n")
+	if len(ts) != 3 {
+		t.Fatalf("want 3 transforms, got %d: %+v", len(ts), ts)
+	}
+	if ts[1].Op != OpAdd || ts[1].Path.String() != "/#0" || ts[1].After.String() != "/port" {
+		t.Fatalf("comment add: %+v", ts[1])
+	}
+	if got, ok := commentTextOf(ts[1].Value); !ok || got != "added by taskloom" {
+		t.Fatalf("comment value: %q,%v", got, ok)
+	}
+	if ts[2].Op != OpAdd || ts[2].Path.String() != "/telemetry" || ts[2].After.String() != "/#0" {
+		t.Fatalf("member add: %+v", ts[2])
+	}
+}
+
+// TestRemovedLeadingCommentNeedsNoRemoveRecord pins the other half of §8.2:
+// removing a member removes its leading comment, so the comment's own "-"
+// line asserts but does not emit a second remove.
+func TestRemovedLeadingCommentNeedsNoRemoveRecord(t *testing.T) {
+	ts := parseOne(t, "hew: 1\n\n--- t.jsonc format=jsonc\n\n@@ / @@\n"+
+		"- // the old opt-out\n- telemetry: false\n  port: 8080\n")
+	var removes []string
+	for _, tr := range ts {
+		if tr.Op == OpRemove {
+			removes = append(removes, tr.Path.String())
+		}
+	}
+	if len(removes) != 1 || removes[0] != "/telemetry" {
+		t.Fatalf("want exactly the member removed, got %v", removes)
+	}
+	if ts[0].Op != OpTest || ts[0].Path.String() != "/#0" {
+		t.Fatalf("the comment line still asserts: %+v", ts[0])
+	}
+}
+
+// A standalone "-" comment line — one that does NOT lead a removed member —
+// keeps its own remove record.
+func TestStandaloneCommentRemovalKeepsItsRecord(t *testing.T) {
+	ts := parseOne(t, "hew: 1\n\n--- t.jsonc format=jsonc\n\n@@ / @@\n"+
+		"- // stale note\n  port: 8080\n")
+	var removes []string
+	for _, tr := range ts {
+		if tr.Op == OpRemove {
+			removes = append(removes, tr.Path.String())
+		}
+	}
+	if len(removes) != 1 || removes[0] != "/#0" {
+		t.Fatalf("want the comment node removed, got %v", removes)
+	}
+}
+
+// A leading comment above a member that is REPLACED (a "-"/"+" pair) is not
+// absorbed: the member survives, so the comment's removal stands on its own.
+func TestLeadingCommentAboveAReplacedMemberIsNotAbsorbed(t *testing.T) {
+	ts := parseOne(t, "hew: 1\n\n--- t.jsonc format=jsonc\n\n@@ / @@\n"+
+		"- // stale note\n- timeout: 30\n+ timeout: 60\n")
+	var ops []string
+	for _, tr := range ts {
+		if tr.Op != OpTest {
+			ops = append(ops, string(tr.Op)+" "+tr.Path.String())
+		}
+	}
+	if len(ops) != 2 || ops[0] != "remove /#0" || ops[1] != "replace /timeout" {
+		t.Fatalf("want the comment removed and the member replaced, got %v", ops)
+	}
+}

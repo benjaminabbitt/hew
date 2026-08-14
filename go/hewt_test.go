@@ -136,10 +136,10 @@ func TestExhaustiveRoundTrips(t *testing.T) {
 
 func TestValidateRejectsMeaninglessFieldCombinations(t *testing.T) {
 	cases := []Transform{
-		{Op: OpAdd},                                                      // missing value
-		{Op: OpCopy, Path: MustParsePath("/a")},                          // missing from
-		{Op: OpRemove, Path: MustParsePath("/a"), Value: mustValNoT(1)},  // value not valid on remove
-		{Op: OpTest, Path: MustParsePath("/a")},                          // no assertion mode
+		{Op: OpAdd},                             // missing value
+		{Op: OpCopy, Path: MustParsePath("/a")}, // missing from
+		{Op: OpRemove, Path: MustParsePath("/a"), Value: mustValNoT(1)}, // value not valid on remove
+		{Op: OpTest, Path: MustParsePath("/a")},                         // no assertion mode
 		{Op: OpTest, Path: MustParsePath("/a"), Value: mustValNoT(1),
 			Absent: true}, // two assertion modes
 		{Op: OpAdd, Path: MustParsePath("/a"), Value: mustValNoT(1),

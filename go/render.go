@@ -432,7 +432,11 @@ func renderMemberLine(margin byte, seg Segment, v Value) string {
 	case SegKey:
 		text = escapeKey(seg.Name) + ": " + renderValueText(v)
 	case SegComment:
-		text = "# " + valueText(v)
+		body, ok := commentTextOf(v)
+		if !ok {
+			body = valueText(v)
+		}
+		text = "# " + body
 	default:
 		// Sequence element (scalar or keyed flow object) and the synthetic
 		// container-add marker both render as a bare value line.

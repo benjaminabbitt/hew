@@ -56,6 +56,27 @@ func TestApplyInPlaceDefault(t *testing.T) {
 	}
 }
 
+// TestApplyDispatchesJSONCTargets covers the §8.2 binding's wiring: a jsonc
+// target routes to hewjsonc, comments and all, rather than to the JSON
+// applier that would refuse them.
+func TestApplyDispatchesJSONCTargets(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.jsonc", "{\n  // keep me\n  \"port\": 8080\n}\n")
+	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- target.jsonc format=jsonc\n\n@@ / @@\n"+
+		"  // keep me\n- port: 8080\n+ port: 9090\n")
+	exit, _, stderr := run(t, dir, "apply", "patch.hew")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "target.jsonc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "{\n  // keep me\n  \"port\": 9090\n}\n" {
+		t.Fatalf("jsonc target not applied byte-preservingly: %q", got)
+	}
+}
+
 func TestApplyDryRunWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	original := `{
