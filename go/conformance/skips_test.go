@@ -11,12 +11,12 @@ import "github.com/hew-format/hew/internal/harness"
 // end-state gate (`just corpus-go-strict`, HEW_CORPUS_NO_SKIPS=1) turns
 // every match into a failure.
 //
-// P2 ships: the notation parser and renderer (format-agnostic), and ONE
-// applier — JSON (§8.1) — plus a CLI `apply` that dispatches to it. Every
-// other format's applier, the differ (P4), git source resolution, and the
-// resolved-op-list projection (Resolve, §9.2 — needed by --ops and by
-// --record's resolved transforms) are out of scope and skipped explicitly
-// below, never silently.
+// P2 shipped the notation parser and renderer (format-agnostic) and the JSON
+// applier (§8.1); P3 adds the YAML applier (§8.3) and the CLI's dispatch to
+// it. The remaining formats' appliers, the differ (P4), git source
+// resolution, and the resolved-op-list projection (Resolve, §9.2 — needed by
+// --ops and by --record's resolved transforms) are out of scope and skipped
+// explicitly below, never silently.
 var skipRules = []harness.SkipRule{
 	{Case: "markdown/*", Seam: "*", Reason: "deferred: Markdown backend gated on spec §8.7/O29 evaluation (severable family)"},
 
