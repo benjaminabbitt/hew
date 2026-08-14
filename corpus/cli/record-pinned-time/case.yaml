@@ -1,0 +1,31 @@
+name: cli/record-pinned-time
+seams: [cli]
+kind: cli
+format: json
+argv: ["apply", "-i", "--record", "out.hewt", "patch.hew"]
+env:
+  HEW_APPLIED_AT: "2026-08-14T09:31:07Z"
+exit: 0
+expected: expected.json
+expected_record: expected-record.hewt
+record_digest_fields: [patch.digest, targets.0.before, targets.0.after]
+ops: [OP-16]
+why: |
+  RULED O37. Every other field of an application record is a function of its
+  inputs; `applied_at` was the one wall clock, and it made a deterministic
+  artifact differ on every run — which breaks exactly the callers most likely to
+  keep records, a build that commits them and a test that pins one. With
+  HEW_APPLIED_AT set, the record's applied_at is that instant and nothing else.
+
+  This case INVERTS the runner's normal rule that a record fixture must not pin
+  applied_at. Everywhere else, a fixture that pins the clock is itself the
+  error; here the pin IS the assertion, so applied_at becomes an ordinary
+  compared field and any other instant is a failure. The runner still requires
+  it to be RFC 3339 UTC, and compares the normalized RFC 3339 rendering, so the
+  YAML spelling (quoted string or bare timestamp) stays the implementation's
+  choice exactly as §9.7 already allows.
+
+  `env:` may only carry inputs the spec names as environment-readable —
+  HEW_APPLIED_AT and SOURCE_DATE_EPOCH (§9.7, Appendix B.1). A corpus that could
+  reach any environment variable could pin behaviour the spec never promised.
+spec: "§9.7, §13.4, Appendix A.8, Appendix B.1"

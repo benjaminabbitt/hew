@@ -1,6 +1,6 @@
 hew: 1
 
---- new.tf format=hcl
+--- old.tf format=hcl
 
 @@ /terraform @@
 - required_version = ">= 1.6"

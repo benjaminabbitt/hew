@@ -1,0 +1,22 @@
+name: cli/diff-empty-output
+seams: [cli]
+kind: cli
+format: yaml
+argv: ["diff", "config.yaml", "config.yaml"]
+exit: 0
+stdout: expected.hew
+target_unchanged: true
+why: |
+  RULED O38. Two identical inputs produce a PREAMBLE-ONLY patch — `hew: 1`, a
+  `--- ` target line, zero hunks — on stdout, and exit 0. Not zero bytes: zero
+  bytes is a file `hew apply` then refuses as HEW001 (§10.2), which would turn
+  "nothing changed" into an error one command later, and a tool whose exit
+  contract is honest cannot have a silent mode flip like that.
+
+  Diffing a file against itself is the shortest true statement of "identical
+  inputs", and it also pins O39's label from the degenerate direction: with old
+  and new the same descriptor, the `--- ` line can only name that file.
+
+  cli/apply-no-hunks-noop takes this exact output as its input, which is the
+  composition the ruling exists to protect.
+spec: "§9.4-R8, §10.2, Appendix B.2.2"

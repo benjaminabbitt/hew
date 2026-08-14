@@ -53,7 +53,7 @@ first three seams from one set of fixtures.
 | `target.<ext>` | `apply-ir`, `e2e` | The input document, byte-exact. |
 | `expected.<ext>` | success cases | The expected output, compared **byte for byte**. |
 | `expected-ops.json` | optional | The *resolved* RFC 6901 op list, for interop pinning. |
-| `old.*` / `new.*` / `expected.hew` | `diff` | The differ's inputs and output. |
+| `old.*` / `new.*` / `expected.hew` | `diff` | The differ's inputs and output. `expected.hew`'s `--- ` line names **`old.*`** — the patch applies to old (spec §9.4-R7, ruling O39). |
 
 ## Manifest fields
 
@@ -74,7 +74,21 @@ Error cases add `error` (the code), `error_seam` (which component must raise it)
 have refused.
 
 CLI cases add `argv`, `exit`, and optionally `stdout` / `stderr_contains` /
-`target_unchanged`.
+`target_unchanged` / `expected` / `expected_targets` / `targets_unchanged` /
+`no_files_created` / `expected_record` / `record_digest_fields` / `requires` / `env`.
+
+**`env:`** pins the environment of the run, and is deliberately restricted to the two
+variables the spec names as environment-readable — `HEW_APPLIED_AT` and `SOURCE_DATE_EPOCH`
+(spec §9.7, ruling O37). Anything else is a corpus error: a corpus that could reach any
+environment variable could pin behaviour the spec never promised. A case that pins the clock
+this way also inverts the record rule below.
+
+**`expected_record` / `record_digest_fields`.** A record fixture cannot pin a digest or a wall
+clock, and the runner does not ignore either — it *recomputes* each named digest from the
+case's own fixture bytes and requires the record to have got it right, and it requires
+`applied_at` to be present and RFC 3339 UTC. The one exception is a case that sets
+`HEW_APPLIED_AT` through `env:`: there the fixture pins `applied_at` and a different instant
+is a failure, because that is the assertion.
 
 ## Runner obligations
 
@@ -103,6 +117,12 @@ conformant runner must carry one with three properties:
 3. **`HEW_CORPUS_NO_SKIPS=1` disallows the registry entirely** — every case a rule would have
    skipped instead fails. This is the end-state gate, and an implementation is conformant when
    it passes under it (`just corpus-go-strict`).
+
+Ratified-but-unbuilt behaviour rides the same mechanism. When a ruling lands before its
+implementation, the case is added **first** and a rule records that it is red because the
+ruling is newer than the code — reason text naming the ruling, so the registry reads as a list
+of promises outstanding rather than a list of tests that happen to fail. The two ratchets do
+the rest.
 
 The `markdown/*` rule is the one entry expected to outlive the milestones: it is gated on
 spec §8.7 / O29, not on work in progress.

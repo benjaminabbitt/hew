@@ -6,4 +6,8 @@ ops: [OP-01, OP-31]
 why: |
   RT1 for JSONC, including a comment added alongside the member it documents —
   the capability no surveyed patch format has.
+
+  Ruling O39: the `--- ` line names the OLD side, not the new one. The patch
+  applies to old — which is literally what this case's apply-ir and e2e seams
+  do with it — so naming new.* named a file the applier never opens.
 spec: "§9.4, §13.5"

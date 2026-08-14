@@ -8,4 +8,8 @@ why: |
   byte for byte. Also pins the default context radius of 1 sibling (§9.4-R2) —
   `name` appears as context because it neighbours a change, `keep` does not
   because it neighbours nothing.
+
+  Ruling O39: the `--- ` line names the OLD side, not the new one. The patch
+  applies to old — which is literally what this case's apply-ir and e2e seams
+  do with it — so naming new.* named a file the applier never opens.
 spec: "§9.4, §13.5"

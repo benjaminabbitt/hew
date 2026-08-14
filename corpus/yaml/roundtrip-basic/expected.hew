@@ -1,6 +1,6 @@
 hew: 1
 
---- new.yaml format=yaml
+--- old.yaml format=yaml
 
 @@ /server @@
 - host: localhost

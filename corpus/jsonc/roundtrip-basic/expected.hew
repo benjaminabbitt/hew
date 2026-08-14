@@ -1,6 +1,6 @@
 hew: 1
 
---- new.jsonc format=jsonc
+--- old.jsonc format=jsonc
 
 @@ /server @@
 - "timeout": 30

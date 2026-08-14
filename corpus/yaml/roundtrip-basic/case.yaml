@@ -8,4 +8,8 @@ why: |
   determinism (§9.4-R1), the default context radius (§9.4-R2), and address
   preference — the differ must emit `name=github` context for the keyed array,
   not an index (§9.4-R4).
+
+  Ruling O39: the `--- ` line names the OLD side, not the new one. The patch
+  applies to old — which is literally what this case's apply-ir and e2e seams
+  do with it — so naming new.* named a file the applier never opens.
 spec: "§9.4, §13.5"

@@ -1,0 +1,32 @@
+name: cli/apply-reversal
+seams: [cli]
+kind: cli
+format: yaml
+argv: ["apply", "-i", "--reversal", "target.yaml.undo.hew", "patch.hew"]
+exit: 0
+expected: expected.yaml
+expected_targets:
+  target.yaml.undo.hew: undo.hew
+ops: [OP-01]
+why: |
+  RULED O40. With `--reversal`, a successful apply ALSO writes the reversal
+  patch: diff(after -> before), a real `.hew` file with real context lines at
+  the §9.4-R2 radius, produced by the same differ and renderer `hew diff` uses.
+  Two assertions, both byte-exact: the target was mutated (expected.yaml), and
+  the reversal artifact is what the ruling says it is (undo.hew).
+
+  The file name here is spelled out rather than derived, because argv must be
+  unambiguous; it is deliberately the same `<target>.undo.hew` that Appendix B.1
+  documents as the default, so the fixture doubles as the naming example.
+
+  Its `--- ` line names target.yaml, per O39: the reversal patch's old side IS
+  the post-apply target, so that is the file it applies to.
+
+  NOT ASSERTED HERE, and stated instead: applying `target.yaml.undo.hew`
+  restores target.yaml to its pre-apply bytes. That needs two invocations and
+  the manifest's argv is one, so the claim is prose until the corpus grows a
+  multi-invocation cli form (§13.4). The identity it rests on is already pinned
+  per format by RT1 (§13.5) — this is that same composition with the arguments
+  exchanged — and the reversal is not a backup: it refuses to apply to a file
+  that has drifted since, which is the whole difference (§10.5).
+spec: "§9.7, §10.5, Appendix A.8, Appendix B.1"
