@@ -116,6 +116,40 @@ func TestNoMatchDetailCountsTheElementsThatMiss(t *testing.T) {
 	}
 }
 
+// TestMatchSpellingSuggestsAnAddressThatResolves pins the rule a suggestion
+// has to keep: the address it proposes must select the value it was built
+// from. A string is spelled quoted, so the comparison's type is visible where
+// the address is read (O42, and the same choice `MatchKey` makes).
+func TestMatchSpellingSuggestsAnAddressThatResolves(t *testing.T) {
+	doc := mustDoc(t, "items:\n  - id: \"8080\"\n    v: 1\n  - id: plain\n    v: 2\n  - id: 3\n    v: 3\n")
+	for _, tc := range []struct {
+		yaml, want string
+	}{
+		{`"8080"`, `"8080"`},
+		{`plain`, `"plain"`},
+		{`3`, `3`},
+		{`true`, `true`},
+		{`null`, `null`},
+	} {
+		d := mustDoc(t, "v: "+tc.yaml+"\n")
+		node, _ := d.Root().Member("v")
+		got, ok := MatchSpelling(node.Value())
+		if !ok || got != tc.want {
+			t.Errorf("MatchSpelling(%s) = %q, %v; want %q", tc.yaml, got, ok, tc.want)
+		}
+	}
+	// The suggestion is an address, so it has to work as one.
+	for _, id := range []string{`"8080"`, `"plain"`, "3"} {
+		p := MustParsePath("/items/id=" + id)
+		if _, err := Resolve(tlOf(Transform{Op: OpRemove, Path: p}), doc); err != nil {
+			t.Errorf("the suggested address %s does not resolve: %v", p, err)
+		}
+	}
+	if _, ok := MatchSpelling(Value{}); ok {
+		t.Error("the absent value has no key-match spelling")
+	}
+}
+
 // TestScalarOfProjectsDocumentValues pins the projection the diagnostic spells
 // its miss with: a decoded document value has to come back as the scalar an
 // ADDRESS would use for it, or the suggested spelling would be wrong.

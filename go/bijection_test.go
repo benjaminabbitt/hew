@@ -143,9 +143,9 @@ func TestCanonicalRenderingQuotesExactlyTheEnumeratedClasses(t *testing.T) {
 	// its SHAPE, so "08080" is quoted even though RFC 6901's index production
 	// would not have taken it.
 	quoted := []string{"", "-", "*", "8080", "0", "007", "08080", "@scope/pkg", "#0", "#t",
-		"# Setup", `"q"`, "code:0", "notablock:0", "opt?", "a[1]"}
+		"# Setup", `"q"`, "code:0", "notablock:0", "a1:0", "_x-y:12", "opt?", "a[1]", "a[12]"}
 	bare := []string{"server", "left-pad", "8080x", "a/b", "a~b", "a=b",
-		"para:x", "a[]", "-x", "true", "1.0", "{}"}
+		"para:x", "a[]", "a[1", "0:0", "1a:0", ":0", "a:", "a:b", "-x", "true", "1.0", "{}"}
 	for _, k := range quoted {
 		if got := (Segment{Kind: SegKey, Name: k}).String(); !strings.HasPrefix(got, `"`) {
 			t.Errorf("key %q renders bare as %q; §4.1 requires the quoted form", k, got)
