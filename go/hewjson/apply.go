@@ -227,23 +227,10 @@ func (d *doc) nodeValue(n *jNode) (hew.Value, error) {
 }
 
 // scalarToValue converts a Hew path segment's identity Scalar into a
-// hew.Value, for comparing it against a decoded target value via Equal.
-func scalarToValue(s hew.Scalar) hew.Value {
-	tag := "!!str"
-	switch s.Kind {
-	case hew.ScalarBool:
-		tag = "!!bool"
-	case hew.ScalarNull:
-		tag = "!!null"
-	case hew.ScalarNumber:
-		if strings.ContainsAny(s.Text, ".eE") {
-			tag = "!!float"
-		} else {
-			tag = "!!int"
-		}
-	}
-	return hew.NodeValue(&yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: s.Text})
-}
+// hew.Value, for comparing it against a decoded target value via Equal. The
+// conversion is the core's (hew.Scalar.Value), so that this binding's
+// matching and hew.Resolve's key-match projection cannot drift apart.
+func scalarToValue(s hew.Scalar) hew.Value { return s.Value() }
 
 // resolveFull resolves a full path against the document root, translating a
 // resolveErr into the corresponding hewerr.Error at the given patch line.

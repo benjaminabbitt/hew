@@ -34,12 +34,6 @@ var skipRules = []harness.SkipRule{
 	{Case: "jsonc/roundtrip-basic", Seam: "apply-ir", Reason: "P3: hewjsonc applier not yet implemented"},
 	{Case: "jsonc/roundtrip-basic", Seam: "e2e", Reason: "P3: hewjsonc applier not yet implemented"},
 
-	// --ops and --record's resolved transforms both need Resolve (§9.2,
-	// Appendix A.1's abstract -> RFC 6901 projection against a specific
-	// target), not implemented in P2.
-	{Case: "cli/apply-ops-output", Seam: "cli", Reason: "P3: Resolve (§9.2) not implemented; --ops prints the resolved op list"},
-	{Case: "cli/apply-record", Seam: "cli", Reason: "P3: Resolve (§9.2) not implemented; the record's targets[].transforms is the resolved form"},
-
 	// git-anchor source resolution (Appendix A.7) and the differ are both P4.
 	{Case: "cli/diff-git-anchor", Seam: "cli", Reason: "M11: differ / git source resolution not yet implemented (P4)"},
 

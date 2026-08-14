@@ -205,6 +205,313 @@ func TestNoArgsExitsTwo(t *testing.T) {
 	}
 }
 
+const targetServers = `{
+  "servers": [
+    { "name": "github", "command": "npx" }
+  ]
+}
+`
+
+const patchKeyMatch = `hew: 1
+
+--- target.json format=json
+
+@@ /servers/name=github @@
+- "command": "npx"
++ "command": "npx-18"
+`
+
+func TestApplyOpsPrintsResolvedFormAndWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", targetServers)
+	writeFile(t, dir, "patch.hew", patchKeyMatch)
+	exit, stdout, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+	want := `[
+  { "op": "test", "path": "/servers/0/command", "value": "npx" },
+  { "op": "replace", "path": "/servers/0/command", "value": "npx-18" }
+]
+`
+	if stdout != want {
+		t.Fatalf("stdout:\n%s\nwant:\n%s", stdout, want)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "target.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != targetServers {
+		t.Fatalf("--ops must write no target: %s", got)
+	}
+}
+
+func TestApplyOpsMissingTargetExitsTwo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "patch.hew", patchKeyMatch)
+	exit, stdout, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 2 {
+		t.Fatalf("want exit 2, got %d", exit)
+	}
+	if stdout != "" {
+		t.Fatalf("nothing may reach stdout on failure: %q", stdout)
+	}
+	if !strings.Contains(stderr, "HEW003") {
+		t.Fatalf("stderr: %q", stderr)
+	}
+}
+
+func TestApplyOpsUnknownFormatExitsTwo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.xyz", "whatever")
+	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- target.xyz\n\n@@ / @@\n+ a: 1\n")
+	exit, _, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 2 || !strings.Contains(stderr, "HEW021") {
+		t.Fatalf("want exit 2 with HEW021, got %d: %q", exit, stderr)
+	}
+}
+
+func TestApplyOpsUnparseableTargetExitsTwo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", "{oops")
+	writeFile(t, dir, "patch.hew", patchKeyMatch)
+	exit, _, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 2 || !strings.Contains(stderr, "HEW002") {
+		t.Fatalf("want exit 2 with HEW002, got %d: %q", exit, stderr)
+	}
+	if !strings.Contains(stderr, "target.json") {
+		t.Fatalf("the diagnostic must name the target: %q", stderr)
+	}
+}
+
+// --ops resolves addresses; a path that names nothing cannot be projected,
+// and that is a did-not-apply (exit 1), not trouble.
+func TestApplyOpsUnresolvablePathExitsOne(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", targetServers)
+	writeFile(t, dir, "patch.hew", `hew: 1
+
+--- target.json format=json
+
+@@ /servers/name=ghost @@
+- "command": "npx"
++ "command": "npx-18"
+`)
+	exit, _, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 1 || !strings.Contains(stderr, "HEW013") {
+		t.Fatalf("want exit 1 with HEW013, got %d: %q", exit, stderr)
+	}
+}
+
+// A stale target still resolves: --ops reports addresses, not an apply.
+func TestApplyOpsDoesNotEvaluateAssertions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", `{
+  "servers": [
+    { "name": "github", "command": "drifted" }
+  ]
+}
+`)
+	writeFile(t, dir, "patch.hew", patchKeyMatch)
+	exit, stdout, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+	if !strings.Contains(stdout, `"path": "/servers/0/command"`) {
+		t.Fatalf("stdout: %q", stdout)
+	}
+}
+
+func TestApplyOpsFromTransformsInput(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", targetServers)
+	writeFile(t, dir, "move.hewt", `hew-transforms: 1
+target: target.json
+format: json
+transforms:
+  - op: copy
+    from: /servers/name=github/command
+    path: /servers/0/alias
+`)
+	exit, stdout, stderr := run(t, dir, "apply", "--ops", "--transforms", "move.hewt")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+	want := `[
+  { "op": "copy", "from": "/servers/0/command", "path": "/servers/0/alias" }
+]
+`
+	if stdout != want {
+		t.Fatalf("stdout:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestApplyRecordHoldsTheResolvedForm(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", `{
+  "mcpServers": [
+    { "name": "ctxloom", "command": "ctxloom" }
+  ]
+}
+`)
+	writeFile(t, dir, "patch.hew", `hew: 1
+
+--- target.json format=json
+
+@@ /mcpServers @@
+  { "name": "ctxloom" }
++ { "name": "taskloom", "command": "taskloom" }
+`)
+	exit, _, stderr := run(t, dir, "apply", "-i", "--record", "out.hewt", "patch.hew")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+	got := string(readBack(t, dir, "out.hewt"))
+	for _, want := range []string{
+		"hew-record: 1\n",
+		"applied_at: ",
+		"source: patch.hew",
+		"digest: sha256:",
+		"path: /mcpServers/0/name",
+		"path: /mcpServers/1",
+		"committed: true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("record missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "name=ctxloom") {
+		t.Fatalf("the record holds the RESOLVED list, not the abstract one (§9.7):\n%s", got)
+	}
+}
+
+// §9.7's record names one patch source and one digest of it; several patches
+// have no spelling there, so the combination is refused rather than guessed.
+func TestApplyRecordWithSeveralPatchesIsAUsageError(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", targetServers)
+	writeFile(t, dir, "patch.hew", patchKeyMatch)
+	writeFile(t, dir, "other.hew", patchKeyMatch)
+	exit, _, stderr := run(t, dir, "apply", "--record", "out.hewt", "patch.hew", "other.hew")
+	if exit != 2 {
+		t.Fatalf("want exit 2, got %d", exit)
+	}
+	if !strings.Contains(stderr, "single patch source") {
+		t.Fatalf("stderr: %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out.hewt")); err == nil {
+		t.Fatal("a refused invocation must write no record")
+	}
+}
+
+// Every assertion mode and the copy op survive into the record's resolved
+// list; only the qualifiers RFC 6901 cannot spell are consumed.
+func TestApplyRecordCarriesEveryAssertionMode(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", targetServers)
+	writeFile(t, dir, "all.hewt", `hew-transforms: 1
+target: target.json
+format: json
+transforms:
+  - op: test
+    path: /servers/name=github/tls
+    absent: true
+  - op: test
+    path: /servers
+    count: 1
+  - op: test
+    path: /servers
+    kind: seq
+  - op: test
+    path: /servers/0
+    count: 2
+    exhaustive: true
+  - op: copy
+    from: /servers/name=github/command
+    path: /servers/0/alias
+    anchor: fork
+`)
+	exit, _, stderr := run(t, dir, "apply", "--record", "out.hewt", "--transforms", "all.hewt")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+	got := string(readBack(t, dir, "out.hewt"))
+	for _, want := range []string{
+		"source: all.hewt",
+		"path: /servers/0/tls\n",
+		"absent: true",
+		"count: 1",
+		"kind: seq",
+		"exhaustive: true",
+		"op: copy",
+		"from: /servers/0/command",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("record missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "anchor") {
+		t.Fatalf("a format-only qualifier must be consumed by resolution (§9.2):\n%s", got)
+	}
+}
+
+// An `? absent` on a key-match that matches nothing is satisfied by the
+// applier and has no RFC 6901 pointer, so `--record` cannot record it. The
+// run must then fail with the target untouched, never edit-then-fail.
+func TestApplyRecordThatCannotBeResolvedLeavesTheTargetUntouched(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.json", targetServers)
+	writeFile(t, dir, "patch.hew", `hew: 1
+
+--- target.json format=json
+
+@@ /servers/name=github @@
+? absent /servers/name=ghost
+- "command": "npx"
++ "command": "npx-18"
+`)
+	exit, _, stderr := run(t, dir, "apply", "--record", "out.hewt", "patch.hew")
+	if exit != 1 || !strings.Contains(stderr, "HEW013") {
+		t.Fatalf("want exit 1 with HEW013, got %d: %q", exit, stderr)
+	}
+	if got := string(readBack(t, dir, "target.json")); got != targetServers {
+		t.Fatalf("target must be untouched (§10.5):\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out.hewt")); err == nil {
+		t.Fatal("no record may be written for a run that failed")
+	}
+	// Without --record the same patch applies: the failure is the record's,
+	// and it is not invented for runs that do not ask for one.
+	writeFile(t, dir, "target.json", targetServers)
+	if exit, _, stderr = run(t, dir, "apply", "patch.hew"); exit != 0 {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	}
+}
+
+// detectFormat knows the extension, but no binding exists for it yet: that is
+// HEW021 too, and by a different branch than an undetectable extension.
+func TestApplyOpsKnownFormatWithoutABindingExitsTwo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "target.yaml", "server:\n  host: localhost\n")
+	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- target.yaml\n\n@@ /server @@\n- host: localhost\n+ host: elsewhere\n")
+	exit, _, stderr := run(t, dir, "apply", "--ops", "patch.hew")
+	if exit != 2 || !strings.Contains(stderr, "HEW021") {
+		t.Fatalf("want exit 2 with HEW021, got %d: %q", exit, stderr)
+	}
+	if !strings.Contains(stderr, `no binding for format "yaml"`) {
+		t.Fatalf("stderr should name the missing binding: %q", stderr)
+	}
+}
+
+func readBack(t *testing.T, dir, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestApplyRecordWritesFile(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "target.json", `{

@@ -74,9 +74,11 @@ type Manifest struct {
 	ExpectedTargets  map[string]string `yaml:"expected_targets"` // target file -> expected fixture
 	NoFilesCreated   []string          `yaml:"no_files_created"` // globs that must match nothing after the run
 
-	// Application-record cli cases (spec §9.7). Asserting these needs
-	// digest recomputation over the fixtures, which is M10 work; until then
-	// a case declaring expected_record FAILS rather than passing vacuously.
+	// Application-record cli cases (spec §9.7). The fields named by
+	// record_digest_fields are not pinned by the fixture: the runner
+	// RECOMPUTES each digest from the case's own fixture bytes and asserts
+	// the record got it right (CheckRecord), so excluding them from the
+	// structural comparison costs no assertion.
 	ExpectedRecord     string   `yaml:"expected_record"`
 	RecordDigestFields []string `yaml:"record_digest_fields"`
 }
