@@ -665,3 +665,58 @@ func TestMemberLookup(t *testing.T) {
 		t.Fatal("a nil node has no members")
 	}
 }
+
+// TestDiffRefusesUnspellableKey is the live defect, at the seam it enters
+// through: the differ is the one producer that builds paths out of RAW
+// DOCUMENT KEYS, and a package.json with a scoped dependency is enough to hand
+// it "@scope/pkg". The bare spelling of that key, "@scope~1pkg", re-reads as a
+// MARKER segment, so the patch would have addressed something else entirely.
+// Refuse, do not misapply (§9.3).
+func TestDiffRefusesUnspellableKey(t *testing.T) {
+	old := dmap("dependencies", dmap(
+		"left-pad", dstr("1.0.0"),
+		"@scope/pkg", dmap("version", dstr("1.0.0")),
+	))
+	new := dmap("dependencies", dmap(
+		"left-pad", dstr("1.0.0"),
+		"@scope/pkg", dmap("version", dstr("1.0.0"), "resolved", dstr("https://example.test/pkg")),
+	))
+
+	tl, err := DiffTrees(old, new, FormatJSON, DiffOptions{Target: "package.json"})
+	if err == nil {
+		t.Fatalf("the differ produced a patch addressing an unspellable key:\n%s", summarize(tl))
+	}
+	if len(tl.Transform) != 0 {
+		t.Errorf("a refused diff must return no transforms, got %d", len(tl.Transform))
+	}
+	he, ok := hewerr.As(err)
+	if !ok {
+		t.Fatalf("want a *hewerr.Error, got %T: %v", err, err)
+	}
+	if he.Code != hewerr.CodeInexpressible {
+		t.Errorf("code = %s, want HEW020 inexpressible", he.Code)
+	}
+	if he.Component != hewerr.ComponentDiffer {
+		t.Errorf("component = %s, want differ: the key entered the IR here", he.Component)
+	}
+	if he.Target != "package.json" {
+		t.Errorf("target = %q, want the file the key lives in", he.Target)
+	}
+	if !strings.Contains(he.Detail, "@scope/pkg") {
+		t.Errorf("detail %q does not name the offending key", he.Detail)
+	}
+	if !strings.Contains(he.Detail, "PR #1") {
+		t.Errorf("detail %q does not point at the ratified-pending quoted-key form", he.Detail)
+	}
+}
+
+// TestDiffAcceptsSpellableKeys is the guard's other half at the differ seam:
+// an ordinary document still diffs.
+func TestDiffAcceptsSpellableKeys(t *testing.T) {
+	old := dmap("dependencies", dmap("left-pad", dstr("1.0.0")))
+	new := dmap("dependencies", dmap("left-pad", dstr("2.0.0")))
+	tl := diffOK(t, old, new, DiffOptions{Target: "package.json"})
+	if len(tl.Transform) == 0 {
+		t.Fatal("a changed version must produce transforms")
+	}
+}

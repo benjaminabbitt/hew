@@ -102,7 +102,16 @@ func DiffTrees(old, new *DiffNode, format FormatID, opt DiffOptions) (TransformL
 	if err := d.root(old, new); err != nil {
 		return TransformList{}, err
 	}
-	return TransformList{Target: opt.Target, Format: format, Transform: d.out}, nil
+	tl := TransformList{Target: opt.Target, Format: format, Transform: d.out}
+	// The differ is the one producer that builds paths from RAW DOCUMENT KEYS,
+	// so it is where an unspellable key enters the IR: a package.json with a
+	// "@scope/pkg" dependency is enough. Checking here rather than leaving it
+	// to the emitting seam costs one walk and buys a diagnostic that names the
+	// file the key actually lives in (§9.4-R6's "never silently degrade").
+	if err := tl.checkSpellable(hewerr.ComponentDiffer); err != nil {
+		return TransformList{}, err
+	}
+	return tl, nil
 }
 
 type differ struct {

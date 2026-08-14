@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // RenderOptions controls rendering (Appendix A.3).
@@ -69,6 +71,20 @@ var ErrInexpressible = errors.New("hew: transform not expressible in mirror gram
 // hunk it came from).
 func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	if err := tl.Validate(); err != nil {
+		return nil, err
+	}
+	// The hunk headers below are spelled from these paths; refuse the ones v0
+	// cannot spell before writing one down (§9.3).
+	//
+	// Deliberately conservative: a mutation's LAST segment often goes out as a
+	// body fragment line instead ("@scope/pkg": …), a spelling the fragment
+	// parser reads back correctly, so a few of these lists would have rendered
+	// cleanly. Which ones is a function of the change's shape — scalar or
+	// container — and the same list emitted as .hewt is corrupt either way. A
+	// guard whose verdict depended on the shape would be a guard nobody could
+	// reason about, so the whole class is refused until the quoted-key form
+	// (PR #1) makes the question moot.
+	if err := tl.checkSpellable(hewerr.ComponentRenderer); err != nil {
 		return nil, err
 	}
 	groups, order, err := groupByAnchor(tl.Transform)

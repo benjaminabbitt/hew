@@ -344,6 +344,69 @@ func (p Path) String() string {
 	return b.String()
 }
 
+// --- spellability -----------------------------------------------------------
+//
+// A Path is data first and notation second: NewPath will build a key segment
+// for any string, but the v0 §4 grammar cannot SPELL every string. The key
+// "@scope/pkg" prints as "@scope~1pkg" and reads back as a marker; "8080"
+// reads back as an index; "-" as the append position. Rendering such a path
+// into a .hew or .hewt file emits an address that means something else, which
+// §9.3 forbids: refuse, never misapply. The predicates below are how the
+// emitting seams tell the two apart, and they are deliberately defined by the
+// round trip itself rather than by a second, drift-prone copy of the grammar.
+//
+// Interim: a quoted-key segment form is ratified-pending (PR #1). When it
+// lands, these keys become spellable and the refusals below stop firing on
+// their own — the predicate is the round trip, so it follows the grammar.
+
+// spellable reports whether the segment survives a print/parse round trip:
+// re-reading its §4 spelling yields an Equal segment. It is a segment-local
+// judgement — see Path.spellable for what only the whole path can see.
+func (s Segment) spellable() bool {
+	got, err := parseSegment(s.String(), true)
+	return err == nil && s.Equal(got)
+}
+
+// spellable reports whether the whole path survives the round trip. It is
+// stricter than every segment being spellable on its own: a single empty key
+// prints "/" and reads back as the document root, and a "?" on a non-final
+// segment is refused outright (§4.4) — neither is visible to one segment. The
+// absent (zero) path is spellable because nothing is emitted for it.
+func (p Path) spellable() bool {
+	if p.IsZero() {
+		return true
+	}
+	got, err := ParsePath(p.String())
+	return err == nil && p.Equal(got)
+}
+
+// firstUnspellable returns the segment of p a diagnostic should blame, and
+// true, for a path the v0 §4 grammar cannot spell. It reports false for a path
+// that round-trips whole, the absent path included — a segment that would not
+// survive on its own is not a problem if the path around it rescues it, which
+// is why the whole-path verdict is taken first and the blame hunted second.
+func (p Path) firstUnspellable() (Segment, bool) {
+	if p.spellable() {
+		return Segment{}, false
+	}
+	for i := range p.segs {
+		if !p.segs[i].spellable() {
+			return p.segs[i], true
+		}
+	}
+	// Every segment survives alone, so the failure is POSITIONAL: a lone empty
+	// key printing "/", or a "?" before the last segment. Blame the shortest
+	// prefix that stops round-tripping.
+	for i := 1; i <= len(p.segs); i++ {
+		if !(Path{origin: p.origin, segs: p.segs[:i]}).spellable() {
+			return p.segs[i-1], true
+		}
+	}
+	// Unreachable: p is its own longest prefix and is unspellable by the check
+	// at the top, so the loop above always returns.
+	return Segment{}, true
+}
+
 // ParsePath parses a path in the full §4 grammar, including the IR-only `[n]`
 // ordinal selector. Malformed input is HEW001 at the parser component.
 func ParsePath(s string) (Path, error) { return parsePath(s, true) }

@@ -120,6 +120,30 @@ func TestDiffContextFlowsThrough(t *testing.T) {
 	}
 }
 
+// TestDiffOfScopedPackageJSONIsRefused is the reported defect end to end: a
+// real package.json whose scoped dependency gains a member. The key
+// "@scope/pkg" has no v0 §4 spelling — its bare form re-reads as a marker
+// segment — so `hew diff` must say so by name instead of emitting a patch that
+// addresses something else (§9.3). A quoted-key segment form is
+// ratified-pending (PR #1); this refusal is the honest behavior until then.
+func TestDiffOfScopedPackageJSONIsRefused(t *testing.T) {
+	old := `{"dependencies":{"left-pad":"1.0.0","@scope/pkg":{"version":"1.0.0"}}}`
+	new := `{"dependencies":{"left-pad":"1.0.0","@scope/pkg":{"version":"1.0.0","resolved":"https://example.test/pkg"}}}`
+
+	tl, err := Diff([]byte(old), []byte(new), hew.FormatJSON, hew.DiffOptions{Target: "package.json"})
+	if err == nil {
+		out, rerr := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative})
+		t.Fatalf("diff of a scoped dependency must be refused; got a patch instead:\n%s\n(render err: %v)", out, rerr)
+	}
+	he, ok := hewerr.As(err)
+	if !ok || he.Code != hewerr.CodeInexpressible || he.Component != hewerr.ComponentDiffer {
+		t.Fatalf("want HEW020 at the differ, got %v", err)
+	}
+	if he.Target != "package.json" || !strings.Contains(he.Detail, "@scope/pkg") {
+		t.Fatalf("the diagnostic must name the file and the key: %v", err)
+	}
+}
+
 func TestDiffKeyFieldsFlowThrough(t *testing.T) {
 	old := "m:\n  - slug: a\n    v: 1\n  - slug: b\n    v: 2\n"
 	new := "m:\n  - slug: a\n    v: 1\n  - slug: b\n    v: 2\n  - slug: c\n    v: 3\n"

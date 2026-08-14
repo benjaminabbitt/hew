@@ -64,6 +64,12 @@ func MarshalTransformStream(tls []TransformList) ([]byte, error) {
 		if err := tls[i].Validate(); err != nil {
 			return nil, err
 		}
+		// Every path in this document is about to become text; refuse the ones
+		// v0 cannot spell before writing an address that means something else.
+		// MarshalTransforms funnels through here, so it is guarded too.
+		if err := tls[i].checkSpellable(hewerr.ComponentRenderer); err != nil {
+			return nil, err
+		}
 		if err := enc.Encode(documentNode(tls[i])); err != nil {
 			return nil, irErr(tls[i].Target, "encoding .hewt: %v", err)
 		}
