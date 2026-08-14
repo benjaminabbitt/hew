@@ -318,7 +318,10 @@ func TestResolveAppendOnNonSequence(t *testing.T) {
 
 func TestResolveInexpressibleSegments(t *testing.T) {
 	doc := mustDoc(t, servers)
-	for _, p := range []string{`/"aws"`, "/## Install", "/code:0", "/@managed", "/#0"} {
+	// The extension-claimed forms (a Markdown heading, block or marker) are
+	// inexpressible for exactly the same reason and are covered in
+	// ext/markdown's suite, which is the build that has that grammar (§8.8).
+	for _, p := range []string{`/"aws"`, "/#0"} {
 		err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath(p)}), doc)
 		mustCode(t, err, hewerr.CodeInexpressible)
 		if !strings.Contains(err.Error(), "no RFC 6901 representation") {

@@ -22,7 +22,6 @@ func TestParsePathRoundTrip(t *testing.T) {
 		`/resource/"aws_instance"/"web"`,
 		"/mcpServers/name=ctxloom?",
 		"/server/tls?",
-		"/@ctxloom:context",
 		"/server/#0",
 		"/server/#t",
 	}
@@ -184,27 +183,25 @@ func TestSegmentSpellability(t *testing.T) {
 		{"label", Segment{Kind: SegLabel, Name: "aws"}, true},
 		{"empty label", Segment{Kind: SegLabel, Name: ""}, true},
 		{"label with a quote and a backslash", Segment{Kind: SegLabel, Name: `a"b\c`}, true},
-		{"heading", Segment{Kind: SegHeading, Level: 2, Name: "Setup"}, true},
-		{"heading with empty text", Segment{Kind: SegHeading, Level: 1, Name: ""}, true},
-		{"heading text containing a slash", Segment{Kind: SegHeading, Level: 3, Name: "a/b"}, true},
-		{"marker", Segment{Kind: SegMarker, Name: "ctxloom:context"}, true},
 		{"comment ordinal", Segment{Kind: SegComment, Index: 0}, true},
 		{"trailing comment", Segment{Kind: SegComment, Trailing: true}, true},
-		{"block", Segment{Kind: SegBlock, Block: BlockPara, Index: 2}, true},
 
 		// --- keys the v0 grammar cannot spell --------------------------------
 		// Every one of these is a key a real document can hold; what it
 		// re-reads as is the corruption this predicate exists to catch.
-		{"scoped npm package reads back as a marker", Segment{Kind: SegKey, Name: "@scope/pkg"}, false},
-		{"lone at-sign is not a legal segment", Segment{Kind: SegKey, Name: "@"}, false},
+		//
+		// These are the collisions with the CORE's own shapes. A key can also
+		// collide with a shape an extension claims — "@scope/pkg" re-reads as a
+		// Markdown marker — and those cases moved to ext/markdown's suite with
+		// the grammar that creates them (§8.8). This file registers no segment
+		// forms, so here "@scope/pkg" is an ordinary, spellable key: the guard
+		// follows the grammar the build actually has, which is the whole reason
+		// it is defined by a round trip rather than by a second copy of §4.
 		{"digit-only key reads back as an index", Segment{Kind: SegKey, Name: "8080"}, false},
 		{"zero key reads back as index zero", Segment{Kind: SegKey, Name: "0"}, false},
 		{"dash key reads back as the append token", Segment{Kind: SegKey, Name: "-"}, false},
 		{"hash-digit key reads back as a comment address", Segment{Kind: SegKey, Name: "#0"}, false},
 		{"hash-t key reads back as the trailing comment", Segment{Kind: SegKey, Name: "#t"}, false},
-		{"hash-space key reads back as a heading", Segment{Kind: SegKey, Name: "# Setup"}, false},
-		{"para-ordinal key reads back as a block", Segment{Kind: SegKey, Name: "para:0"}, false},
-		{"code-ordinal key reads back as a block", Segment{Kind: SegKey, Name: "code:12"}, false},
 		{"key ending in ? reads back as an optional flag", Segment{Kind: SegKey, Name: "opt?"}, false},
 		{"key ending in [n] reads back as an ordinal", Segment{Kind: SegKey, Name: "a[1]"}, false},
 		{"double-quoted key reads back as a label", Segment{Kind: SegKey, Name: `"quoted"`}, false},
@@ -213,9 +210,9 @@ func TestSegmentSpellability(t *testing.T) {
 		// --- non-key segments whose data v0 cannot spell ---------------------
 		{"negative index reads back as a key", Segment{Kind: SegIndex, Index: -1}, false},
 		{"negative comment ordinal reads back as a key", Segment{Kind: SegComment, Index: -1}, false},
-		{"level-zero heading reads back as a key", Segment{Kind: SegHeading, Level: 0, Name: "Setup"}, false},
-		{"nameless marker is not a legal segment", Segment{Kind: SegMarker, Name: ""}, false},
-		{"unknown block kind reads back as a key", Segment{Kind: SegBlock, Block: BlockKind("nope"), Index: 2}, false},
+		// An extension-claimed segment no linked extension claims: the token
+		// re-reads as whatever the core makes of it, here an ordinary key.
+		{"unclaimed extension token reads back as a key", Segment{Kind: SegExtension, Form: "heading", Raw: "# Setup"}, false},
 		{"non-JSON number reads back as a string", Segment{Kind: SegMatch, Name: "mask", Value: Scalar{Kind: ScalarNumber, Text: "0x1f"}}, false},
 		{"YAML-spelled boolean reads back as a string", Segment{Kind: SegMatch, Name: "on", Value: Scalar{Kind: ScalarBool, Text: "True"}}, false},
 		{"unquoted string 'true' reads back as a boolean", Segment{Kind: SegMatch, Name: "s", Value: Scalar{Kind: ScalarString, Text: "true"}}, false},
@@ -255,7 +252,7 @@ func TestPathSpellability(t *testing.T) {
 		// "?" is legal only on the last segment (§4.4) — also invisible to any
 		// single segment.
 		{"optional on a non-final segment", NewPath(Segment{Kind: SegKey, Name: "server", Optional: true}, Segment{Kind: SegKey, Name: "tls"}), false},
-		{"unspellable key in the middle", NewPath(Segment{Kind: SegKey, Name: "deps"}, Segment{Kind: SegKey, Name: "@scope/pkg"}, Segment{Kind: SegKey, Name: "version"}), false},
+		{"unspellable key in the middle", NewPath(Segment{Kind: SegKey, Name: "deps"}, Segment{Kind: SegKey, Name: "8080"}, Segment{Kind: SegKey, Name: "version"}), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,15 +293,15 @@ func TestAbsentPathIsSpellable(t *testing.T) {
 func TestFirstUnspellableNamesTheEarliestOffender(t *testing.T) {
 	p := NewPath(
 		Segment{Kind: SegKey, Name: "deps"},
-		Segment{Kind: SegKey, Name: "@scope/pkg"},
+		Segment{Kind: SegKey, Name: "-"},
 		Segment{Kind: SegKey, Name: "8080"},
 	)
 	seg, bad := p.firstUnspellable()
 	if !bad {
 		t.Fatal("path with two unspellable keys must be refused")
 	}
-	if seg.Name != "@scope/pkg" {
-		t.Fatalf("firstUnspellable() named %q, want the earliest offender @scope/pkg", seg.Name)
+	if seg.Name != "-" {
+		t.Fatalf(`firstUnspellable() named %q, want the earliest offender "-"`, seg.Name)
 	}
 
 	// Positional failures have no locally-broken segment, so attribution falls
@@ -341,7 +338,7 @@ func TestSpellFailureNamesTheCorruption(t *testing.T) {
 		seg  Segment
 		want string
 	}{
-		{"different kind", Segment{Kind: SegKey, Name: "@scope/pkg"}, "re-reads as a marker segment, not a key"},
+		{"different kind", Segment{Kind: SegKey, Name: "#0"}, "re-reads as a comment segment, not a key"},
 		{"same kind, different segment", Segment{Kind: SegKey, Name: "opt?"}, "re-reads as a different key segment"},
 		{"not a legal segment", Segment{Kind: SegKey, Name: `"unterminated`}, "is not a legal segment"},
 		{"positional", Segment{Kind: SegKey, Name: ""}, "does not survive in this position"},

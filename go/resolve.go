@@ -284,7 +284,7 @@ func (r *resolver) createPointer(path Path, line int) (string, error) {
 			"resolve: %s matches no element, and RFC 6901 has no index for a node that does not exist (§9.2)", last.String())
 	default:
 		return "", r.err(hewerr.CodeInexpressible, path.String(), line,
-			"resolve: a %s segment has no RFC 6901 representation (§9.2)", last.Kind)
+			"resolve: a %s segment has no RFC 6901 representation (§9.2)", last.describe())
 	}
 }
 
@@ -347,7 +347,7 @@ type stepErr struct {
 func (r *resolver) step(n Node, seg Segment) (string, Node, *stepErr) {
 	if seg.Ordinal != nil && seg.Kind != SegMatch {
 		return "", nil, &stepErr{inexpressible: true,
-			detail: fmt.Sprintf("an ordinal selector on a %s segment has no RFC 6901 projection (§9.2)", seg.Kind)}
+			detail: fmt.Sprintf("an ordinal selector on a %s segment has no RFC 6901 projection (§9.2)", seg.describe())}
 	}
 	switch seg.Kind {
 	case SegKey:
@@ -382,7 +382,7 @@ func (r *resolver) step(n Node, seg Segment) (string, Node, *stepErr) {
 		// Labels, headings, blocks, markers and comment addresses: §9.2's
 		// "no RFC 6902 representation at all".
 		return "", nil, &stepErr{inexpressible: true,
-			detail: fmt.Sprintf("a %s segment has no RFC 6901 representation (§9.2)", seg.Kind)}
+			detail: fmt.Sprintf("a %s segment has no RFC 6901 representation (§9.2)", seg.describe())}
 	}
 }
 

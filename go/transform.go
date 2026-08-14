@@ -339,11 +339,11 @@ func spellFailure(seg Segment) string {
 	switch {
 	case err != nil:
 		return "its bare spelling " + spelling + " is not a legal segment"
-	case got.Kind != seg.Kind:
-		return "its bare spelling " + spelling + " re-reads as a " + got.Kind.String() +
-			" segment, not a " + seg.Kind.String()
+	case got.Kind != seg.Kind || got.Form != seg.Form:
+		return "its bare spelling " + spelling + " re-reads as a " + got.describe() +
+			" segment, not a " + seg.describe()
 	case !seg.Equal(got):
-		return "its bare spelling " + spelling + " re-reads as a different " + seg.Kind.String() + " segment"
+		return "its bare spelling " + spelling + " re-reads as a different " + seg.describe() + " segment"
 	}
 	return "its bare spelling " + spelling + " does not survive in this position"
 }

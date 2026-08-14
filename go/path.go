@@ -20,12 +20,18 @@ const (
 	TransformsVersion = 1
 )
 
-// SegmentKind discriminates the segment forms of §4. RFC 6901 contributes
-// SegKey, SegIndex and SegAppend; the other six are hew's extensions.
+// SegmentKind discriminates the segment forms of §4.
+//
+// The core knows the UNIVERSAL shapes and no others (§8.8): RFC 6901
+// contributes SegKey, SegIndex and SegAppend, and hew adds SegMatch and the
+// quoted segment — the shapes every tree-shaped format has, which is why a
+// format-neutral pointer standard needed them. Everything else is
+// SegExtension: a token the core lexed and a registered extension claimed.
 type SegmentKind uint8
 
 const (
-	// SegKey is an object member name (§4.1). Name holds the decoded key.
+	// SegKey is an object member name (§4.1). Name holds the decoded key. It
+	// is also the floor: a token no other form claims is a key.
 	SegKey SegmentKind = iota
 	// SegIndex is a sequence index (§4.1). Index holds it.
 	SegIndex
@@ -36,18 +42,15 @@ const (
 	SegMatch
 	// SegLabel is a quoted HCL block label (§4.3). Name holds the label.
 	SegLabel
-	// SegHeading is a Markdown heading (§4.5): Level is the ATX level, Name
-	// the heading text.
-	SegHeading
-	// SegBlock is a Markdown block ordinal (§4.5): Block is the kind, Index
-	// the ordinal within that kind within the section.
-	SegBlock
-	// SegMarker is a Markdown managed-marker region (§4.5, §8.6). Name is the
-	// marker name, without the leading "@".
-	SegMarker
 	// SegComment is a comment address (§4.5b): Index is the kind-scoped
 	// ordinal, or Trailing marks the `#t` form.
 	SegComment
+	// SegExtension is a segment shape an extension claims (§8.8): a Markdown
+	// heading, block ordinal or marker, and whatever a future family adds.
+	// Form names the claiming shape and Raw is the token exactly as authored,
+	// which is all the core needs to carry it and print it back unchanged. The
+	// extension that claimed it is what knows what it MEANS.
+	SegExtension
 )
 
 func (k SegmentKind) String() string {
@@ -62,37 +65,12 @@ func (k SegmentKind) String() string {
 		return "match"
 	case SegLabel:
 		return "label"
-	case SegHeading:
-		return "heading"
-	case SegBlock:
-		return "block"
-	case SegMarker:
-		return "marker"
 	case SegComment:
 		return "comment"
+	case SegExtension:
+		return "extension"
 	}
 	return "segment(" + strconv.Itoa(int(k)) + ")"
-}
-
-// BlockKind is the kind of a Markdown block segment (§4.5). The set is closed:
-// a `<kind>:<n>` spelling with any other kind is an ordinary key.
-type BlockKind string
-
-const (
-	BlockPara  BlockKind = "para"
-	BlockCode  BlockKind = "code"
-	BlockList  BlockKind = "list"
-	BlockTable BlockKind = "table"
-	BlockQuote BlockKind = "quote"
-	BlockHTML  BlockKind = "html"
-)
-
-func validBlockKind(k BlockKind) bool {
-	switch k {
-	case BlockPara, BlockCode, BlockList, BlockTable, BlockQuote, BlockHTML:
-		return true
-	}
-	return false
 }
 
 // ScalarKind is the format-native type a key-match value decodes to (§4.2).
@@ -137,11 +115,17 @@ type Scalar struct {
 // meaningful; the rest are zero.
 type Segment struct {
 	Kind  SegmentKind
-	Name  string    // SegKey, SegMatch (field), SegLabel, SegHeading (text), SegMarker
-	Index int       // SegIndex, SegBlock, SegComment
-	Level int       // SegHeading
-	Block BlockKind // SegBlock
-	Value Scalar    // SegMatch
+	Name  string // SegKey, SegMatch (field), SegLabel
+	Index int    // SegIndex, SegComment
+	Value Scalar // SegMatch
+
+	// Form and Raw carry a SegExtension: the name of the extension shape that
+	// claimed the token, and the token itself. The core stores the bytes and
+	// nothing more — decoding a heading's level or a marker's name is the
+	// claiming extension's business, and keeping the raw spelling is what makes
+	// print/parse exact for a shape the core does not understand.
+	Form string
+	Raw  string
 
 	// Trailing marks the `#t` comment form (§4.5b).
 	Trailing bool
@@ -162,7 +146,7 @@ type Segment struct {
 // Equal reports structural equality, following Ordinal by value.
 func (s Segment) Equal(o Segment) bool {
 	if s.Kind != o.Kind || s.Name != o.Name || s.Index != o.Index ||
-		s.Level != o.Level || s.Block != o.Block || s.Value != o.Value ||
+		s.Form != o.Form || s.Raw != o.Raw || s.Value != o.Value ||
 		s.Trailing != o.Trailing || s.Optional != o.Optional {
 		return false
 	}
@@ -191,17 +175,8 @@ func (s Segment) String() string {
 		b.WriteString(s.Value.pathString())
 	case SegLabel:
 		b.WriteString(quoteLabel(s.Name))
-	case SegHeading:
-		b.WriteString(strings.Repeat("#", s.Level))
-		b.WriteByte(' ')
-		b.WriteString(escapeText(s.Name))
-	case SegBlock:
-		b.WriteString(string(s.Block))
-		b.WriteByte(':')
-		b.WriteString(strconv.Itoa(s.Index))
-	case SegMarker:
-		b.WriteByte('@')
-		b.WriteString(escapeText(s.Name))
+	case SegExtension:
+		b.WriteString(s.Raw)
 	case SegComment:
 		b.WriteByte('#')
 		if s.Trailing {
@@ -219,6 +194,17 @@ func (s Segment) String() string {
 		b.WriteByte('?')
 	}
 	return b.String()
+}
+
+// describe names a segment's shape for a diagnostic. For an extension-claimed
+// segment it is the FORM, not the kind: a reader needs to be told the spelling
+// re-reads as a "marker", and "extension" would name the mechanism instead of
+// the mistake.
+func (s Segment) describe() string {
+	if s.Kind == SegExtension && s.Form != "" {
+		return s.Form
+	}
+	return s.Kind.String()
 }
 
 // pathString renders a key-match value as it appears inside a segment.
@@ -511,18 +497,6 @@ func parseSegment(raw string, allowOrdinal bool) (Segment, error) {
 		seg.Kind, seg.Name = SegLabel, name
 		return seg, nil
 
-	case isHeading(body):
-		level := 0
-		for level < len(body) && body[level] == '#' {
-			level++
-		}
-		text, err := unescape(body[level+1:], false)
-		if err != nil {
-			return seg, segErr("segment " + strconv.Quote(raw) + ": " + err.Error())
-		}
-		seg.Kind, seg.Level, seg.Name = SegHeading, level, text
-		return seg, nil
-
 	case isComment(body):
 		seg.Kind = SegComment
 		if body == "#t" {
@@ -536,30 +510,24 @@ func parseSegment(raw string, allowOrdinal bool) (Segment, error) {
 		seg.Index = n
 		return seg, nil
 
-	case strings.HasPrefix(body, "@"):
-		if len(body) == 1 {
-			return seg, segErr(`segment "@": marker segment requires a name (§4.5)`)
-		}
-		name, err := unescape(body[1:], false)
-		if err != nil {
-			return seg, segErr("segment " + strconv.Quote(raw) + ": " + err.Error())
-		}
-		seg.Kind, seg.Name = SegMarker, name
-		return seg, nil
-
 	case body == "-":
 		seg.Kind = SegAppend
 		return seg, nil
 	}
 
-	if kind, ord, ok := splitBlock(body); ok {
-		n, err := strconv.Atoi(ord)
+	// The extension-claimed shapes (§8.8), offered the token before the core's
+	// remaining fallbacks. The order matters and is today's order: a form is
+	// consulted BEFORE key-match and key, because `@name` and `# Setup` are
+	// legal spellings of both, and AFTER the quoted segment and `-`, which no
+	// extension may reinterpret.
+	if form, claimed, err := claimSegment(body); claimed {
 		if err != nil {
-			return seg, segErr("segment " + strconv.Quote(raw) + ": block ordinal out of range")
+			return seg, segErr("segment " + strconv.Quote(raw) + ": " + err.Error())
 		}
-		seg.Kind, seg.Block, seg.Index = SegBlock, kind, n
+		seg.Kind, seg.Form, seg.Raw = SegExtension, form, body
 		return seg, nil
 	}
+
 	if isIndex(body) {
 		n, err := strconv.Atoi(body)
 		if err != nil {
@@ -569,7 +537,7 @@ func parseSegment(raw string, allowOrdinal bool) (Segment, error) {
 		return seg, nil
 	}
 	if i := unescapedEq(body); i >= 0 {
-		field, err := unescape(body[:i], true)
+		field, err := unescape(body[:i])
 		if err != nil {
 			return seg, segErr("segment " + strconv.Quote(raw) + ": " + err.Error())
 		}
@@ -580,7 +548,7 @@ func parseSegment(raw string, allowOrdinal bool) (Segment, error) {
 		seg.Kind, seg.Name, seg.Value = SegMatch, field, val
 		return seg, nil
 	}
-	key, err := unescape(body, true)
+	key, err := unescape(body)
 	if err != nil {
 		return seg, segErr("segment " + strconv.Quote(raw) + ": " + err.Error())
 	}
@@ -607,19 +575,10 @@ func ordinalStart(body string) int {
 	return i
 }
 
-// isHeading matches one or more "#" followed by a space (§4.5). The space is
-// what separates a heading from a comment address (§4.5b).
-func isHeading(body string) bool {
-	i := 0
-	for i < len(body) && body[i] == '#' {
-		i++
-	}
-	return i > 0 && i < len(body) && body[i] == ' '
-}
-
 // isComment matches "#t" or "#" followed by digits (§4.5b). A segment
-// starting with "#" that matches neither this nor isHeading is an ordinary
-// key, which is why "#foo" and "##0" address keys.
+// starting with "#" that matches neither this nor an extension's shape — a
+// Markdown heading is `#`s and a SPACE — is an ordinary key, which is why
+// "#foo" and "##0" address keys.
 func isComment(body string) bool {
 	if len(body) < 2 || body[0] != '#' {
 		return false
@@ -633,23 +592,6 @@ func isComment(body string) bool {
 		}
 	}
 	return true
-}
-
-func splitBlock(body string) (BlockKind, string, bool) {
-	i := strings.IndexByte(body, ':')
-	if i < 0 || i+1 == len(body) {
-		return "", "", false
-	}
-	kind := BlockKind(body[:i])
-	if !validBlockKind(kind) {
-		return "", "", false
-	}
-	for j := i + 1; j < len(body); j++ {
-		if body[j] < '0' || body[j] > '9' {
-			return "", "", false
-		}
-	}
-	return kind, body[i+1:], true
 }
 
 // isIndex matches RFC 6901's array index production: "0" or a digit string
@@ -694,7 +636,7 @@ func parseMatchValue(raw string) (Scalar, error) {
 		}
 		return Scalar{Kind: ScalarString, Text: text, Quoted: true}, nil
 	}
-	text, err := unescape(raw, true)
+	text, err := unescape(raw)
 	if err != nil {
 		return Scalar{}, err
 	}
@@ -751,11 +693,12 @@ func isNumber(s string) bool {
 	return i == len(s)
 }
 
-// unescape decodes RFC 6901's ~0 and ~1 plus hew's ~2 (§4.1). eq selects
-// whether ~2 is in scope: it is for keys, match fields and match values,
-// where an unescaped "=" would change the segment's form, and it is not for
-// heading text or marker names, which no "=" can be confused with.
-func unescape(s string, eq bool) (string, error) {
+// unescape decodes RFC 6901's ~0 and ~1 plus hew's ~2 (§4.1). All three are in
+// scope everywhere the CORE decodes: keys, match fields and match values, where
+// an unescaped "=" would change the segment's form. An extension's own shape
+// decodes its own text — ~2 is not meaningful in a Markdown heading and
+// ext/markdown says so itself (§8.8).
+func unescape(s string) (string, error) {
 	if !strings.ContainsRune(s, '~') {
 		return s, nil
 	}
@@ -776,9 +719,6 @@ func unescape(s string, eq bool) (string, error) {
 		case '1':
 			b.WriteByte('/')
 		case '2':
-			if !eq {
-				return "", segErr(`invalid escape "~2" here`)
-			}
 			b.WriteByte('=')
 		default:
 			return "", segErr(`invalid escape "~` + string(s[i]) + `"`)
@@ -787,23 +727,21 @@ func unescape(s string, eq bool) (string, error) {
 	return b.String(), nil
 }
 
-func escapeKey(s string) string { return escape(s, true) }
-
-func escapeText(s string) string { return escape(s, false) }
-
-func escape(s string, eq bool) string {
+// escapeKey is unescape's inverse for the core's own text: a key, a match
+// field or an unquoted match value.
+func escapeKey(s string) string {
 	if !strings.ContainsAny(s, "~/=") {
 		return s
 	}
 	var b strings.Builder
 	b.Grow(len(s) + 4)
 	for i := 0; i < len(s); i++ {
-		switch {
-		case s[i] == '~':
+		switch s[i] {
+		case '~':
 			b.WriteString("~0")
-		case s[i] == '/':
+		case '/':
 			b.WriteString("~1")
-		case s[i] == '=' && eq:
+		case '=':
 			b.WriteString("~2")
 		default:
 			b.WriteByte(s[i])

@@ -82,6 +82,13 @@ type Binding struct {
 	// what makes it valid; an unknown kind is HEW001, exactly as before.
 	Kinds []NodeKind
 
+	// Segments are the segment SHAPES this extension claims (§8.8). The core
+	// grammar defines five universal lexical forms — key, index, `-`, key-match
+	// and the quoted segment — and lexes everything else into a raw token it
+	// offers to the registered extensions before defaulting to `key`. A form
+	// that claims a token owns its meaning; the core only carries the bytes.
+	Segments []SegmentForm
+
 	// Qualifiers are the transform qualifier keys this extension OWNS —
 	// "anchor" for YAML (§9.6), "surface" for TOML. O48's first recorded
 	// tension is why this is a declaration and not a relocation: the field's
@@ -89,6 +96,25 @@ type Binding struct {
 	// and an opaque bag could not be canonicalized deterministically. What
 	// moves is ownership, and this is where it is recorded.
 	Qualifiers []string
+}
+
+// SegmentForm is one extension-claimed segment shape (§8.8). Name is what the
+// form is called — it travels in the parsed Segment so a resolver can tell
+// which of its own shapes it is looking at — and Claim decides whether a lexed
+// token is one of them.
+//
+// Claim receives the token with the universal suffixes already stripped (the
+// `?` of §4.4 and the IR-only `[n]` of §9.6), so a form describes only its own
+// shape. Its three answers are distinct on purpose:
+//
+//   - (true, nil)   — mine, and well formed.
+//   - (false, nil)  — not mine; the core keeps looking, and `key` is the floor.
+//   - (_, non-nil)  — mine, and MALFORMED. "@" is the standing example: it is
+//     unmistakably a marker and unmistakably nameless, and reporting it as an
+//     ordinary key would hide the typo behind a lookup failure much later.
+type SegmentForm struct {
+	Name  string
+	Claim func(raw string) (bool, error)
 }
 
 var (
@@ -204,6 +230,40 @@ func OwnsQualifier(f FormatID, q string) bool {
 		}
 	}
 	return false
+}
+
+// claimSegment offers a lexed token to the registered extensions' segment
+// forms and reports the name of the form that claimed it (§8.8).
+//
+// It asks EVERY registered extension rather than the one format the patch
+// declares, and that boundary is the honest one to state. §8.8's design
+// direction says the core offers the token to the ACTIVE format's extension,
+// and the format is indeed known from the `--- ` line before any hunk is read —
+// but ParsePath and the emitting seams' spellability guard take no FormatID,
+// and giving them one is a change to the §4 parsing API that O41's
+// canonical-rendering work owns. Until then a claim is scoped to the BUILD:
+// a heading is a heading in any patch a markdown-linked program parses, which
+// is exactly the behaviour the hardcoded grammar had.
+//
+// Iteration is over sorted format ids so that two extensions claiming one
+// shape resolve the same way in every run rather than by map order.
+func claimSegment(raw string) (string, bool, error) {
+	for _, id := range Formats() {
+		b, ok := Lookup(id)
+		if !ok {
+			continue
+		}
+		for _, f := range b.Segments {
+			claimed, err := f.Claim(raw)
+			if err != nil {
+				return f.Name, true, err
+			}
+			if claimed {
+				return f.Name, true, nil
+			}
+		}
+	}
+	return "", false, nil
 }
 
 // declaresKind reports whether any registered extension declares k. The core

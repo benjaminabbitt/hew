@@ -33,6 +33,7 @@ func init() {
 		Detect: hew.DetectRule{
 			Extensions: []string{".md", ".markdown"},
 		},
-		Kinds: []hew.NodeKind{KindSection, KindBlock},
+		Kinds:    []hew.NodeKind{KindSection, KindBlock},
+		Segments: segmentForms(),
 	})
 }

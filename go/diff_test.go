@@ -668,21 +668,25 @@ func TestMemberLookup(t *testing.T) {
 
 // TestDiffRefusesUnspellableKey is the live defect, at the seam it enters
 // through: the differ is the one producer that builds paths out of RAW
-// DOCUMENT KEYS, and a package.json with a scoped dependency is enough to hand
-// it "@scope/pkg". The bare spelling of that key, "@scope~1pkg", re-reads as a
-// MARKER segment, so the patch would have addressed something else entirely.
-// Refuse, do not misapply (§9.3).
+// DOCUMENT KEYS, and a port map is enough to hand it "8080". The bare spelling
+// of that key re-reads as a sequence INDEX, so the patch would have addressed
+// something else entirely. Refuse, do not misapply (§9.3).
+//
+// The sibling case — a scoped npm dependency, "@scope/pkg", re-reading as a
+// Markdown marker — is the same defect against an extension-claimed shape, and
+// lives in ext/markdown's suite because this package registers no segment
+// forms (§8.8).
 func TestDiffRefusesUnspellableKey(t *testing.T) {
-	old := dmap("dependencies", dmap(
-		"left-pad", dstr("1.0.0"),
-		"@scope/pkg", dmap("version", dstr("1.0.0")),
+	old := dmap("ports", dmap(
+		"http", dmap("target", dstr("web")),
+		"8080", dmap("target", dstr("api")),
 	))
-	new := dmap("dependencies", dmap(
-		"left-pad", dstr("1.0.0"),
-		"@scope/pkg", dmap("version", dstr("1.0.0"), "resolved", dstr("https://example.test/pkg")),
+	new := dmap("ports", dmap(
+		"http", dmap("target", dstr("web")),
+		"8080", dmap("target", dstr("api"), "protocol", dstr("tcp")),
 	))
 
-	tl, err := DiffTrees(old, new, FormatJSON, DiffOptions{Target: "package.json"})
+	tl, err := DiffTrees(old, new, FormatJSON, DiffOptions{Target: "compose.json"})
 	if err == nil {
 		t.Fatalf("the differ produced a patch addressing an unspellable key:\n%s", summarize(tl))
 	}
@@ -699,10 +703,10 @@ func TestDiffRefusesUnspellableKey(t *testing.T) {
 	if he.Component != hewerr.ComponentDiffer {
 		t.Errorf("component = %s, want differ: the key entered the IR here", he.Component)
 	}
-	if he.Target != "package.json" {
+	if he.Target != "compose.json" {
 		t.Errorf("target = %q, want the file the key lives in", he.Target)
 	}
-	if !strings.Contains(he.Detail, "@scope/pkg") {
+	if !strings.Contains(he.Detail, "8080") {
 		t.Errorf("detail %q does not name the offending key", he.Detail)
 	}
 	if !strings.Contains(he.Detail, "PR #1") {
