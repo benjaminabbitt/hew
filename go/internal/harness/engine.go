@@ -30,13 +30,17 @@ type Binding struct {
 	// RenderHew renders .hewt bytes to .hew notation (render seam, RT2).
 	RenderHew func(hewt []byte) ([]byte, error)
 	// DiffToHew diffs two documents to .hew notation (diff seam). target is
-	// the new side's file name, which the produced patch carries in its
-	// "--- <target>" header — a diff says "apply this to get here", and the
-	// file it names is the new one.
+	// the OLD side's file name, which the produced patch carries in its
+	// "--- <target>" header (§9.4-R7, ruling O39): the patch APPLIES TO old,
+	// and this same expected.hew is what the case's apply-ir and e2e seams
+	// apply to old.* — so naming the new side would name a file the applier
+	// never opens.
 	DiffToHew func(old, new []byte, format, target string) ([]byte, error)
 	// RunCLI runs the hew CLI in-process: argv (without argv0), a working
-	// directory all relative paths resolve against, and explicit streams.
-	RunCLI func(argv []string, dir string, stdin io.Reader, stdout, stderr io.Writer) int
+	// directory all relative paths resolve against, the case's pinned
+	// environment (§13.4's env: block — only the variables the spec declares
+	// environment-readable ever reach here), and explicit streams.
+	RunCLI func(argv []string, dir string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 // Status classifies one seam run.
@@ -343,7 +347,8 @@ func (e *Engine) runDiff(c *Case, seam Seam, mustRead func(string) ([]byte, erro
 	if err != nil {
 		return e.outcome(c, seam, StatusCorpusError, err.Error())
 	}
-	got, derr := e.Bind.DiffToHew(old, new_, c.Format, c.NewFile)
+	// §9.4-R7: the label is the OLD side's, because the patch applies to old.
+	got, derr := e.Bind.DiffToHew(old, new_, c.Format, c.OldFile)
 	if derr != nil {
 		return e.outcome(c, seam, StatusFail, "diff failed: "+derr.Error())
 	}
@@ -361,7 +366,7 @@ func (e *Engine) runCLI(c *Case, seam Seam, scratch string, snap map[string][]by
 		return e.outcome(c, seam, StatusFail, err.Error())
 	}
 	var stdout, stderr bytes.Buffer
-	exit := e.Bind.RunCLI(c.Argv, scratch, strings.NewReader(""), &stdout, &stderr)
+	exit := e.Bind.RunCLI(c.Argv, scratch, c.Env, strings.NewReader(""), &stdout, &stderr)
 
 	var probs []string
 	if c.Exit != nil && exit != *c.Exit {
@@ -447,7 +452,7 @@ func (e *Engine) runCLI(c *Case, seam Seam, scratch string, snap map[string][]by
 					return b, rerr == nil
 				},
 			}
-			probs = append(probs, CheckRecord(wantFixture, gotBytes, c.RecordDigestFields, fx)...)
+			probs = append(probs, CheckRecord(wantFixture, gotBytes, c.RecordDigestFields, fx, c.PinnedAppliedAt())...)
 		}
 	}
 	if c.Expected != "" {

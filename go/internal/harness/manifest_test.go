@@ -532,3 +532,103 @@ func TestSortedSeamsDoesNotAliasManifest(t *testing.T) {
 		t.Fatalf("manifest seam aliased the returned slice: %v", m.Seams)
 	}
 }
+
+// cliManifest is a minimal valid cli-kind manifest, the base the env: tests
+// mutate.
+func cliManifest(env map[string]string) *Manifest {
+	exit0 := 0
+	return &Manifest{
+		Name: "cli/x", Kind: "cli", Seams: []Seam{SeamCLI},
+		Argv: []string{"apply", "patch.hew"}, Exit: &exit0, Env: env,
+	}
+}
+
+// TestValidateEnvBlock pins the closed set of ruling O37: a case may pin the
+// two variables the spec declares environment-readable and nothing else,
+// because a corpus that could reach any variable could pin behaviour the spec
+// never promised.
+func TestValidateEnvBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      map[string]string
+		contains string
+	}{
+		{name: "HEW_APPLIED_AT", env: map[string]string{"HEW_APPLIED_AT": "2026-08-14T09:31:07Z"}},
+		{name: "SOURCE_DATE_EPOCH", env: map[string]string{"SOURCE_DATE_EPOCH": "1786786267"}},
+		{name: "both", env: map[string]string{"HEW_APPLIED_AT": "2026-08-14T09:31:07Z", "SOURCE_DATE_EPOCH": "1786786267"}},
+		{
+			name:     "any other variable",
+			env:      map[string]string{"PATH": "/nowhere"},
+			contains: `env: "PATH" is not one of the variables`,
+		},
+		{
+			name:     "HEW_APPLIED_AT that is not RFC 3339",
+			env:      map[string]string{"HEW_APPLIED_AT": "yesterday"},
+			contains: `env: HEW_APPLIED_AT "yesterday" is not an RFC 3339 UTC timestamp`,
+		},
+		{
+			name:     "HEW_APPLIED_AT that is not UTC",
+			env:      map[string]string{"HEW_APPLIED_AT": "2026-08-14T09:31:07+02:00"},
+			contains: "is not an RFC 3339 UTC timestamp",
+		},
+		{
+			name:     "SOURCE_DATE_EPOCH that is not an integer",
+			env:      map[string]string{"SOURCE_DATE_EPOCH": "noon"},
+			contains: `env: SOURCE_DATE_EPOCH "noon" is not an integer`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := cliManifest(tc.env).Validate("cli/x")
+			switch {
+			case tc.contains == "" && err != nil:
+				t.Fatalf("Validate: %v", err)
+			case tc.contains == "":
+			case err == nil:
+				t.Fatalf("want a problem containing %q, got none", tc.contains)
+			case !strings.Contains(err.Error(), tc.contains):
+				t.Fatalf("want a problem containing %q, got %v", tc.contains, err)
+			}
+		})
+	}
+}
+
+// TestValidateEnvIsCLIOnly: env: pins the environment of an argv run, and a
+// case with no argv has no run to pin.
+func TestValidateEnvIsCLIOnly(t *testing.T) {
+	m := &Manifest{
+		Name: "json/x", Kind: "ok", Seams: []Seam{SeamParse},
+		Env: map[string]string{"HEW_APPLIED_AT": "2026-08-14T09:31:07Z"},
+	}
+	err := m.Validate("json/x")
+	if err == nil || !strings.Contains(err.Error(), "meaningful only on a cli case") {
+		t.Fatalf("want the cli-only problem, got %v", err)
+	}
+}
+
+// TestPinnedAppliedAt pins §9.7's precedence: an explicit HEW_APPLIED_AT beats
+// SOURCE_DATE_EPOCH, and the epoch form is normalized to RFC 3339 UTC so the
+// two spellings compare as one instant.
+func TestPinnedAppliedAt(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "unset", env: nil, want: ""},
+		{name: "rfc3339", env: map[string]string{"HEW_APPLIED_AT": "2026-08-14T09:31:07Z"}, want: "2026-08-14T09:31:07Z"},
+		{name: "epoch", env: map[string]string{"SOURCE_DATE_EPOCH": "0"}, want: "1970-01-01T00:00:00Z"},
+		{
+			name: "HEW_APPLIED_AT wins",
+			env:  map[string]string{"HEW_APPLIED_AT": "2026-08-14T09:31:07Z", "SOURCE_DATE_EPOCH": "0"},
+			want: "2026-08-14T09:31:07Z",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (&Manifest{Env: tc.env}).PinnedAppliedAt(); got != tc.want {
+				t.Fatalf("PinnedAppliedAt() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -64,7 +64,7 @@ targets:
 
 func check(t *testing.T, got string) []string {
 	t.Helper()
-	return CheckRecord([]byte(wantRecord), []byte(got), digestFields, fixtures())
+	return CheckRecord([]byte(wantRecord), []byte(got), digestFields, fixtures(), "")
 }
 
 func wantNoProbs(t *testing.T, probs []string) {
@@ -149,7 +149,7 @@ func TestCheckRecordRejectsANonStringAppliedAt(t *testing.T) {
 
 func TestCheckRecordRefusesAFixtureThatPinsAppliedAt(t *testing.T) {
 	want := "applied_at: 2026-08-14T09:31:07Z\n" + wantRecord
-	probs := CheckRecord([]byte(want), []byte(goodRecord()), digestFields, fixtures())
+	probs := CheckRecord([]byte(want), []byte(goodRecord()), digestFields, fixtures(), "")
 	wantProb(t, probs, "cannot be pinned")
 	// Pinning it must not ALSO produce a structural mismatch: the field is
 	// dropped from both sides once reported.
@@ -161,9 +161,9 @@ func TestCheckRecordRefusesAFixtureThatPinsAppliedAt(t *testing.T) {
 }
 
 func TestCheckRecordReportsUnreadableDocuments(t *testing.T) {
-	probs := CheckRecord([]byte("\tnot: yaml"), []byte(goodRecord()), digestFields, fixtures())
+	probs := CheckRecord([]byte("\tnot: yaml"), []byte(goodRecord()), digestFields, fixtures(), "")
 	wantProb(t, probs, "expected_record fixture")
-	probs = CheckRecord([]byte(wantRecord), []byte("\tnot: yaml"), digestFields, fixtures())
+	probs = CheckRecord([]byte(wantRecord), []byte("\tnot: yaml"), digestFields, fixtures(), "")
 	wantProb(t, probs, "record file")
 }
 
@@ -186,16 +186,95 @@ func TestCheckRecordNeedsTheTargetItMustDigest(t *testing.T) {
 }
 
 func TestCheckRecordRejectsAnUnknownDigestField(t *testing.T) {
-	probs := CheckRecord([]byte(wantRecord), []byte(goodRecord()), []string{"patch.source"}, fixtures())
+	probs := CheckRecord([]byte(wantRecord), []byte(goodRecord()), []string{"patch.source"}, fixtures(), "")
 	wantProb(t, probs, "names no digest this runner knows how to recompute")
 
-	probs = CheckRecord([]byte(wantRecord), []byte(goodRecord()), []string{"targets.0.committed"}, fixtures())
+	probs = CheckRecord([]byte(wantRecord), []byte(goodRecord()), []string{"targets.0.committed"}, fixtures(), "")
 	wantProb(t, probs, "names no digest this runner knows how to recompute")
 }
 
 func TestCheckRecordOutOfRangeTargetIndex(t *testing.T) {
-	probs := CheckRecord([]byte(wantRecord), []byte(goodRecord()), []string{"targets.9.before"}, fixtures())
+	probs := CheckRecord([]byte(wantRecord), []byte(goodRecord()), []string{"targets.9.before"}, fixtures(), "")
 	wantProb(t, probs, "missing digest field targets.9.before")
+}
+
+// The pinned-clock inversion (ruling O37). goodRecord()'s applied_at is
+// 2026-08-14T09:31:07Z, so a fixture pinning the same instant is now REQUIRED
+// rather than refused.
+const pin = "2026-08-14T09:31:07Z"
+
+func pinnedFixture(appliedAt string) []byte {
+	return []byte("applied_at: \"" + appliedAt + "\"\n" + wantRecord)
+}
+
+func checkPinned(t *testing.T, want []byte, got string) []string {
+	t.Helper()
+	return CheckRecord(want, []byte(got), digestFields, fixtures(), pin)
+}
+
+func TestCheckRecordAcceptsAPinnedAppliedAt(t *testing.T) {
+	wantNoProbs(t, checkPinned(t, pinnedFixture(pin), goodRecord()))
+}
+
+// Both YAML spellings §9.7 allows are the same instant: a bare timestamp
+// decodes to time.Time, a quoted one stays a string, and the comparison is on
+// the normalized RFC 3339 rendering so it is about the instant, not the
+// quoting.
+func TestCheckRecordPinnedAppliedAtIgnoresYAMLSpelling(t *testing.T) {
+	bare := []byte("applied_at: " + pin + "\n" + wantRecord)
+	wantNoProbs(t, checkPinned(t, bare, goodRecord()))
+
+	quoted := strings.Replace(goodRecord(), "applied_at: "+pin, `applied_at: "`+pin+`"`, 1)
+	wantNoProbs(t, checkPinned(t, pinnedFixture(pin), quoted))
+}
+
+// A pinned run whose record carries a different instant is the failure the
+// whole case exists to detect.
+func TestCheckRecordCatchesAnUnpinnedRecord(t *testing.T) {
+	got := strings.Replace(goodRecord(), "applied_at: "+pin, "applied_at: 2001-01-01T00:00:00Z", 1)
+	wantProb(t, checkPinned(t, pinnedFixture(pin), got), "but the run pinned "+pin)
+}
+
+// A case that pins the clock and then leaves the fixture's applied_at unpinned
+// asserts nothing at all, which is a corpus error rather than a pass.
+func TestCheckRecordPinnedRunRequiresAPinnedFixture(t *testing.T) {
+	wantProb(t, checkPinned(t, []byte(wantRecord), goodRecord()), "expected_record MUST pin it too")
+}
+
+// A fixture pinning a different instant than the env means the case
+// contradicts itself.
+func TestCheckRecordPinnedFixtureMustAgreeWithTheEnv(t *testing.T) {
+	probs := checkPinned(t, pinnedFixture("2001-01-01T00:00:00Z"), goodRecord())
+	wantProb(t, probs, "but env pins "+pin)
+}
+
+func TestCheckRecordPinnedRejectsNonTimestamps(t *testing.T) {
+	probs := CheckRecord(pinnedFixture(pin), []byte(goodRecord()), digestFields, fixtures(), "yesterday")
+	wantProb(t, probs, "which is not RFC 3339")
+
+	probs = checkPinned(t, []byte("applied_at: 7\n"+wantRecord), goodRecord())
+	wantProb(t, probs, "expected_record's applied_at is 7")
+
+	got := strings.Replace(goodRecord(), "applied_at: "+pin, "applied_at: 7", 1)
+	wantProb(t, checkPinned(t, pinnedFixture(pin), got), "want an RFC 3339 timestamp")
+
+	got = strings.Replace(goodRecord(), "applied_at: "+pin+"\n", "", 1)
+	wantProb(t, checkPinned(t, pinnedFixture(pin), got), "record is missing applied_at")
+}
+
+// Whichever branch ran, applied_at must be gone from both sides afterwards, or
+// the structural comparison reports it a second time as a mismatch.
+func TestCheckRecordPinnedDropsAppliedAtFromTheComparison(t *testing.T) {
+	for _, probs := range [][]string{
+		checkPinned(t, pinnedFixture(pin), goodRecord()),
+		checkPinned(t, []byte(wantRecord), goodRecord()),
+	} {
+		for _, p := range probs {
+			if strings.Contains(p, "record mismatch") {
+				t.Fatalf("applied_at should be dropped from both sides: %v", probs)
+			}
+		}
+	}
 }
 
 func TestRecordArgValue(t *testing.T) {

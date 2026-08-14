@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/hewdiff"
@@ -85,7 +86,9 @@ func newBinding() harness.Binding {
 		// radius is the spec's default of 1 and the fragments are spelled in
 		// the target format's own syntax, which is what §5's "parsed by the
 		// target format's fragment parser" licenses and what the corpus's
-		// expected.hew files show.
+		// expected.hew files show. target is the OLD side (§9.4-R7): the
+		// differ has no opinion, it stamps the label it is handed, and which
+		// label that is belongs to the caller — here, the engine.
 		DiffToHew: func(old, new []byte, format, target string) ([]byte, error) {
 			tl, err := hewdiff.Diff(old, new, hew.FormatID(format), hew.DiffOptions{
 				Target:  target,
@@ -96,6 +99,14 @@ func newBinding() harness.Binding {
 			}
 			return hew.Render(tl, hew.RenderOptions{Preamble: true, Context: hew.ContextDefault, Fragment: hew.FragmentNative})
 		},
-		RunCLI: hewcli.Run,
+		// env is accepted at the seam and DROPPED here, deliberately and
+		// visibly: O37's HEW_APPLIED_AT is ratified and unimplemented, so
+		// there is nothing in hewcli to hand it to yet. cli/record-pinned-time
+		// is skipped for exactly that reason, and wiring the CLI to read the
+		// environment is what deletes both this comment and that skip rule.
+		RunCLI: func(argv []string, dir string, env map[string]string,
+			stdin io.Reader, stdout, stderr io.Writer) int {
+			return hewcli.Run(argv, dir, stdin, stdout, stderr)
+		},
 	}
 }
