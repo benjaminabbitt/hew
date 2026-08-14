@@ -227,6 +227,42 @@ func TestParseLowering(t *testing.T) {
     path: /tags/=beta
 `,
 	}, {
+		name: "sequence elements pair by offset within an adjacent run",
+		body: "@@ /tags @@\n- - alpha\n- - beta\n+ - ALPHA\n+ - BETA\n+ - gamma\n",
+		want: `  - op: test
+    path: /tags/=alpha
+    value: alpha
+  - op: test
+    path: /tags/=beta
+    value: beta
+  - op: replace
+    path: /tags/=alpha
+    value: ALPHA
+  - op: replace
+    path: /tags/=beta
+    value: BETA
+  - op: add
+    path: /tags
+    after: /tags/=BETA
+    value: gamma
+`,
+	}, {
+		name: "a removed element with no add after it is just a removal",
+		body: "@@ /tags @@\n- - alpha\n  - beta\n+ - gamma\n",
+		want: `  - op: test
+    path: /tags/=alpha
+    value: alpha
+  - op: test
+    path: /tags/=beta
+    value: beta
+  - op: remove
+    path: /tags/=alpha
+  - op: add
+    path: /tags
+    after: /tags/=beta
+    value: gamma
+`,
+	}, {
 		name: "a removed container asserts its children and removes only itself",
 		body: "@@ / @@\n- provider \"azurerm\" {\n-   features {}\n- }\n",
 		want: `  - op: test

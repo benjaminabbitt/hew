@@ -20,8 +20,10 @@ type RenderOptions struct {
 	// hand it (that would silently change strictness, exactly what §9.4-R2's
 	// own note warns against).
 	Context int
-	// Preamble controls whether "hew: 1" (and "idempotent: true", if any
-	// transform carries Idempotent) is emitted.
+	// Preamble controls whether "hew: 1" is emitted. Convergence is never
+	// written as the file-level `idempotent:` pragma (§2.1, ruling O3): the
+	// pragma governs every hunk, while Idempotent is a per-transform
+	// qualifier, so it goes back out as the `! idempotent` line it came from.
 	Preamble bool
 	// Comment, if non-empty, is written as a leading "# " comment line before
 	// the preamble.

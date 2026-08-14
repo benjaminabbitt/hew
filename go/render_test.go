@@ -208,6 +208,12 @@ func TestRenderRoundTripQualifiers(t *testing.T) {
 				Value: mustValNoT(true), Idempotent: true},
 		}},
 	}, {
+		name: "a replaced sequence element keeps its before-image address",
+		tl: TransformList{Target: "t.yaml", Format: FormatYAML, Transform: []Transform{
+			{Op: OpTest, Path: MustParsePath("/tags/=alpha"), Value: mustValNoT("alpha")},
+			{Op: OpReplace, Path: MustParsePath("/tags/=alpha"), Value: mustValNoT("ALPHA")},
+		}},
+	}, {
 		name: "a free assertion keeps the body position it was written in",
 		tl: TransformList{Target: "t.json", Format: FormatJSON, Transform: []Transform{
 			{Op: OpTest, Path: MustParsePath("/server/port"), Value: mustValNoT(8080)},

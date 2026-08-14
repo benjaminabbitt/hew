@@ -45,7 +45,6 @@ type mirrorEntry struct {
 	kind   mirrorKind
 	margin byte
 	line   int
-	indent int
 
 	key    string   // mKV
 	labels []string // mBlock: block type first, then labels; mTable: dotted components
@@ -119,7 +118,7 @@ func (r *bodyReader) entries(indent int) ([]*mirrorEntry, error) {
 func (r *bodyReader) entry() (*mirrorEntry, error) {
 	bl := r.lines[r.i]
 	r.i++
-	e := &mirrorEntry{margin: bl.margin, line: bl.num, indent: bl.indent, beforeIdx: -1, afterIdx: -1}
+	e := &mirrorEntry{margin: bl.margin, line: bl.num, beforeIdx: -1, afterIdx: -1}
 
 	if bl.margin == marginAssert || bl.margin == marginDirect {
 		a, err := parseAnnotation(bl)

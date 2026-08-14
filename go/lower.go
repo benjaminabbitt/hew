@@ -269,7 +269,7 @@ func (l *lowerer) emit(path Path, nodes []*mirrorEntry, surface Surface, q quals
 			}
 			l.push(Transform{Op: OpRemove, Path: p}, e, eq)
 		case marginAdd:
-			if err := l.emitAdd(path, nodes, i, paired[i] >= 0, eq); err != nil {
+			if err := l.emitAdd(path, nodes, i, paired[i], eq); err != nil {
 				return err
 			}
 		}
@@ -305,19 +305,27 @@ func pickSurface(container, inherited Surface) Surface {
 	return inherited
 }
 
-func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i int, replace bool, q quals) error {
+func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i, pairedWith int, q quals) error {
 	e := nodes[i]
-	target, err := l.entryPath(path, e, false)
-	if err != nil {
-		return err
-	}
 	val, err := entryValue(e)
 	if err != nil {
 		return err
 	}
-	if replace {
+	if pairedWith >= 0 {
+		// A replace names the node it replaces, so its address comes from the
+		// `-` line's BEFORE-image identity: `/tags/=alpha` becomes `beta`,
+		// and `/tags/=beta` does not exist in the document being patched
+		// (§9.1 step 5, §4.2).
+		target, terr := l.entryPath(path, nodes[pairedWith], true)
+		if terr != nil {
+			return terr
+		}
 		l.push(Transform{Op: OpReplace, Path: target, Value: val}, e, q)
 		return nil
+	}
+	target, err := l.entryPath(path, e, false)
+	if err != nil {
+		return err
 	}
 	t := Transform{Op: OpAdd, Value: val, Path: target}
 	if positional(e) {
