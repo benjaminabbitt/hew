@@ -1,0 +1,7 @@
+hew: 1
+
+--- target.tf format=hcl
+
+@@ /resource/"aws_s3_bucket"/bucket="example-assets" @@
+- acl = "private"
++ acl = "public-read"

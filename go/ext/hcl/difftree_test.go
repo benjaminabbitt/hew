@@ -109,26 +109,56 @@ func TestDiffTreeRejectsUnparseableSource(t *testing.T) {
 	}
 }
 
-// A repeated `(type, labels)` tuple has one address for two blocks. §6.4.3
-// settles that with an ordinal a REVIEWER writes; the differ says so instead
-// of guessing (§9.4-R6).
-func TestDiffTreeRefusesARepeatedTuple(t *testing.T) {
-	he := treeErr(t, "provider \"aws\" {\n  k = \"1\"\n}\n\nprovider \"aws\" {\n  k = \"2\"\n}\n")
+// A repeated `(type, labels)` tuple has one address for two blocks, and until
+// O45 that was the end of the story: the differ refused the file, because the
+// only remedy was an ordinal a REVIEWER writes (§6.4.3, §9.4-R6). Key-match
+// addresses a block set now, so the differ writes the address that states
+// identity — and writes no ordinal, which is the point.
+func TestDiffTreeAddressesARepeatedTupleByKeyMatch(t *testing.T) {
+	tree, err := DiffTree([]byte("provider \"aws\" {\n  k = \"1\"\n}\n\nprovider \"aws\" {\n  k = \"2\"\n}\n"))
+	if err != nil {
+		t.Fatalf("two blocks that differ in an attribute are addressable (O45): %v", err)
+	}
+	set := tree.Children[0].Node.Children[0].Node // /provider -> "aws"
+	if len(set.Children) != 2 {
+		t.Fatalf("the block set has %d children, want 2", len(set.Children))
+	}
+	for i, c := range set.Children {
+		if c.MatchField != "k" {
+			t.Errorf("child %d is addressed by %q, want the distinguishing attribute k", i, c.MatchField)
+		}
+		if c.Label {
+			t.Errorf("child %d is addressed as a label; a block set has no further label step", i)
+		}
+	}
+	// The two children are different NODES, or the sequence diff would treat
+	// one as the other (§9.4-R1's node equality).
+	if set.Children[0].Key == set.Children[1].Key {
+		t.Error("both blocks carry the same identity token")
+	}
+}
+
+// TestDiffTreeRefusesIndistinguishableBlocks is what is left of the old
+// refusal, and it is the honest half: §6.4.3 rule 3's blocks that differ in
+// nothing have no key-match address either, and guessing an ordinal is a
+// choice a differ may not make (§9.4-R6).
+func TestDiffTreeRefusesIndistinguishableBlocks(t *testing.T) {
+	he := treeErr(t, "provider \"aws\" {\n  k = \"1\"\n}\n\nprovider \"aws\" {\n  k = \"1\"\n}\n")
 	if he.Code != hewerr.CodeInexpressible || he.Component != hewerr.ComponentDiffer {
 		t.Fatalf("want HEW020 from the differ, got %v", he)
 	}
-	if he.Path != "/" {
-		t.Fatalf("want the root body named, got %q", he.Path)
+	if he.Path != `/provider/"aws"` {
+		t.Fatalf(`want the tuple named, got %q`, he.Path)
 	}
-	if !strings.Contains(he.Error(), `provider "aws"`) || !strings.Contains(he.Error(), "ord=") {
-		t.Fatalf("diagnostic names neither the tuple nor the remedy: %v", he)
+	if !strings.Contains(he.Error(), "no attribute distinguishes them") || !strings.Contains(he.Error(), "ord=") {
+		t.Fatalf("diagnostic names neither the reason nor the remedy: %v", he)
 	}
 }
 
 func TestDiffTreeNamesTheNestedBodyOfARepeatedTuple(t *testing.T) {
-	he := treeErr(t, "terraform {\n  backend \"s3\" {\n    b = \"1\"\n  }\n  backend \"s3\" {\n    b = \"2\"\n  }\n}\n")
-	if he.Code != hewerr.CodeInexpressible || he.Path != "/terraform" {
-		t.Fatalf("want HEW020 at /terraform, got %s at %q", he.Code, he.Path)
+	he := treeErr(t, "terraform {\n  backend \"s3\" {\n    b = \"1\"\n  }\n  backend \"s3\" {\n    b = \"1\"\n  }\n}\n")
+	if he.Code != hewerr.CodeInexpressible || he.Path != `/terraform/backend/"s3"` {
+		t.Fatalf(`want HEW020 at /terraform/backend/"s3", got %s at %q`, he.Code, he.Path)
 	}
 }
 

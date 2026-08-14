@@ -3,6 +3,7 @@ package hew
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -191,6 +192,12 @@ func (d *differ) container(path Path, old, new *DiffNode) error {
 	addr := d.addressing(path, old, new)
 	slots := d.match(path, addr, old, new)
 
+	if old.KeyedSet || new.KeyedSet {
+		if err := d.checkKeyedSet(path, slots); err != nil {
+			return err
+		}
+	}
+
 	changed := false
 	for i := range slots {
 		if slots[i].state.changed() {
@@ -210,6 +217,47 @@ func (d *differ) container(path Path, old, new *DiffNode) error {
 		}
 	}
 	return nil
+}
+
+// checkKeyedSet refuses the changes a container with no address of its own
+// cannot carry (DiffNode.KeyedSet, O45). A child that keeps its identity is
+// patched THROUGH that identity and is fine; one that appears, disappears, or
+// changes the very attribute it is addressed by has to be written as an op at
+// the container — and the container is an address that names every child at
+// once, so the patch would parse, refuse as HEW012, and blame the reader.
+//
+// This is §9.4-R6 applied where it bites: say so, do not degrade. For an HCL
+// block set the remedy is the reviewer's — an ordinal (§7.2), or a transform
+// list written by hand (§9.6).
+func (d *differ) checkKeyedSet(path Path, slots []slot) error {
+	for i := range slots {
+		var what string
+		switch slots[i].state {
+		case slotAdded:
+			what = slotLabel(slots[i].new) + " appears"
+		case slotRemoved:
+			what = slotLabel(slots[i].old) + " is gone, or its identifying attribute changed"
+		default:
+			continue
+		}
+		return diffErr(hewerr.CodeInexpressible, d.opt.Target, pathLabel(path),
+			"%s here, and this container has no address of its own — every address it offers "+
+				"names all of its children at once (§4.3), so hew can patch INSIDE one of these "+
+				"but cannot add, remove or re-identify one. That edit needs an ordinal a reviewer "+
+				"chooses (§7.2) or a hand-written transform list (§9.6); the differ will not emit "+
+				"an address it knows the applier must refuse (§9.4-R6)", what)
+	}
+	return nil
+}
+
+func slotLabel(c *DiffChild) string {
+	if c == nil {
+		return "a child"
+	}
+	if c.MatchField != "" {
+		return "the child with " + c.MatchField + "=" + valueScalar(c.MatchValue).pathString()
+	}
+	return "the child " + strconv.Quote(c.Key)
 }
 
 // match runs the sequence diff over the two child lists and classifies every
@@ -436,6 +484,8 @@ func (a addressing) identities(children []DiffChild) []string {
 			out[i] = "#" + c.Text
 		case c.Label:
 			out[i] = "l" + c.Key
+		case c.MatchField != "":
+			out[i] = "m" + c.MatchField + "=" + c.Key
 		case !a.seq:
 			out[i] = "k" + c.Key
 		case a.field != "":
@@ -463,6 +513,10 @@ func (a addressing) childPath(path Path, c DiffChild, index, commentIndex int) P
 		return path.Append(Segment{Kind: SegComment, Index: commentIndex})
 	case c.Label:
 		return path.Append(Segment{Kind: SegKey, Name: c.Key, Quoted: true})
+	case c.MatchField != "":
+		// A child the binding addresses by identity rather than by name (§4.2,
+		// O45): a block of a same-`(type, labels)` set.
+		return path.Append(Segment{Kind: SegMatch, Name: c.MatchField, Value: valueScalar(c.MatchValue)})
 	case !a.seq:
 		return path.Append(Segment{Kind: SegKey, Name: c.Key})
 	case a.field != "":
@@ -638,13 +692,10 @@ func valueScalar(v Value) Scalar {
 	case "!!int", "!!float":
 		return Scalar{Kind: ScalarNumber, Text: n.Value}
 	}
-	return Scalar{Kind: ScalarString, Text: n.Value, Quoted: ambiguousAsPathText(n.Value)}
-}
-
-func ambiguousAsPathText(s string) bool {
-	switch s {
-	case "", "true", "false", "null":
-		return true
-	}
-	return isNumber(s) || strings.HasPrefix(s, `"`)
+	// No Quoted here, and that is the point: the differ used to carry its own
+	// copy of "which strings would re-read as something else", and O42 made
+	// that the RENDERER's rule — pathString force-quotes exactly this set, and
+	// a little more (a value ending `?` or `[n]`). One copy of the rule cannot
+	// drift from itself.
+	return Scalar{Kind: ScalarString, Text: n.Value}
 }

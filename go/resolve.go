@@ -492,6 +492,22 @@ func missRemedy(got Scalar) string {
 	return "remove the quotes to match a " + got.Kind.String()
 }
 
+// MatchSpelling renders a decoded document value as the key-match value that
+// would address it (§4.2), so a tool that SUGGESTS an address suggests one that
+// resolves. A string is always spelled quoted, which is the same choice O42
+// makes for `MatchKey` and for the differ: the comparison's type is then
+// visible where the address is read, instead of being inferred from the value's
+// shape by whoever reads it next. Reports false for a value no scalar spelling
+// can carry.
+func MatchSpelling(v Value) (string, bool) {
+	s, ok := scalarOf(v)
+	if !ok {
+		return "", false
+	}
+	s.Quoted = s.Kind == ScalarString
+	return s.pathString(), true
+}
+
 // scalarOf projects a decoded document value back onto the path grammar's
 // scalar vocabulary (§4.2), so a diagnostic can spell it the way an address
 // would have to spell it. A non-scalar has no such spelling and reports false.

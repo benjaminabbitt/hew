@@ -1040,3 +1040,123 @@ func TestFileWithoutATrailingNewline(t *testing.T) {
 	got := apply(t, "a = 1", list(hew.Transform{Op: hew.OpReplace, Path: p(t, "/a"), Value: val(t, "2")}))
 	eq(t, got, "a = 2")
 }
+
+// --- O45: key-match over a same-(type, labels) block set --------------------
+//
+// §6.4.3 rule 1 recommends addressing a repeated block by a distinguishing
+// attribute instead of by ordinal, and until O45 §4.2 restricted key-match to
+// sequences — so the spec was recommending a remedy it gave no spelling for. A
+// set of blocks sharing a (type, labels) tuple is an addressable container for
+// key-match now, matched on a DIRECT attribute.
+
+func TestKeyMatchSelectsAmongRepeatedBlocks(t *testing.T) {
+	got := apply(t, providers, list(
+		hew.Transform{Op: hew.OpTest, Path: p(t, `/provider/"aws"/alias="east"/region`), Value: val(t, "us-east-1")},
+		hew.Transform{Op: hew.OpReplace, Path: p(t, `/provider/"aws"/alias="east"/region`), Value: val(t, "us-east-2")},
+	))
+	eq(t, got, `provider "aws" {
+  region  = "us-west-1"
+  profile = "default"
+}
+
+provider "aws" {
+  alias  = "east"
+  region = "us-east-2"
+}
+`)
+	// The sibling block is what makes this a selection and not a coincidence:
+	// the same edit, through the OTHER block's attribute.
+	got = apply(t, providers, list(
+		hew.Transform{Op: hew.OpReplace, Path: p(t, `/provider/"aws"/profile="default"/region`), Value: val(t, "us-west-2")},
+	))
+	if !strings.Contains(got, `region  = "us-west-2"`) || !strings.Contains(got, `region = "us-east-1"`) {
+		t.Fatalf("the matched block is the one that changed:\n%s", got)
+	}
+}
+
+// TestKeyMatchOverBlocksIsUnique keeps §4.2's uniqueness rule: the container
+// changed, the rule did not.
+func TestKeyMatchOverBlocksIsUnique(t *testing.T) {
+	two := `provider "aws" {
+  region = "us-west-1"
+}
+
+provider "aws" {
+  region = "us-west-1"
+}
+`
+	failWith(t, two, list(hew.Transform{Op: hew.OpRemove, Path: p(t, `/provider/"aws"/region="us-west-1"`)}),
+		hewerr.CodeAmbiguousMatch, `/provider/"aws"/region="us-west-1"`, 0,
+		"2 blocks match", "will not pick one")
+}
+
+// TestKeyMatchOverBlocksNamesItsNearMiss is O46 in the container O45 added: the
+// attribute is there and its TYPE is what differs, which the address cannot
+// show.
+func TestKeyMatchOverBlocksNamesItsNearMiss(t *testing.T) {
+	src := `resource "aws_instance" "a" {
+  count = "2"
+}
+
+resource "aws_instance" "b" {
+  count = 3
+}
+`
+	failWith(t, src, list(hew.Transform{Op: hew.OpRemove, Path: p(t, `/resource/"aws_instance"/count=2`)}),
+		hewerr.CodeNoMatch, `/resource/"aws_instance"/count=2`, 0,
+		"1 element has", `count="2" (string)`, "quote the value to match a string")
+}
+
+// TestKeyMatchOverBlocksNeedsAField: a block has no value of its own, so §4.2's
+// `=value` form has nothing to compare and says so rather than matching
+// nothing.
+func TestKeyMatchOverBlocksNeedsAField(t *testing.T) {
+	failWith(t, providers, list(hew.Transform{Op: hew.OpRemove, Path: p(t, `/provider/"aws"/="east"`)}),
+		hewerr.CodeInexpressible, `/provider/"aws"/="east"`, 0,
+		"a block has no value of its own")
+}
+
+// TestAmbiguousBlocksSuggestKeyMatchFirst is §6.4.3 rule 1 in the diagnostic:
+// the ordinal is the LAST resort, so the message offers the address that states
+// identity before the one that states position. The corpus pins the count and
+// the refusal; this pins the order of the two remedies.
+func TestAmbiguousBlocksSuggestKeyMatchFirst(t *testing.T) {
+	he := failWith(t, providers, list(hew.Transform{Op: hew.OpRemove, Path: p(t, `/provider/"aws"`)}),
+		hewerr.CodeAmbiguousMatch, `/provider/"aws"`, 0,
+		"2 blocks match", "will not pick one", "distinguishing attribute", `! match ord=`)
+	key := strings.Index(he.Detail, "distinguishing attribute")
+	ord := strings.Index(he.Detail, "! match ord=")
+	if key > ord {
+		t.Errorf("the ordinal is offered before the key-match; §6.4.3 makes it the last resort:\n%s", he.Detail)
+	}
+	// The suggested address is one that resolves, spelled as §4.2 spells it.
+	if !strings.Contains(he.Detail, `/provider/"aws"/region="us-west-1"`) {
+		t.Errorf("the hint does not name a usable address:\n%s", he.Detail)
+	}
+}
+
+// TestIndistinguishableBlocksSaySo is §6.4.3 rule 3: where the siblings differ
+// in nothing, suggesting a key-match would be suggesting an address that cannot
+// exist, and the honest answer is that the ordinal is all there is.
+func TestIndistinguishableBlocksSaySo(t *testing.T) {
+	same := `provider "aws" {
+  region = "us-west-1"
+}
+
+provider "aws" {
+  region = "us-west-1"
+}
+`
+	he := failWith(t, same, list(hew.Transform{Op: hew.OpRemove, Path: p(t, `/provider/"aws"`)}),
+		hewerr.CodeAmbiguousMatch, `/provider/"aws"`, 0, "share every attribute")
+	if strings.Contains(he.Detail, "distinguishing attribute") {
+		t.Errorf("no attribute distinguishes these blocks; the hint proposes one anyway:\n%s", he.Detail)
+	}
+}
+
+// TestKeyMatchOverBlocksWithNoHit reports HEW013 against the tuple rather than
+// falling through to the first block.
+func TestKeyMatchOverBlocksWithNoHit(t *testing.T) {
+	failWith(t, providers, list(hew.Transform{Op: hew.OpRemove, Path: p(t, `/provider/"aws"/alias="west"`)}),
+		hewerr.CodeNoMatch, `/provider/"aws"/alias="west"`, 0, "no element matches")
+}

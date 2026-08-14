@@ -181,6 +181,16 @@ func TestRoundTripIdentity(t *testing.T) {
 		{"edit in the second block of a type", hew.FormatHCL,
 			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"1\"\n}\n",
 			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"2\"\n}\n"},
+		// O45: two blocks sharing a `(type, labels)` tuple. RT1 is the whole
+		// assertion here — the differ has to pick an address that the applier
+		// resolves back to the SAME block, which for a repeated tuple is the
+		// key-match of §4.2 and was, until the ruling, nothing at all.
+		{"edit inside a repeated tuple", hew.FormatHCL,
+			"provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-west-1\"\n}\n\nprovider \"aws\" {\n  alias  = \"east\"\n  region = \"us-east-1\"\n}\n",
+			"provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-west-1\"\n}\n\nprovider \"aws\" {\n  alias  = \"east\"\n  region = \"us-east-2\"\n}\n"},
+		{"attribute added inside a repeated tuple", hew.FormatHCL,
+			"resource \"aws_s3_bucket\" \"a\" {\n  bucket = \"one\"\n}\n\nresource \"aws_s3_bucket\" \"a\" {\n  bucket = \"two\"\n}\n",
+			"resource \"aws_s3_bucket\" \"a\" {\n  bucket = \"one\"\n}\n\nresource \"aws_s3_bucket\" \"a\" {\n  bucket = \"two\"\n  acl    = \"private\"\n}\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

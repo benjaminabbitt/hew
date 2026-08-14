@@ -1,6 +1,8 @@
 package hcl
 
 import (
+	"strconv"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/benjaminabbitt/hew/go"
@@ -45,9 +47,6 @@ func DiffTree(src []byte) (*hew.DiffNode, error) {
 }
 
 func (d *doc) diffBody(b *bodyNode, path string) (*hew.DiffNode, error) {
-	if err := d.checkTuples(b, path); err != nil {
-		return nil, err
-	}
 	out := &hew.DiffNode{Kind: hew.KindMap}
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	// Blocks sharing a type are ONE child, because they share the first step
@@ -97,6 +96,9 @@ func (d *doc) diffTuples(items []*itemNode, depth int, path string) (*hew.DiffNo
 	if len(items) == 1 && len(items[0].labels) == depth {
 		return d.diffItem(items[0], path)
 	}
+	if len(items) > 1 && labelsExhausted(items, depth) {
+		return d.diffBlockSet(items, path)
+	}
 	out := &hew.DiffNode{Kind: hew.KindMap}
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	for _, g := range groupByLabel(items, depth) {
@@ -114,6 +116,76 @@ func (d *doc) diffTuples(items []*itemNode, depth int, path string) (*hew.DiffNo
 	}
 	out.Value = hew.NodeValue(m)
 	return out, nil
+}
+
+// labelsExhausted reports whether every item's labels run out at depth — the
+// blocks share their whole `(type, labels)` tuple, and no further label step
+// can tell them apart.
+func labelsExhausted(items []*itemNode, depth int) bool {
+	for _, it := range items {
+		if len(it.labels) != depth || it.kind != itemBlock {
+			return false
+		}
+	}
+	return true
+}
+
+// diffBlockSet projects a set of blocks sharing one `(type, labels)` tuple —
+// the construct §6.4.3 names as the one place hew can silently patch the wrong
+// node, and which O45 made addressable by KEY-MATCH on a distinguishing
+// attribute (§4.2).
+//
+// The differ picks that attribute explicitly rather than handing the set to
+// §9.4-R4's identity-field inference, because that inference falls back to
+// INDEX addressing when it cannot choose, and an index is not an address a
+// block set has: the patch would parse, resolve to nothing, and blame the user.
+// Where nothing distinguishes the blocks the answer is still §9.4-R6's — say
+// so, here, as HEW020 — because the alternative is guessing an ordinal, which
+// is a choice a reviewer makes and not one a differ may make (§7.2).
+func (d *doc) diffBlockSet(items []*itemNode, path string) (*hew.DiffNode, error) {
+	attr, ok := d.identityAttr(items)
+	if !ok {
+		return nil, &hewerr.Error{Code: hewerr.CodeInexpressible, Component: hewerr.ComponentDiffer,
+			Path: path,
+			Detail: "this body holds " + strconv.Itoa(len(items)) + " blocks sharing one (type, labels) tuple and no " +
+				"attribute distinguishes them, so §4.2's key-match cannot address one (O45). What is left is the " +
+				"ordinal selector of §6.4.3, which the notation writes as a `! match ord=` annotation a reviewer " +
+				"chooses (§7.2) — the differ will not guess one (§9.4-R6)"}
+	}
+	out := &hew.DiffNode{Kind: hew.KindMap, KeyedSet: true}
+	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, it := range items {
+		v, _ := d.attrValue(it, attr)
+		child, err := d.diffBody(it.body, path+"/"+attr+"="+attrToken(v))
+		if err != nil {
+			return nil, err
+		}
+		out.Children = append(out.Children, hew.DiffChild{
+			Key: attrToken(v), MatchField: attr, MatchValue: v, Node: child,
+		})
+		m.Content = append(m.Content, strNode(attrToken(v)), child.Value.Node())
+	}
+	out.Value = hew.NodeValue(m)
+	return out, nil
+}
+
+// identityAttr is §9.4-R4's identity rule over a block set: an attribute every
+// block has as a scalar and no two share. It is the same question the applier's
+// ambiguity hint asks, answered by the same function, so the address the differ
+// WRITES and the address the diagnostic SUGGESTS cannot drift apart.
+func (d *doc) identityAttr(items []*itemNode) (string, bool) {
+	name, _, ok := d.distinguishingAttr(items)
+	return name, ok
+}
+
+// attrToken is an identity value as diff-tree text: the spelling §4.2 would
+// use for it, which is also what makes two blocks' identities comparable.
+func attrToken(v hew.Value) string {
+	s, ok := hew.MatchSpelling(v)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 // groupByLabel splits items on their label at depth, first-seen order. An item
@@ -151,29 +223,11 @@ func (d *doc) diffItem(it *itemNode, path string) (*hew.DiffNode, error) {
 	return d.diffBody(it.body, path)
 }
 
-// checkTuples refuses a body that holds the same `(type, labels)` tuple twice.
-//
-// §6.4.3 settles that collision with an ordinal selector, and the notation
-// spells one only as a `! match ord=` annotation on a hunk anchor (§7.2) — a
-// choice a REVIEWER makes about which of two identical addresses was meant.
-// A differ that picked an ordinal on its own would be guessing, and a differ
-// that emitted the bare tuple would be handing the applier an address it must
-// refuse as HEW012. §9.4-R6 leaves one honest answer: say so, here, as HEW020.
-func (d *doc) checkTuples(b *bodyNode, path string) error {
-	seen := make(map[string]bool, len(b.items))
-	for _, it := range b.items {
-		key := tupleString(it.name, it.labels)
-		if seen[key] {
-			if path == "" {
-				path = "/"
-			}
-			return &hewerr.Error{Code: hewerr.CodeInexpressible, Component: hewerr.ComponentDiffer,
-				Path: path,
-				Detail: "this body holds more than one " + key + "; addressing repeated blocks needs the ordinal " +
-					"selector of §6.4.3, which the notation writes as a `! match ord=` annotation a reviewer chooses " +
-					"(§7.2) — the differ will not guess one (§9.4-R6)"}
-		}
-		seen[key] = true
-	}
-	return nil
-}
+// A body that holds the same `(type, labels)` tuple twice used to be refused
+// here, unconditionally, by a checkTuples pass that ran before any projection:
+// the ordinal selector was the only way to address such a block, the notation
+// spells one only as a `! match ord=` annotation a REVIEWER writes (§7.2), and
+// a differ that picked one would be guessing. O45 replaced the first half of
+// that reasoning — key-match now addresses a block set (§4.2) — so the refusal
+// moved into diffBlockSet, which refuses only what is genuinely unaddressable:
+// blocks that no attribute tells apart.

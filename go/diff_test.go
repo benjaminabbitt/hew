@@ -557,26 +557,35 @@ func TestDiffIsDeterministic(t *testing.T) {
 
 // --- identity scalars --------------------------------------------------------
 
-func TestValueScalarQuotesAmbiguousStrings(t *testing.T) {
+// TestValueScalarCarriesTheTypeAndTheRendererDoesTheQuoting: the differ used
+// to decide quoting itself, with its own copy of "which strings would re-read
+// as something else". O42 made that the renderer's rule, so what valueScalar
+// owes is the KIND — and the spelling that follows from it must still keep a
+// numeric-looking string a string.
+func TestValueScalarCarriesTheTypeAndTheRendererDoesTheQuoting(t *testing.T) {
 	cases := []struct {
 		tag, text string
 		kind      ScalarKind
-		quoted    bool
+		spelled   string
 	}{
-		{"!!str", "plain", ScalarString, false},
-		{"!!str", "8080", ScalarString, true},
-		{"!!str", "true", ScalarString, true},
-		{"!!str", "null", ScalarString, true},
-		{"!!str", "", ScalarString, true},
-		{"!!int", "8080", ScalarNumber, false},
-		{"!!float", "1.5", ScalarNumber, false},
-		{"!!bool", "true", ScalarBool, false},
-		{"!!null", "null", ScalarNull, false},
+		{"!!str", "plain", ScalarString, "plain"},
+		{"!!str", "8080", ScalarString, `"8080"`},
+		{"!!str", "true", ScalarString, `"true"`},
+		{"!!str", "null", ScalarString, `"null"`},
+		{"!!str", "", ScalarString, `""`},
+		{"!!str", "opt?", ScalarString, `"opt?"`},
+		{"!!int", "8080", ScalarNumber, "8080"},
+		{"!!float", "1.5", ScalarNumber, "1.5"},
+		{"!!bool", "true", ScalarBool, "true"},
+		{"!!null", "null", ScalarNull, "null"},
 	}
 	for _, c := range cases {
 		got := valueScalar(NodeValue(&yaml.Node{Kind: yaml.ScalarNode, Tag: c.tag, Value: c.text}))
-		if got.Kind != c.kind || got.Quoted != c.quoted {
-			t.Fatalf("%s %q -> %+v, want kind %v quoted %v", c.tag, c.text, got, c.kind, c.quoted)
+		if got.Kind != c.kind {
+			t.Errorf("%s %q -> kind %v, want %v", c.tag, c.text, got.Kind, c.kind)
+		}
+		if spelled := got.pathString(); spelled != c.spelled {
+			t.Errorf("%s %q renders as %s, want %s", c.tag, c.text, spelled, c.spelled)
 		}
 	}
 }
@@ -716,5 +725,108 @@ func TestDiffAcceptsSpellableKeys(t *testing.T) {
 	tl := diffOK(t, old, new, DiffOptions{Target: "package.json"})
 	if len(tl.Transform) == 0 {
 		t.Fatal("a changed version must produce transforms")
+	}
+}
+
+// --- keyed sets: a container with no address of its own (O45) ---------------
+
+// keyedSet builds the shape ext/hcl produces for a set of blocks sharing one
+// (type, labels) tuple: children addressed by a key-match on a distinguishing
+// attribute, in a container that names all of them at once.
+func keyedSet(field string, kv ...any) *DiffNode {
+	n := &DiffNode{Kind: KindMap, KeyedSet: true}
+	y := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for i := 0; i+1 < len(kv); i += 2 {
+		id := kv[i].(string)
+		val := kv[i+1].(*DiffNode)
+		n.Children = append(n.Children, DiffChild{
+			Key: id, MatchField: field, MatchValue: NodeValue(&yaml.Node{
+				Kind: yaml.ScalarNode, Tag: "!!str", Value: id}), Node: val,
+		})
+		y.Content = append(y.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: id}, val.Value.Node())
+	}
+	n.Value = NodeValue(y)
+	return n
+}
+
+// TestDiffAddressesAKeyedSetChildByIdentity: the address the differ writes for
+// such a child is the key-match of §4.2 and never a member name — the child has
+// no name to be addressed by.
+func TestDiffAddressesAKeyedSetChildByIdentity(t *testing.T) {
+	old := dmap("provider", keyedSet("alias", "east", dmap("region", dstr("us-east-1"))))
+	new := dmap("provider", keyedSet("alias", "east", dmap("region", dstr("us-east-2"))))
+	tl := diffOK(t, old, new, DiffOptions{Target: "main.tf"})
+	got := summarize(tl)
+	if !strings.Contains(got, `/provider/alias=east/region`) {
+		t.Fatalf("the child is not addressed by identity:\n%s", got)
+	}
+	for _, tr := range tl.Transform {
+		back, err := ParsePath(tr.Path.String())
+		if err != nil || !back.Equal(tr.Path) {
+			t.Fatalf("address %s does not round-trip: %v", tr.Path, err)
+		}
+	}
+}
+
+// TestDiffRefusesToAddOrRemoveInAKeyedSet is §9.4-R6 where it bites. Every
+// address such a container offers names all of its children, so an op AT the
+// container is one the applier must refuse — and a differ that emitted one
+// would hand the reader a patch that fails with someone else's mistake.
+func TestDiffRefusesToAddOrRemoveInAKeyedSet(t *testing.T) {
+	one := dmap("provider", keyedSet("alias", "east", dmap("region", dstr("us-east-1"))))
+	two := dmap("provider", keyedSet("alias",
+		"east", dmap("region", dstr("us-east-1")),
+		"west", dmap("region", dstr("us-west-1"))))
+
+	for _, c := range []struct {
+		name     string
+		old, new *DiffNode
+		names    string
+	}{
+		{"a child appears", one, two, `the child with alias=west appears`},
+		{"a child disappears", two, one, "gone, or its identifying attribute changed"},
+		{"a child is re-identified", one,
+			dmap("provider", keyedSet("alias", "eu", dmap("region", dstr("us-east-1")))),
+			"gone, or its identifying attribute changed"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := DiffTrees(c.old, c.new, FormatHCL, DiffOptions{Target: "main.tf"})
+			if err == nil {
+				t.Fatal("this edit has no address; the differ must refuse it (§9.4-R6)")
+			}
+			he, ok := hewerr.As(err)
+			if !ok || he.Code != hewerr.CodeInexpressible || he.Component != hewerr.ComponentDiffer {
+				t.Fatalf("want HEW020 from the differ, got %v", err)
+			}
+			if he.Path != "/provider" {
+				t.Errorf("the container is not named: %q", he.Path)
+			}
+			if !strings.Contains(he.Detail, c.names) {
+				t.Errorf("detail %q does not name what changed (%q)", he.Detail, c.names)
+			}
+			if !strings.Contains(he.Detail, "ordinal") {
+				t.Errorf("detail %q does not name the remedy", he.Detail)
+			}
+		})
+	}
+}
+
+// TestDiffPatchesInsideAKeyedSetChild is the other half: an edit that keeps
+// every identity is exactly what key-match addressing was added for, and it
+// must not be caught by the refusal above.
+func TestDiffPatchesInsideAKeyedSetChild(t *testing.T) {
+	old := dmap("provider", keyedSet("alias",
+		"east", dmap("region", dstr("us-east-1")),
+		"west", dmap("region", dstr("us-west-1"))))
+	new := dmap("provider", keyedSet("alias",
+		"east", dmap("region", dstr("us-east-2")),
+		"west", dmap("region", dstr("us-west-1"))))
+	tl := diffOK(t, old, new, DiffOptions{Target: "main.tf"})
+	if len(tl.Transform) == 0 {
+		t.Fatal("the changed region must produce transforms")
+	}
+	if strings.Contains(summarize(tl), `alias="west"/region`) {
+		t.Errorf("the untouched sibling is in the patch:\n%s", summarize(tl))
 	}
 }
