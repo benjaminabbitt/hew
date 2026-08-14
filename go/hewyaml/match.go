@@ -137,8 +137,13 @@ func (d *doc) describe(n *ynode) string {
 	return n.kind.String()
 }
 
-// nodeKind maps a parsed node onto the §7.1 `? kind` vocabulary.
+// nodeKind maps a parsed node onto the §7.1 `? kind` vocabulary. A comment
+// address resolves to no node and matches no kind — §7.1's vocabulary has no
+// entry for a comment — so the assertion fails rather than crashing.
 func (d *doc) nodeKind(n *ynode) hew.NodeKind {
+	if n == nil {
+		return ""
+	}
 	switch n.kind {
 	case nMap:
 		return hew.KindMap
@@ -153,7 +158,11 @@ func (d *doc) nodeKind(n *ynode) hew.NodeKind {
 }
 
 // childCount is the child count `? count` and `? exhaustive` assert over.
+// ok=false covers both a scalar and a comment address: neither is a container.
 func childCount(n *ynode) (int, bool) {
+	if n == nil {
+		return 0, false
+	}
 	switch n.kind {
 	case nMap:
 		return len(n.entries), true

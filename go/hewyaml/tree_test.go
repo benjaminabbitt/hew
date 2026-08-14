@@ -35,6 +35,8 @@ const spanDoc = "" +
 	"plain: hello world\n" +
 	"trailing: spaced   \n" +
 	"comment: value # note\n" +
+	"tabbed: value\t# note\n" +
+	"spacehash: a #b\n" +
 	"hash: a#b\n" +
 	"colon: http://example.com\n" +
 	"sq: 'it''s here'\n" +
@@ -42,6 +44,8 @@ const spanDoc = "" +
 	"lit: |\n  one\n\n  two\n" +
 	"fold: >-\n  a\n  b\n" +
 	"cont: first\n  second\n" +
+	"gapped: a\n  b\n\n  c\n" +
+	"commented: a\n  b\n  # not content\n" +
 	"flowmap: {a: 1, b: [2, 3], c: \"}\"}\n" +
 	"flowseq: [1, 'x, y', {k: v}]\n" +
 	"empty:\n" +
@@ -51,21 +55,25 @@ const spanDoc = "" +
 func TestScalarSpans(t *testing.T) {
 	d := mustDoc(t, spanDoc)
 	for key, want := range map[string]string{
-		"plain":    "hello world",
-		"trailing": "spaced",
-		"comment":  "value",
-		"hash":     "a#b",
-		"colon":    "http://example.com",
-		"sq":       "'it''s here'",
-		"dq":       `"a \" b # c"`,
-		"lit":      "|\n  one\n\n  two",
-		"fold":     ">-\n  a\n  b",
-		"cont":     "first\n  second",
-		"flowmap":  `{a: 1, b: [2, 3], c: "}"}`,
-		"flowseq":  "[1, 'x, y', {k: v}]",
-		"empty":    "",
-		"anchored": "42",
-		"alias":    "*anc",
+		"plain":     "hello world",
+		"trailing":  "spaced",
+		"comment":   "value",
+		"tabbed":    "value",
+		"spacehash": "a",
+		"hash":      "a#b",
+		"gapped":    "a\n  b\n\n  c",
+		"commented": "a\n  b",
+		"colon":     "http://example.com",
+		"sq":        "'it''s here'",
+		"dq":        `"a \" b # c"`,
+		"lit":       "|\n  one\n\n  two",
+		"fold":      ">-\n  a\n  b",
+		"cont":      "first\n  second",
+		"flowmap":   `{a: 1, b: [2, 3], c: "}"}`,
+		"flowseq":   "[1, 'x, y', {k: v}]",
+		"empty":     "",
+		"anchored":  "42",
+		"alias":     "*anc",
 	} {
 		if got := d.text(valueOf(t, d, key)); got != want {
 			t.Errorf("%s: span is %q, want %q", key, got, want)
@@ -92,11 +100,17 @@ func TestFlowChildSpans(t *testing.T) {
 	if got := d.text(fs.elems[2].val); got != "{k: v}" {
 		t.Errorf("flowseq[2]: %q", got)
 	}
+	// A flow element has no "-" marker, so its element start is the value.
+	for i, el := range fs.elems {
+		if el.dash != el.val.start {
+			t.Errorf("flowseq[%d]: dash %d is not the value start %d", i, el.dash, el.val.start)
+		}
+	}
 }
 
 func TestKeySpans(t *testing.T) {
-	d := mustDoc(t, "\"quoted: key\": 1\nplain: 2\n'sq key': 3\n")
-	for i, want := range []string{`"quoted: key"`, "plain", "'sq key'"} {
+	d := mustDoc(t, "\"quoted: key\": 1\nplain: 2\n'sq key': 3\nempty:\n")
+	for i, want := range []string{`"quoted: key"`, "plain", "'sq key'", "empty"} {
 		e := d.root.entries[i]
 		if got := string(d.src[e.keyStart:e.keyEnd]); got != want {
 			t.Errorf("key %d: %q, want %q", i, got, want)
@@ -154,6 +168,27 @@ func TestAliasSpans(t *testing.T) {
 	if d.aliases["x"] != 1 {
 		t.Errorf("alias count for &x: %d, want 1", d.aliases["x"])
 	}
+
+	// An alias ends at a flow terminator or at end of file, not only at a
+	// newline.
+	d = mustDoc(t, "a: &x 1\nm: {k: *x}\nlast: *x")
+	if got := d.text(valueOf(t, d, "m").lookup("k").val); got != "*x" {
+		t.Errorf("alias in a flow map: %q", got)
+	}
+	if got := d.text(valueOf(t, d, "last")); got != "*x" {
+		t.Errorf("alias at end of file: %q", got)
+	}
+}
+
+func TestMergeSourcesSkipNonMappings(t *testing.T) {
+	// A merge list whose first entry does not name a mapping is skipped, not
+	// treated as the end of the search.
+	src := "s: &s 1\nbase: &base\n  a: 1\nm:\n  <<: [*s, *base]\n  b: 2\n"
+	d := mustDoc(t, src)
+	e, _, anchor := d.mergedLookup(valueOf(t, d, "m"), "a")
+	if e == nil || anchor != "base" {
+		t.Fatalf("merge list lookup: entry=%v anchor=%q", e, anchor)
+	}
 }
 
 func TestCommentChildren(t *testing.T) {
@@ -203,6 +238,30 @@ func TestCommentChildrenOfNonContainers(t *testing.T) {
 	d := mustDoc(t, "a: 1\n")
 	if cs := d.commentChildren(valueOf(t, d, "a")); cs != nil {
 		t.Errorf("a scalar has no comment children: %v", cs)
+	}
+}
+
+func TestCommentTextStripsTheMarkerAndOneSpace(t *testing.T) {
+	// §6.1: comment equality is the text after the marker and ONE leading
+	// space. A marker with no space, and a marker with nothing after it, are
+	// both legal.
+	d := mustDoc(t, "m:\n  #tight\n  #  two spaces\n  #\n  # \n  a: 1\n")
+	var got []string
+	for _, c := range d.commentChildren(valueOf(t, d, "m")) {
+		got = append(got, c.text)
+	}
+	want := []string{"tight", " two spaces", "", ""}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("comment texts: %q, want %q", got, want)
+	}
+}
+
+func TestScalarDocumentContinues(t *testing.T) {
+	// The root node is owned by no key, so a plain scalar document continues
+	// over any indented line at all.
+	d := mustDoc(t, "hello\n world\n")
+	if got := d.text(d.root); got != "hello\n world" {
+		t.Errorf("scalar document span: %q", got)
 	}
 }
 

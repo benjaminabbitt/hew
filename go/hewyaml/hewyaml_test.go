@@ -342,6 +342,13 @@ func TestCommentAddressing(t *testing.T) {
 		mustFail(t, target, "  - op: add\n    path: /server/#3\n    value: plain\n",
 			hewerr.CodeInexpressible, "/server/#3")
 	})
+	t.Run("a comment is neither a container nor a kind", func(t *testing.T) {
+		mustFail(t, target, "  - op: test\n    path: /server/#0\n    count: 0\n",
+			hewerr.CodeAssertionFailed, "/server/#0")
+		mustFail(t, target, "  - op: test\n    path: /server/#0\n    kind: scalar\n",
+			hewerr.CodeAssertionFailed, "/server/#0")
+		mustApply(t, target, "  - op: test\n    path: /server/#9\n    absent: true\n", target)
+	})
 	t.Run("cannot descend through a comment", func(t *testing.T) {
 		mustFail(t, target, "  - op: test\n    path: /server/#0/x\n    value: 1\n",
 			hewerr.CodeStaleTarget, "/server/#0/x")

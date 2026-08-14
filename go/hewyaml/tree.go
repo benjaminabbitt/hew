@@ -357,7 +357,7 @@ func (d *doc) buildSeq(n *ynode, baseIndent int) error {
 // (§8.2). It never walks past the container's own region.
 func (d *doc) commentBlockStart(lineStart, regionStart int) int {
 	p := lineStart
-	for p > regionStart && p > 0 {
+	for p > regionStart {
 		prev := d.lineStartOf(p - 1)
 		if !d.isCommentLine(prev) {
 			break
@@ -418,14 +418,31 @@ func (d *doc) scanScalar(start, baseIndent int, flow bool) int {
 	if flow || end == start {
 		return end
 	}
-	// A plain scalar continues on following lines indented deeper than its
-	// own key; a blank or a comment line ends it.
+	// A plain scalar continues on following lines indented deeper than its own
+	// key. A comment line is not part of it: "#" after whitespace opens a
+	// comment anywhere a plain scalar can appear.
+	return d.scanIndented(end, baseIndent, true)
+}
+
+// scanIndented extends a scalar's span over the following lines indented
+// deeper than baseIndent — the continuation rule both a block scalar and a
+// multi-line plain scalar follow. A blank line is interior to the scalar only
+// when a deeper line follows it; a trailing blank belongs to the document.
+func (d *doc) scanIndented(end, baseIndent int, stopAtComment bool) int {
 	for {
 		next := d.blockEndOf(end)
 		if next >= len(d.src) || next == end {
 			return end
 		}
-		if d.isCommentLine(next) || d.firstNonSpace(next) >= d.lineEndOf(next) {
+		if d.firstNonSpace(next) >= d.lineEndOf(next) {
+			after := d.blockEndOf(d.lineEndOf(next))
+			if after >= len(d.src) || d.indentOf(after) <= baseIndent {
+				return end
+			}
+			end = d.lineEndOf(next)
+			continue
+		}
+		if stopAtComment && d.isCommentLine(next) {
 			return end
 		}
 		if d.indentOf(next) <= baseIndent {
@@ -472,29 +489,11 @@ func (d *doc) scanQuoted(start int) int {
 	return len(d.src)
 }
 
+// scanBlockScalar spans a "|" or ">" scalar: its header line plus every
+// following line indented deeper than the key. Its content is literal, so a
+// line that looks like a comment is content.
 func (d *doc) scanBlockScalar(start, baseIndent int) int {
-	end := d.lineEndOf(start)
-	for {
-		next := d.blockEndOf(end)
-		if next >= len(d.src) || next == end {
-			return end
-		}
-		blank := d.firstNonSpace(next) >= d.lineEndOf(next)
-		if !blank && d.indentOf(next) <= baseIndent {
-			return end
-		}
-		if blank {
-			// A blank line may be interior to the scalar; only keep it if a
-			// deeper-indented line follows.
-			after := d.blockEndOf(d.lineEndOf(next))
-			if after >= len(d.src) || d.indentOf(after) <= baseIndent {
-				return end
-			}
-			end = d.lineEndOf(next)
-			continue
-		}
-		end = d.trimRight(next, d.lineEndOf(next))
-	}
+	return d.scanIndented(d.lineEndOf(start), baseIndent, false)
 }
 
 func (d *doc) scanAlias(start int) int {
