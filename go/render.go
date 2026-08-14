@@ -344,7 +344,7 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 					after = &rel[0]
 				}
 			}
-			if before == nil && !t.Before.IsZero() {
+			if !t.Before.IsZero() {
 				if rel, ok := relSegs(anchor, t.Before); ok && len(rel) == 1 {
 					before = &rel[0]
 				}

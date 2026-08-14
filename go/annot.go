@@ -205,27 +205,24 @@ func noArgs(a annotation) error {
 	return nil
 }
 
-// cutToken splits off the first whitespace-delimited token, keeping quoted
-// and bracketed runs whole.
+// cutToken splits off the first whitespace-delimited token, keeping a quoted
+// run whole: an assertion's path is one token, and a key-match segment may
+// quote a value that contains spaces (§4.2's `id="a b"`).
 func cutToken(s string) (string, string) {
 	s = strings.TrimLeft(s, " \t")
-	depth, inQuote := 0, false
+	inQuote := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case inQuote:
 			if c == '\\' {
-				i++
+				i++ // an escaped quote does not close the run
 			} else if c == '"' {
 				inQuote = false
 			}
 		case c == '"':
 			inQuote = true
-		case c == '[' || c == '{':
-			depth++
-		case c == ']' || c == '}':
-			depth--
-		case (c == ' ' || c == '\t') && depth == 0:
+		case c == ' ' || c == '\t':
 			return s[:i], s[i:]
 		}
 	}

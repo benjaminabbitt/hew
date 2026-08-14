@@ -565,6 +565,29 @@ func TestParseLowering(t *testing.T) {
     value: ~> 5.0
 `,
 	}, {
+		name: "an assertion path is one token even when a quoted value holds spaces",
+		body: "@@ /servers @@\n? expect /servers/name=\"my server\"/port = 8080\n? absent /provider/\"aws\"/region\n  keep: 1\n",
+		want: `  - op: test
+    path: /servers/name="my server"/port
+    value: 8080
+  - op: test
+    path: /provider/"aws"/region
+    absent: true
+  - op: test
+    path: /servers/keep
+    value: 1
+`,
+	}, {
+		name: "a quoted match value may carry an escaped quote",
+		body: "@@ /a @@\n? expect /a/name=\"say \\\"hi\\\"\"/n = 1\n  keep: 1\n",
+		want: `  - op: test
+    path: /a/name="say \"hi\""/n
+    value: 1
+  - op: test
+    path: /a/keep
+    value: 1
+`,
+	}, {
 		name: "an empty block and an empty container have their empty values",
 		body: "@@ / @@\n  features {}\n  opts: {\n  }\n  list: [\n  ]\n",
 		want: `  - op: test
@@ -729,6 +752,7 @@ func TestParseErrors(t *testing.T) {
 		{"bad margin", hdr + "@@ / @@\n* a: 1\n", hewerr.CodeParse, 6, "not a margin character"},
 		{"missing margin space", hdr + "@@ / @@\n+a: 1\n", hewerr.CodeParse, 6, "must be a single space"},
 		{"unexpected indentation", hdr + "@@ / @@\n  a: 1\n    b: 2\n", hewerr.CodeParse, 7, "unexpected indentation"},
+		{"a body line shallower than the hunk's first", hdr + "@@ / @@\n    a: 1\n  b: 2\n", hewerr.CodeParse, 7, "unexpected indentation"},
 		{"stray closing delimiter", hdr + "@@ / @@\n  }\n", hewerr.CodeParse, 6, "unexpected closing delimiter"},
 		{"mixed margins in an added container", hdr + "@@ / @@\n+ a {\n-   b = 1\n+ }\n", hewerr.CodeParse, 7, "mixed margins"},
 		{"unknown assertion", hdr + "@@ / @@\n? probably /a\n  b: 1\n", hewerr.CodeParse, 6, "unknown assertion"},
