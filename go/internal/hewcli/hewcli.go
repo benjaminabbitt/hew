@@ -11,13 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/hewhcl"
-	"github.com/benjaminabbitt/hew/hewjson"
-	"github.com/benjaminabbitt/hew/hewjsonc"
-	"github.com/benjaminabbitt/hew/hewtoml"
-	"github.com/benjaminabbitt/hew/hewyaml"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/hewhcl"
+	"github.com/benjaminabbitt/hew/go/hewjson"
+	"github.com/benjaminabbitt/hew/go/hewjsonc"
+	"github.com/benjaminabbitt/hew/go/hewtoml"
+	"github.com/benjaminabbitt/hew/go/hewyaml"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // Run executes argv (without argv0) with relative paths resolved against

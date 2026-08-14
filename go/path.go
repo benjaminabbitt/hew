@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // Version is the .hew notation version; TransformsVersion is the version

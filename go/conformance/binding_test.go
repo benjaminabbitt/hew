@@ -3,16 +3,16 @@ package conformance
 import (
 	"fmt"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/hewdiff"
-	"github.com/benjaminabbitt/hew/hewhcl"
-	"github.com/benjaminabbitt/hew/hewjson"
-	"github.com/benjaminabbitt/hew/hewjsonc"
-	"github.com/benjaminabbitt/hew/hewtoml"
-	"github.com/benjaminabbitt/hew/hewyaml"
-	"github.com/benjaminabbitt/hew/internal/harness"
-	"github.com/benjaminabbitt/hew/internal/hewcli"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/hewdiff"
+	"github.com/benjaminabbitt/hew/go/hewhcl"
+	"github.com/benjaminabbitt/hew/go/hewjson"
+	"github.com/benjaminabbitt/hew/go/hewjsonc"
+	"github.com/benjaminabbitt/hew/go/hewtoml"
+	"github.com/benjaminabbitt/hew/go/hewyaml"
+	"github.com/benjaminabbitt/hew/go/internal/harness"
+	"github.com/benjaminabbitt/hew/go/internal/hewcli"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // applyByFormat dispatches to the format bindings this slice ships (§8.1's

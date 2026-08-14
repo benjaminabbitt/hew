@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 func mustVal(t *testing.T, x any) Value {

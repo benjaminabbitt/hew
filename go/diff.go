@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // The three spellings of §9.4-R2's sibling radius that are not a plain count.

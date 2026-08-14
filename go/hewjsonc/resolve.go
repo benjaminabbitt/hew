@@ -3,8 +3,8 @@ package hewjsonc
 import (
 	"fmt"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // ref is a resolved location. Exactly one of node and cmt is set: a value node,

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // alreadyApplied is the §10.6 diagnostic: the after-image holds in full, so

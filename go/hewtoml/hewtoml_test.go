@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // hewtDoc wraps transform records in a .hewt document for the "t.toml" target.

@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // --- a Document over yaml.Node, so Resolve is exercised independently of any

@@ -1,4 +1,4 @@
-module github.com/benjaminabbitt/hew
+module github.com/benjaminabbitt/hew/go
 
 go 1.25.0
 

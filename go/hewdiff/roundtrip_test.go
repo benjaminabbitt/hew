@@ -3,12 +3,12 @@ package hewdiff
 import (
 	"testing"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/hewhcl"
-	"github.com/benjaminabbitt/hew/hewjson"
-	"github.com/benjaminabbitt/hew/hewjsonc"
-	"github.com/benjaminabbitt/hew/hewtoml"
-	"github.com/benjaminabbitt/hew/hewyaml"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/hewhcl"
+	"github.com/benjaminabbitt/hew/go/hewjson"
+	"github.com/benjaminabbitt/hew/go/hewjsonc"
+	"github.com/benjaminabbitt/hew/go/hewtoml"
+	"github.com/benjaminabbitt/hew/go/hewyaml"
 )
 
 func apply(target []byte, tl hew.TransformList) ([]byte, error) {

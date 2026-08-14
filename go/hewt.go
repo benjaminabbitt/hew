@@ -7,7 +7,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 	"gopkg.in/yaml.v3"
 )
 

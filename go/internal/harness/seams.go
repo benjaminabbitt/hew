@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // CheckError asserts an error-kind case's declared contract against an actual

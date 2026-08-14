@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // edit is one byte-range splice against the source the doc was parsed from:

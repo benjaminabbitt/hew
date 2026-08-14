@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/go"
 	"gopkg.in/yaml.v3"
 )
 

@@ -3,7 +3,7 @@ package hewhcl
 import (
 	"strings"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // §8.5's alignment rule: "`hclwrite` re-aligns `=` within a body. Hew adopts

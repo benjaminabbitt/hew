@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/hewdiff"
-	"github.com/benjaminabbitt/hew/internal/hewsource"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/hewdiff"
+	"github.com/benjaminabbitt/hew/go/internal/hewsource"
 )
 
 type diffFlags struct {

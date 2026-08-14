@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // Binding wires the implementation under test into the engine. Every hook

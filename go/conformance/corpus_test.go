@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/benjaminabbitt/hew/internal/harness"
+	"github.com/benjaminabbitt/hew/go/internal/harness"
 )
 
 var (

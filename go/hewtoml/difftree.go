@@ -5,8 +5,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // DiffTree parses source bytes into the format-neutral tree hew.DiffTrees

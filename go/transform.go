@@ -3,7 +3,7 @@ package hew
 import (
 	"fmt"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // FormatID names a target format (§8.0).

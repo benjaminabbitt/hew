@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // Parse reads a hew patch document (§2-§7) and lowers it directly to the

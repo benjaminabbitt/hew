@@ -3,8 +3,8 @@ package hewyaml
 import (
 	"testing"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 	"gopkg.in/yaml.v3"
 )
 

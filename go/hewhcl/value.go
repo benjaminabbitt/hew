@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/benjaminabbitt/hew/go"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
-	"github.com/benjaminabbitt/hew"
 	"github.com/zclconf/go-cty/cty"
 	"gopkg.in/yaml.v3"
 )

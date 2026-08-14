@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/benjaminabbitt/hew"
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // Apply is the TOML binding's apply half (§8.4, Appendix A.4's Applier.Apply

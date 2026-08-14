@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benjaminabbitt/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // errorManifest is a conformant error-kind manifest; tests mutate one field at
