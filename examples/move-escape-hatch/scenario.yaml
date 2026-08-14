@@ -1,0 +1,71 @@
+title: Moving a node — the escape hatch
+description: The one thing the mirror grammar cannot say, said in the IR instead, and what the mirror-grammar substitute costs.
+order: 5
+show:
+  - config.yaml
+  - move.hewt
+  - lossy.hew
+intro: |
+  hew has one authoring notation, and one notation does not express everything. A
+  *move* is the honest gap: shape-mirroring has no way to write "this node, but over
+  there", because a margin marks a line and a move is a correspondence between two
+  lines in different regions of the document.
+
+  So hew does not pretend. The IR — the transform list, which had to exist for the
+  conformance corpus and for RFC 6902 interop anyway — is also an accepted input, and
+  `move` is one of its operations. `move.hewt` above is the whole escape hatch: no
+  second grammar, no reserved syntax, just the layer underneath, exposed.
+
+  `transcribed.yaml` is a second copy of `config.yaml`, used below to run the
+  mirror-grammar alternative against the same starting bytes.
+steps:
+  - title: Apply the transform list
+    note: |
+      `--transforms` reads a `.hewt` and feeds it to the same applier a `.hew` patch
+      reaches, so this path inherits the entire applier conformance suite. It is
+      mutually exclusive with a positional patch argument — one input surface per
+      invocation.
+    run: [apply, --transforms, move.hewt]
+    expect_exit: 0
+    watch: [config.yaml]
+    caption: |
+      The two-line comment moved with the node. That is the point of `move` over
+      delete-and-add: the applier relocates the subtree's *source bytes* and the
+      comments attached to them, which no transcription can do.
+
+  - title: The mirror-grammar substitute, for comparison
+    note: |
+      You can express a move in the mirror grammar. `lossy.hew` does it the only way
+      available — a `-` where the node was, a `+` where it should be — and hew applies
+      it without complaint, because it is a perfectly legal removal followed by a
+      perfectly legal addition. hew does not detect the pattern and does not warn.
+    run: [apply, -i, lossy.hew]
+    expect_exit: 0
+    watch: [transcribed.yaml]
+    caption: |
+      Same tree, different bytes: the comment is gone. It was attached to the node that
+      was removed, and the node that was added is a fresh scalar transcribed from the
+      patch text. For a two-line comment that is an annoyance; for a large subtree with
+      its own formatting it is a diff nobody wants to review.
+
+  - title: What the substitute actually says
+    note: |
+      `--transforms-out` writes the abstract transform list a patch compiles to, and
+      nothing else — the parser seam, exposed. Run against `lossy.hew` it shows the
+      substitute for what it is.
+    run: [apply, --transforms-out, "-", lossy.hew]
+    expect_exit: 0
+    caption: |
+      A `remove` and an `add`. No `move` anywhere, because the notation never had one to
+      give — which is exactly the reading of the file the escape hatch exists to avoid
+      needing.
+outro: |
+  ## The boundary, stated once
+
+  Moves, copies, and renames live in the `.hewt`. Everything else lives in the mirror
+  grammar. That trade was deliberate: an inventory of eight config-editing mechanisms
+  across five engines found that not one of them performs a move — a move is what a
+  schema migration does, and schema migrations are code with a version gate. Paying for
+  cross-hunk correspondence syntax in the human notation, to serve an operation the
+  human notation's users do not perform, is a trade hew declines. There is no third
+  surface, and none is reserved.

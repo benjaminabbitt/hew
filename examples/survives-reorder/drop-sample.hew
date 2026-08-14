@@ -1,0 +1,7 @@
+hew: 1
+
+--- settings.yaml format=yaml
+
+@@ /telemetry @@
+  enabled: true
+- sample_rate: 0.1

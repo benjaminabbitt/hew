@@ -1,0 +1,101 @@
+title: Producing a patch with hew diff
+description: Edit a file, diff it into a .hew patch, apply that patch to the original, and get the bytes back — then do it against git.
+order: 6
+show:
+  - app.json
+intro: |
+  You do not have to write `.hew` patches by hand. `hew diff` takes two documents and
+  produces one, the way `diff -u` does — and like `diff -u`, its output is meant to be
+  read before it is applied.
+
+  `original.json` (not shown; identical to `app.json` above) is a pristine copy kept
+  aside, so the patch produced below can be applied to the file as it was and the result
+  compared byte for byte against the file as it should be. That round trip — differ then
+  applier, two of hew's four components, inverses of each other — is one of the two
+  identities the conformance corpus pins.
+steps:
+  - title: Make the edit by hand
+    note: |
+      Two changes, in two different objects: bump the timeout, turn tracing on.
+    write:
+      - path: app.json
+        label: "**`app.json`** — edited"
+        content: |
+          {
+            "name": "gateway",
+            "server": {
+              "port": 8080,
+              "timeout": 60
+            },
+            "features": {
+              "tracing": true
+            }
+          }
+
+  - title: Diff the two documents
+    note: |
+      Both arguments are *source descriptors*, not necessarily paths — a working-tree
+      path, `-` for stdin, or a `REV:path` git anchor, which the next step uses. `-o`
+      writes the patch to a file instead of stdout.
+    run: [diff, original.json, app.json, -o, change.hew]
+    expect_exit: 0
+    show: [change.hew]
+    caption: |
+      Two hunks, one per changed object, each carrying a sibling of context. The context
+      radius is a **strictness dial, not a verbosity dial** — context lines compile to
+      assertions, so `-U 0` would not make this patch tidier, it would make it weaker.
+
+  - title: Apply it to the original
+    note: |
+      The patch names `app.json` as its target, because that is the document it
+      describes. `-t` overrides that, which is how a patch produced from one pair of
+      files gets applied to another copy.
+    run: [apply, -i, -t, original.json, change.hew]
+    expect_exit: 0
+    watch: [original.json]
+    identical:
+      - original.json == app.json
+    caption: |
+      Not "equivalent". Not "semantically the same tree". The same bytes.
+
+  - title: Commit that, so git has a version to compare against
+    note: |
+      The interesting invocation of `hew diff` is against history rather than against a
+      second copy of a file. That needs a repository, so here is one.
+    git:
+      - [init, -q, -b, main, .]
+      - [add, app.json]
+      - [commit, -q, -m, "gateway config"]
+
+  - title: Diff the working tree against HEAD
+    note: |
+      Now change the file again — drop the timeout, which is a *removal*, not an edit —
+      and ask what has happened to it since the commit.
+    write:
+      - path: app.json
+        label: "**`app.json`** — edited again, uncommitted"
+        content: |
+          {
+            "name": "gateway",
+            "server": {
+              "port": 8080
+            },
+            "features": {
+              "tracing": true
+            }
+          }
+    run: [diff, "HEAD:app.json", app.json]
+    expect_exit: 0
+    caption: |
+      `HEAD:app.json` follows git's own `<tree-ish>:<path>` convention and is resolved by
+      running git plumbing as a subprocess — the library core has no git awareness at
+      all, and if `git` is not on `PATH` this is exit 2 rather than a silent fallback to
+      treating the descriptor as a filename. `HEAD~3:.mcp.json` works the same way.
+outro: |
+  ## Reading before applying
+
+  The reason `hew diff` emits notation rather than an op list is the same reason
+  `diff -u` beat `ed` scripts: a reviewer can read one hunk and see both the change and
+  its surroundings without executing anything mentally. A generated patch is still a
+  patch a human is expected to read — and, because its context lines are assertions,
+  still a patch that will refuse rather than misapply if the world moves underneath it.

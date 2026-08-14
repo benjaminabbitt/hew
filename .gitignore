@@ -6,3 +6,7 @@
 .claude/
 .ctxloom/
 opencode.json
+
+# Built binaries. `just examples` builds go/hew so the transcript generator
+# drives the real CLI rather than an in-process shim.
+/go/hew

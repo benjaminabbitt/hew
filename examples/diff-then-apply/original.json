@@ -1,0 +1,10 @@
+{
+  "name": "gateway",
+  "server": {
+    "port": 8080,
+    "timeout": 30
+  },
+  "features": {
+    "tracing": false
+  }
+}

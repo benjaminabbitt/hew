@@ -1,0 +1,52 @@
+title: When the target has drifted
+description: A patch written against a file that has since changed — HEW010, exit 1, and not one byte written.
+order: 2
+show:
+  - config.yaml
+  - bump-timeout.hew
+intro: |
+  The patch was written when `replicas` was `3`. It is `5` now — somebody scaled the
+  service and the patch never heard about it. The line the patch actually wants to
+  change, `timeout`, is exactly where it was expected; only the *context* has drifted.
+
+  This is the case the whole format exists for. A context line in a `.hew` patch is not
+  decoration and it is not a hint for a fuzzy matcher: it compiles to a `test` transform
+  in the IR, and a failed `test` is a failed apply. hew has no `--fuzz`, so there is
+  nothing to turn up and nothing to guess with.
+steps:
+  - title: Ask first, with --dry-run
+    note: |
+      `--dry-run` does everything an apply does — read, address, match, assert — and then
+      writes nothing. It is how you find out whether a patch still fits before you let it
+      near the file.
+    run: [apply, --dry-run, bump-timeout.hew]
+    expect_exit: 1
+    unchanged: [config.yaml]
+    caption: |
+      The diagnostic names four things a person needs: the error code (`HEW010`
+      stale-target), the node it was asserting about (`/service/replicas`), the patch
+      line that made the assertion (`bump-timeout.hew:6`), and both values — what the
+      patch expected against what the file holds.
+
+  - title: Try it for real anyway
+    note: |
+      A real apply is no more permissive than the rehearsal. hew stages every file
+      section completely before it commits any of them, so a target that fails at the
+      staging boundary is never opened for writing at all.
+    run: [apply, -i, bump-timeout.hew]
+    expect_exit: 1
+    unchanged: [config.yaml]
+    caption: |
+      Exit 1, and the file below is byte-identical to the one at the top of this page —
+      the generator asserts that, it is not a claim in prose. There is no `.rej` file,
+      no half-applied hunk, and no `timeout: 60` sitting in a file whose `replicas` the
+      patch author had wrong.
+outro: |
+  ## Fixing it
+
+  You do not fix this by loosening hew. You fix it by looking: the patch asserted
+  something false about the file, which is information, and the right response is to
+  find out why `replicas` moved before deciding that `timeout` should. When the answer
+  is "the drift is irrelevant", regenerate the patch against the current file with
+  [`hew diff`](../diff-then-apply/) — or narrow it, since a hunk's context radius is a
+  strictness dial and a patch may carry as little context as it can honestly assert.

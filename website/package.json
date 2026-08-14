@@ -1,0 +1,23 @@
+{
+  "name": "hew-docs",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.28.0",
+    "astro": "4.15.0",
+    "astro-mermaid": "^2.0.1",
+    "sharp": "0.33.5"
+  },
+  "overrides": {
+    "zod": "3.23.8",
+    "zod-to-json-schema": "3.23.0",
+    "@astrojs/sitemap": "3.1.6"
+  }
+}

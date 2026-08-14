@@ -1,0 +1,56 @@
+title: Interop and provenance — --ops and --record
+description: The resolved RFC 6901 op list a patch amounts to, and the record of what an apply actually did.
+order: 7
+show:
+  - mcp.json
+  - pin-node.hew
+intro: |
+  Two flags for the machines. `--ops` answers *what would this patch do to this
+  document, in a form some other tool understands*; `--record` answers *what did this
+  apply actually do, and to which bytes*. Both are derived artifacts — hew reads neither
+  back — and both exist because a tool that edits other people's config files should be
+  able to say what it did afterwards.
+steps:
+  - title: Resolve the patch against the document
+    note: |
+      `--ops` prints the **resolved** RFC 6901 op list and writes nothing. "Resolved" is
+      the load-bearing word: the patch addresses `/mcpServers/name=github`, an identity;
+      the op list addresses `/mcpServers/1`, a position. Resolution is what turns one
+      into the other, and it needs a concrete document to do it, so `--ops` reads the
+      target even though it never writes one.
+    run: [apply, --ops, pin-node.hew]
+    expect_exit: 0
+    unchanged: [mcp.json]
+    caption: |
+      That is an RFC 6902 patch, and it is *only true of this document* — reorder the
+      list and `/mcpServers/1` means something else, which is precisely why hew's own
+      notation does not address that way. `--ops` reports addresses; it does not
+      evaluate anything, so a stale target still prints an op list rather than failing.
+
+  - title: Apply, and keep the receipt
+    note: |
+      `--record` writes an application record after a successful apply: the resolved
+      transforms that actually executed, plus a digest of the patch and of each target
+      before and after. It is not written by default.
+    run: [apply, -i, --record, applied.hewt, pin-node.hew]
+    expect_exit: 0
+    watch: [mcp.json]
+    show: [applied.hewt]
+    caption: |
+      The record is built *before* the commit and written *after* it, which is not
+      pedantry: resolving the executed list can fail where the apply did not, and an
+      apply that cannot produce the record it was asked for must leave the target
+      untouched rather than edit a file and then report failure.
+
+      (`applied_at` is the one value on this page the site generator rewrites — a
+      wall-clock stamp cannot be byte-stable across builds. Every other byte above is
+      what hew printed.)
+outro: |
+  ## What the record is for
+
+  Three digests and a resolved op list are exactly what it takes to invert an edit
+  safely: you know which patch ran, you know the bytes it started from, and you know the
+  bytes it produced — so a future `hew revert` can refuse when the file has moved on
+  instead of guessing. It is also the statement of ownership that a config-writing tool
+  usually cannot make: not "I wrote your file", but "I made exactly these changes to a file
+  whose contents hashed to this, and here is what it hashes to now".

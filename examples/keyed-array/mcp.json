@@ -1,0 +1,6 @@
+{
+  "mcpServers": [
+    { "name": "filesystem", "command": "npx", "args": ["-y", "@mcp/filesystem"] },
+    { "name": "taskloom", "command": "taskloom", "args": ["mcp"] }
+  ]
+}
