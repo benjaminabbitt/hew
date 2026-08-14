@@ -101,13 +101,20 @@ type lowerer struct {
 	anchor Path
 	out    []Transform
 	ords   []ordUse
+
+	// format is the file section's declared format (§2.2), carried so that an
+	// annotation's path is lexed under the ACTIVE format's segment grammar
+	// (§8.8) rather than under every grammar the build happens to link.
+	format FormatID
 }
 
-// lowerHunk compiles one hunk body into transforms (§9.1). filePragma is the
-// preamble's `idempotent:` (§2.1, ruling O3); a hunk's own `! strict` or
-// `! idempotent` overrides it. anchorLine is the `@@` header's line, carried
-// onto every transform the hunk produces as provenance (§10.3).
-func lowerHunk(anchor Path, anchorLine int, body []bodyLine, filePragma bool) ([]Transform, error) {
+// lowerHunk compiles one hunk body into transforms (§9.1). format is the file
+// section's, and scopes the segment claims this hunk's annotation paths may
+// make (§8.8). filePragma is the preamble's `idempotent:` (§2.1, ruling O3); a
+// hunk's own `! strict` or `! idempotent` overrides it. anchorLine is the `@@`
+// header's line, carried onto every transform the hunk produces as provenance
+// (§10.3).
+func lowerHunk(format FormatID, anchor Path, anchorLine int, body []bodyLine, filePragma bool) ([]Transform, error) {
 	r := &bodyReader{lines: body}
 	entries, err := r.entries(body[0].indent)
 	if err != nil {
@@ -125,7 +132,7 @@ func lowerHunk(anchor Path, anchorLine int, body []bodyLine, filePragma bool) ([
 	q := quals{idempotent: filePragma}
 	hunkQ.over(&q)
 
-	l := &lowerer{}
+	l := &lowerer{format: format}
 	if hunkOrd != nil {
 		if err := checkLabels(hunkOrd, anchorLabels(anchor), anchor.String()); err != nil {
 			return nil, err
@@ -248,6 +255,12 @@ func (l *lowerer) emit(path Path, nodes []*mirrorEntry, surface Surface, q quals
 	assignCommentIndices(nodes)
 	q.surface = pickSurface(surface, q.surface)
 
+	// §9.1's phases, in order: step 2 emits every before-image test, in body
+	// order; steps 4 and 5 emit the writes. (json/quoted-key-digits' fixture
+	// pins the other reading — its test/replace pair interleaved ahead of a
+	// later context line's test — and contradicts hcl/repeated-label-ordinal,
+	// json/add-key and json/array-remove-element, which pin these phases. See
+	// the note in conformance/skips_test.go.)
 	for _, e := range nodes {
 		var err error
 		switch {
@@ -530,7 +543,7 @@ func (l *lowerer) freeAssert(path Path, e *mirrorEntry) error {
 // resolve reads an annotation's path argument, expanding a `.`-relative path
 // against the enclosing hunk's anchor (§4.6).
 func (l *lowerer) resolve(text string, line int) (Path, error) {
-	p, err := ParseAuthoredPath(text)
+	p, err := ParseAuthoredPathIn(l.format, text)
 	if err != nil {
 		if he, ok := hewerr.As(err); ok {
 			he.PatchLine = line
@@ -590,7 +603,7 @@ func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
 	case mBlock:
 		segs := []Segment{{Kind: SegKey, Name: e.labels[0]}}
 		for _, label := range e.labels[1:] {
-			segs = append(segs, Segment{Kind: SegLabel, Name: label})
+			segs = append(segs, Segment{Kind: SegKey, Name: label, Quoted: true})
 		}
 		return path.Append(segs...), nil
 	case mTable:
@@ -876,7 +889,7 @@ func entryLabels(e *mirrorEntry) []string {
 func anchorLabels(p Path) []string {
 	var out []string
 	for i := 0; i < p.Len(); i++ {
-		if s := p.Segment(i); s.Kind == SegLabel {
+		if s := p.Segment(i); s.IsQuoted() {
 			out = append(out, s.Name)
 		}
 	}

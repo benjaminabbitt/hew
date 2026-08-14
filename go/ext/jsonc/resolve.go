@@ -84,16 +84,22 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 			return ref{}, &resolveErr{detail: "not an array"}
 		}
 		var found *element
+		var cands []hew.Value
 		count := 0
 		for _, e := range cur.node.elems {
-			if d.matchesSegMatch(e.value, seg) {
+			v, has := d.comparedValue(e.value, seg)
+			if !has {
+				continue
+			}
+			cands = append(cands, v)
+			if v.Equal(scalarToValue(seg.Value)) {
 				found = e
 				count++
 			}
 		}
 		switch {
 		case count == 0:
-			return ref{}, &resolveErr{detail: "no element matches " + seg.String()}
+			return ref{}, &resolveErr{detail: hew.NoMatchDetail(seg, cands)}
 		case count > 1:
 			return ref{}, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
 		}
@@ -126,21 +132,28 @@ func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
 	return ref{cmt: all[seg.Index], parent: cur.node}, nil
 }
 
-func (d *doc) matchesSegMatch(n *node, seg hew.Segment) bool {
-	want := scalarToValue(seg.Value)
+// comparedValue is the value a key-match compares this element against (§4.2).
+// It is separate from the test so that a failed match can report the NEAR MISS
+// it found (§10.3, O46) rather than only that nothing matched.
+func (d *doc) comparedValue(n *node, seg hew.Segment) (hew.Value, bool) {
 	if seg.Name == "" {
 		v, err := n.hewValue()
-		return err == nil && v.Equal(want)
+		return v, err == nil
 	}
 	if n.kind != kObj {
-		return false
+		return hew.Value{}, false
 	}
 	m := n.memberNamed(seg.Name)
 	if m == nil {
-		return false
+		return hew.Value{}, false
 	}
 	v, err := m.value.hewValue()
-	return err == nil && v.Equal(want)
+	return v, err == nil
+}
+
+func (d *doc) matchesSegMatch(n *node, seg hew.Segment) bool {
+	v, ok := d.comparedValue(n, seg)
+	return ok && v.Equal(scalarToValue(seg.Value))
 }
 
 // resolveFull resolves a whole path against the document root, translating a

@@ -3,6 +3,7 @@ package hew
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
@@ -271,15 +272,27 @@ func (tl TransformList) Validate() error {
 	return nil
 }
 
-// --- the spellability guard -------------------------------------------------
+// --- the residual spellability guard (O41) ------------------------------------
 //
-// Every seam that turns a Path back into TEXT — MarshalTransforms and
-// MarshalTransformStream for .hewt, Render for .hew, and the differ, which
-// builds paths from raw document keys — runs this guard first. It is NOT part
-// of Validate: Validate also runs on the way IN, and inbound text that parsed
-// is spellable by construction (§4). The guard is the emitting side's, and it
-// exists so that a key the v0 grammar cannot spell is refused loudly instead
-// of written as an address that resolves somewhere else (§9.3).
+// The seams that turn a Path back into TEXT — MarshalTransforms and
+// MarshalTransformStream for .hewt, Render for .hew — run this guard first. It
+// is NOT part of Validate: Validate also runs on the way IN, and inbound text
+// that parsed is spellable by construction (§4). The guard is the emitting
+// side's, and it exists so that an address that would mean something else is
+// refused loudly rather than written (§9.3).
+//
+// Before O41 this guard fired on ORDINARY DOCUMENT KEYS — "8080", "@scope/pkg",
+// "-" — and the differ ran it too, because the differ builds key segments
+// straight from a target's own keys. That is over: the quoted form spells every
+// key, the canonical-rendering rule emits it, and json/diff-scoped-key pins the
+// differ writing `/dependencies/"@scope/pkg"` instead of refusing. The differ's
+// call is gone with it.
+//
+// What is left is the narrow residue path.go's spellability note enumerates:
+// IR that is malformed as data (a negative index, a ScalarNumber whose text is
+// not a number, an extension token no linked extension claims) and a name
+// holding a LINE BREAK, which §4.1's two escapes cannot spell and which would
+// tear the `@@` line or the .hewt scalar it was written on in half.
 
 // checkSpellable reports the first path-valued field of tl the v0 §4 grammar
 // cannot spell, as HEW020 at comp.
@@ -327,28 +340,33 @@ func inexpressiblePath(comp hewerr.Component, target, field string, i int, p Pat
 		Component: comp,
 		Target:    target,
 		Path:      p.String(),
-		Detail: fmt.Sprintf("transform %d: %s: the v0 §4 path grammar cannot spell the %s %q: %s. "+
-			"A quoted-key segment form is ratified-pending (PR #1); until it lands hew refuses "+
-			"rather than emit a path that addresses something else (§9.3)",
-			i, field, seg.Kind, datum, spellFailure(seg)),
+		Detail: fmt.Sprintf("transform %d: %s: the §4 path grammar cannot spell this %s %q: %s. "+
+			"Every KEY has a spelling since O41 — the literal form, %s — so what is left here is "+
+			"data no address can carry; hew refuses rather than emit a path that addresses "+
+			"something else (§9.3)",
+			i, field, seg.Kind, datum, spellFailure(seg), `/x/"…"`),
 	}
 }
 
 // spellFailure says how a segment's spelling betrays it, in the words a
 // reviewer needs to see why the refusal is not pedantry.
 func spellFailure(seg Segment) string {
+	if strings.ContainsAny(seg.Name, "\r\n") || strings.ContainsAny(seg.Value.Text, "\r\n") {
+		return "it holds a line break, and §4.1's quoted form escapes only `\\\"` and `\\\\` — " +
+			"a path is written on one line, so there is nowhere to put it"
+	}
 	spelling := strconv.Quote(seg.String())
-	got, err := parseSegment(seg.String(), true)
+	got, err := parseSegment(seg.String(), true, buildScope)
 	switch {
 	case err != nil:
-		return "its bare spelling " + spelling + " is not a legal segment"
+		return "its spelling " + spelling + " is not a legal segment"
 	case got.Kind != seg.Kind || got.Form != seg.Form:
-		return "its bare spelling " + spelling + " re-reads as a " + got.describe() +
+		return "its spelling " + spelling + " re-reads as a " + got.describe() +
 			" segment, not a " + seg.describe()
 	case !seg.Equal(got):
-		return "its bare spelling " + spelling + " re-reads as a different " + seg.describe() + " segment"
+		return "its spelling " + spelling + " re-reads as a different " + seg.describe() + " segment"
 	}
-	return "its bare spelling " + spelling + " does not survive in this position"
+	return "its spelling " + spelling + " does not survive in this position"
 }
 
 // Validate checks one record's field/op compatibility (§9.6: "fields whose

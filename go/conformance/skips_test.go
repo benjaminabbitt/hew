@@ -37,21 +37,32 @@ var skipRules = []harness.SkipRule{
 	// deletes its rules afterwards wrote its acceptance test knowing the
 	// answer.
 
-	// O41 — the quoted-key segment, and the canonical-rendering rule that makes
-	// String()/ParsePath a bijection. Unlike every other rule in this table,
-	// these cover a LIVE DEFECT and not just an unbuilt feature: path.go has no
-	// quoted-key form at all (a quoted segment is unconditionally a label), and
-	// escapeKey escapes only ~ / =, so a key whose SHAPE collides with another
-	// segment form has no spelling that survives a render/reparse round trip.
-	// json/diff-scoped-key is the defect's producer end — diff.go builds
-	// SegKey straight from document keys — and is why these cases declare both
-	// the producing and the consuming seams.
-	{Case: "json/quoted-key-scoped", Seam: "*", Reason: "P5: ratified, implementation pending — O41 (quoted-key segment; \"@scope/pkg\" currently reparses as a marker)"},
-	{Case: "json/quoted-key-digits", Seam: "*", Reason: "P5: ratified, implementation pending — O41 (quoted-key segment; a digit-only key currently reparses as an index)"},
-	{Case: "json/diff-scoped-key", Seam: "*", Reason: "P5: ratified, implementation pending — O41 (LIVE DEFECT: the differ emits /@scope~1pkg, which reparses as a marker)"},
-
-	// O44 — reserved tokens. `count>=5` parses today as a match on a field
-	// named "count>", so the parser has to start refusing it before O6's
-	// operators can ever be added compatibly.
-	{Case: "json/reserved-match-operator", Seam: "*", Reason: "P5: ratified, implementation pending — O44 (a key-match field ending < > ! is reserved for O6's operators)"},
+	// O41's quoted-key rules and O44's reserved-token rule died here when the
+	// quoted segment landed: json/quoted-key-scoped, json/diff-scoped-key and
+	// json/reserved-match-operator run whole, and json/quoted-key-digits runs
+	// at every seam but one.
+	//
+	// THIS RULE IS NOT A MISSING FEATURE — it is a CORPUS DEFECT, and it is
+	// recorded here because a work package may not edit corpus/. The quoted-key
+	// behaviour the case exists for is implemented and green at its apply-ir
+	// and e2e seams; what its transforms fixture pins besides is an op ORDER no
+	// other case in the corpus produces:
+	//
+	//	body:  - "8080"  /  + "8080"  /  ctx "8443"
+	//	fixture: test 8080, replace 8080, test 8443     (interleaved)
+	//	§9.1:    test 8080, test 8443, replace 8080     (step 2, then step 5)
+	//
+	// §9.1 lowers in phases — step 2 emits EVERY context and `-` line's test in
+	// body order, steps 4 and 5 then emit the removes and adds/replaces — and
+	// three passing cases pin those phases against the same shape:
+	// hcl/repeated-label-ordinal (a `-`/`+` pair followed by a context line,
+	// fixture: test, test, replace — the exact contradiction),
+	// json/array-remove-element (test, test, test, remove) and json/add-key
+	// (test, test, add). Implementing the fixture's order turns those three
+	// red, so the two readings cannot both be conformant and this fixture is
+	// the outlier: it was written with the ruling and has never been executed.
+	// The fix is a two-record reorder in
+	// corpus/json/quoted-key-digits/transforms.hewt, and it belongs to whoever
+	// owns the corpus.
+	{Case: "json/quoted-key-digits", Seam: "parse", Reason: "corpus defect (not a gap): the fixture interleaves test/replace, contradicting §9.1's phases and hcl/repeated-label-ordinal, json/add-key, json/array-remove-element — see the note above"},
 }

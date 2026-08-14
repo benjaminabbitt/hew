@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	hew "github.com/benjaminabbitt/hew/go"
-	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // Markdown's segment vocabulary, tested where it now lives (§8.8). Everything
@@ -212,49 +211,65 @@ func TestAllBlockKindsAreClaimed(t *testing.T) {
 	}
 }
 
-// --- the spellability guard against a claimed shape --------------------------
+// --- a key that collides with a claimed shape (O41) --------------------------
 //
-// The live O41 case belongs here rather than in the core suite: "@scope/pkg" is
-// a key any package.json can hold, and it is unspellable precisely BECAUSE this
-// extension claims "@…". Link no Markdown and the collision does not exist;
-// link it and the guard must refuse, never misapply (§9.3).
+// This is where the live O41 case belonged while the guard existed:
+// "@scope/pkg" is a key any package.json can hold, and it was unspellable
+// precisely BECAUSE this extension claims "@…", so the emitting seams refused
+// the whole patch rather than write an address that read back as a marker.
+//
+// The ruling replaced the refusal with a spelling. These tests are the same
+// cases read the other way up: the key must SURVIVE, in a build that links this
+// grammar, and it must not be confused with the marker it is spelled like.
 
-func TestEmittingSeamsRefuseKeysThatCollideWithAClaimedShape(t *testing.T) {
+func TestKeysThatCollideWithAClaimedShapeRoundTrip(t *testing.T) {
 	for _, key := range []string{"@scope/pkg", "@", "# Setup", "para:0", "code:12"} {
+		p := hew.NewPath(hew.Segment{Kind: hew.SegKey, Name: key})
 		tl := hew.TransformList{
 			Target: "notes.md", Format: hew.FormatMarkdown,
-			Transform: []hew.Transform{{
-				Op:    hew.OpTest,
-				Path:  hew.NewPath(hew.Segment{Kind: hew.SegKey, Name: key}),
-				Value: mustValue(t, "1.0.0"),
-			}},
+			Transform: []hew.Transform{{Op: hew.OpTest, Path: p, Value: mustValue(t, "1.0.0")}},
 		}
-		if _, err := hew.MarshalTransforms(tl); !isInexpressible(err) {
-			t.Errorf("MarshalTransforms accepted the unspellable key %q: %v", key, err)
+		out, err := hew.MarshalTransforms(tl)
+		if err != nil {
+			t.Errorf("MarshalTransforms refused the key %q: %v", key, err)
+			continue
 		}
-		if _, err := hew.Render(tl, hew.RenderOptions{}); !isInexpressible(err) {
-			t.Errorf("Render accepted the unspellable key %q: %v", key, err)
+		if !strings.Contains(string(out), `"`+key+`"`) {
+			t.Errorf("the .hewt for %q does not carry its literal spelling:\n%s", key, out)
+		}
+		if _, err := hew.Render(tl, hew.RenderOptions{}); err != nil {
+			t.Errorf("Render refused the key %q: %v", key, err)
+		}
+		// The whole point: it reads back as a KEY, not as this extension's form.
+		back, perr := hew.ParsePath(p.String())
+		if perr != nil || !back.Equal(p) {
+			t.Errorf("%q rendered as %q and did not read back: %v", key, p.String(), perr)
+		}
+		if got := back.Segment(0); got.Kind != hew.SegKey || got.Name != key {
+			t.Errorf("%q read back as %+v", key, got)
 		}
 	}
 }
 
-func TestRefusalNamesTheClaimedForm(t *testing.T) {
-	tl := hew.TransformList{
-		Target: "notes.md", Format: hew.FormatMarkdown,
-		Transform: []hew.Transform{{
-			Op:    hew.OpTest,
-			Path:  hew.NewPath(hew.Segment{Kind: hew.SegKey, Name: "@scope/pkg"}),
-			Value: mustValue(t, "1.0.0"),
-		}},
-	}
-	_, err := hew.MarshalTransforms(tl)
-	he, ok := hewerr.As(err)
-	if !ok {
-		t.Fatalf("want a *hewerr.Error, got %v", err)
-	}
-	// "extension" would name the mechanism; the reviewer needs the shape.
-	if !strings.Contains(he.Detail, "re-reads as a marker segment") {
-		t.Fatalf("detail %q does not name the form the spelling re-reads as", he.Detail)
+// TestTheClaimedShapeItselfStillParses is the other side of the same coin: the
+// spelling WITHOUT quotes is still this extension's, and quoting is what tells
+// the two apart.
+func TestTheClaimedShapeItselfStillParses(t *testing.T) {
+	for _, raw := range []string{"@name", "# Setup", "para:0"} {
+		p, err := hew.ParsePath("/" + raw)
+		if err != nil {
+			t.Fatalf("ParsePath(/%s): %v", raw, err)
+		}
+		if got := p.Segment(0); got.Kind != hew.SegExtension || got.Raw != raw {
+			t.Errorf("/%s parsed as %+v, want this extension's claim", raw, got)
+		}
+		q, err := hew.ParsePath(`/"` + raw + `"`)
+		if err != nil {
+			t.Fatalf(`ParsePath(/"%s"): %v`, raw, err)
+		}
+		if got := q.Segment(0); got.Kind != hew.SegKey || got.Name != raw {
+			t.Errorf(`/"%s" parsed as %+v, want the literal key`, raw, got)
+		}
 	}
 }
 
@@ -272,11 +287,6 @@ func TestKeysThatOnlyLookLikeAClaimedShapeStillEmit(t *testing.T) {
 			t.Errorf("MarshalTransforms refused the spellable key %q: %v", key, err)
 		}
 	}
-}
-
-func isInexpressible(err error) bool {
-	he, ok := hewerr.As(err)
-	return ok && he.Code == hewerr.CodeInexpressible
 }
 
 func mustValue(t *testing.T, s string) hew.Value {

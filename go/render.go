@@ -366,7 +366,7 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 
 	for i := range ts {
 		t := &ts[i]
-		if err := checkLabelBody(anchor, *t); err != nil {
+		if err := checkLabelBody(dial, anchor, *t); err != nil {
 			return nil, err
 		}
 		switch t.Op {
@@ -538,9 +538,15 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 // that holds it — there is no body line that spells a label on its own. Saying
 // so is Appendix C's rule: what the notation cannot express is refused, never
 // approximated by a line that would read as something else (§9.4-R6).
-func checkLabelBody(anchor Path, t Transform) error {
+//
+// Only a format whose extension declares it has block sets can have a label at
+// all (dialect.labels, from Binding.QuotedLabels). In every other format the
+// same lexical form is a KEY — `/dependencies/"@scope/pkg"` — which has an
+// ordinary body line and must not be refused here; that is O41's quoted key,
+// and json/quoted-key-scoped's render seam is what pins it.
+func checkLabelBody(dial dialect, anchor Path, t Transform) error {
 	rel, ok := relSegs(anchor, t.Path)
-	if !ok || len(rel) == 0 || rel[0].Kind != SegLabel {
+	if !ok || len(rel) == 0 || !dial.labels || !rel[0].IsQuoted() {
 		return nil
 	}
 	return fmt.Errorf("%w: %s addresses an HCL block by its label, which the mirror grammar writes as a `type \"label\" { … }` body in %s's own container, not as a body line of %s (§8.5, Appendix C)",
@@ -727,24 +733,30 @@ type dialect struct {
 	quote  bool   // TOML/HCL: a string is always written quoted
 	align  bool   // HCL: `=` lines up within a run of member lines (§8.5)
 	marker string // standalone comment marker, trailing space included
+
+	// labels is the target format's answer to "is a quoted segment a label"
+	// (§4.3), read from the registered extension (Binding.QuotedLabels). It is
+	// an ADDRESSING fact rather than a spelling one, so it holds whatever the
+	// fragment style is: a label has no body line in any dialect.
+	labels bool
 }
 
 func dialectFor(style FragmentStyle, format FormatID) dialect {
-	if style != FragmentNative {
-		return dialect{marker: "# "}
+	d := dialect{native: true, marker: "# "}
+	switch {
+	case style != FragmentNative:
+		d = dialect{marker: "# "}
+	case format == FormatJSON || format == FormatJSONC:
+		d = dialect{native: true, json: true, marker: "// "}
+	case format == FormatYAML:
+		d = dialect{native: true, block: true, marker: "# "}
+	case format == FormatTOML:
+		d = dialect{native: true, eq: true, quote: true, marker: "# "}
+	case format == FormatHCL:
+		d = dialect{native: true, eq: true, quote: true, align: true, marker: "# "}
 	}
-	switch format {
-	case FormatJSON, FormatJSONC:
-		return dialect{native: true, json: true, marker: "// "}
-	case FormatYAML:
-		return dialect{native: true, block: true, marker: "# "}
-	case FormatTOML:
-		return dialect{native: true, eq: true, quote: true, marker: "# "}
-	case FormatHCL:
-		return dialect{native: true, eq: true, quote: true, align: true, marker: "# "}
-	default:
-		return dialect{native: true, marker: "# "}
-	}
+	d.labels = quotedIsLabel(format)
+	return d
 }
 
 // alignMark is the placeholder an aligning dialect writes where a run of
@@ -852,17 +864,20 @@ func (d dialect) marginate(margin byte, lines []string) []string {
 	return out
 }
 
-// key spells a member name on a body line. The neutral dialect keeps the
-// path-shaped spelling it has always emitted; a native one writes the name the
-// way the target format writes it.
+// key spells a member name on a body line, in the spelling the mirror grammar
+// reads back (§5): quoted where the bare name would not survive, bare
+// otherwise.
+//
+// The neutral dialect used to tilde-escape here, which was a PATH spelling
+// applied to a body line: the mirror parser decodes no `~1`, so a rendered
+// `@scope~1pkg:` read back as a key literally called that. Quoting is the
+// spelling both sides already agree on (splitMember's unquoteAttr), and it is
+// the same answer O41 gives one level up.
 func (d dialect) key(name string) string {
-	switch {
-	case d.json:
-		return strconv.Quote(name)
-	case d.native && needsQuote(name):
+	if d.json || needsQuote(name) || strings.ContainsAny(name, "~/=") {
 		return strconv.Quote(name)
 	}
-	return escapeKey(name)
+	return name
 }
 
 // isBlock reports whether the value renders as YAML block lines rather than

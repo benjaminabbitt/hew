@@ -93,6 +93,13 @@ type parser struct {
 	version    int
 	defFormat  FormatID
 	filePragma bool // preamble `idempotent: true` (§2.1, ruling O3)
+
+	// format is the format of the file section being read (§2.2), set before
+	// any hunk of that section is parsed. It is what lets an address be lexed
+	// under the ACTIVE format's segment grammar — §8.8's design direction, and
+	// the parsing-API change O41's work package owns. The parser still performs
+	// no format MECHANICS: it opens no target and parses no document.
+	format FormatID
 }
 
 func parseErr(line int, path, format string, args ...any) error {
@@ -238,6 +245,7 @@ func (p *parser) fileSection() (TransformList, error) {
 	ln := p.lines[p.i]
 	p.i++
 	tl := TransformList{Format: p.defFormat}
+	p.format = p.defFormat
 	target, attrs, err := splitTargetLine(strings.TrimPrefix(ln.text, strings.TrimSpace(targetPrefix)))
 	if err != nil {
 		return TransformList{}, parseErr(ln.num, "", "%v", err)
@@ -257,6 +265,7 @@ func (p *parser) fileSection() (TransformList, error) {
 			if !tl.Format.Valid() {
 				return TransformList{}, formatErr(ln.num, target, string(tl.Format))
 			}
+			p.format = tl.Format
 		default:
 			return TransformList{}, parseErr(ln.num, "", "unknown target attribute %q; v0 defines %q (§2.2)", key, "format")
 		}
@@ -384,7 +393,7 @@ func (p *parser) hunk() ([]Transform, error) {
 	if len(attrs) > 0 {
 		return nil, parseErr(ln.num, "", "unknown hunk attribute %q; v0 defines none (§2.3)", attrs[0])
 	}
-	anchor, err := ParseAuthoredPath(inner)
+	anchor, err := ParseAuthoredPathIn(p.format, inner)
 	if err != nil {
 		if he, ok := hewerr.As(err); ok {
 			he.PatchLine = ln.num
@@ -399,7 +408,7 @@ func (p *parser) hunk() ([]Transform, error) {
 	if len(body) == 0 {
 		return nil, parseErr(ln.num, anchor.String(), "hunk has no body lines (§2.3)")
 	}
-	return lowerHunk(anchor, ln.num, body, p.filePragma)
+	return lowerHunk(p.format, anchor, ln.num, body, p.filePragma)
 }
 
 // splitHunkHeader splits `@@ address @@ [attrs]` into its address and

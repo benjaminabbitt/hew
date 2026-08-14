@@ -112,15 +112,38 @@ func scalarEq(n *tnode, want *yaml.Node) bool {
 // itself. Array-of-tables elements are sequence elements like any other, which
 // is what gives TOML the identity addressing of §6.4.2.
 func matchesSeg(n *tnode, seg hew.Segment) bool {
-	want := scalarNode(seg.Value)
+	c, ok := comparedNode(n, seg)
+	return ok && scalarEq(c, scalarNode(seg.Value))
+}
+
+// comparedValue is comparedNode as a hew.Value, which is what the shared
+// no-match diagnostic reads (§10.3, O46).
+func comparedValue(n *tnode, seg hew.Segment) (hew.Value, bool) {
+	c, ok := comparedNode(n, seg)
+	if !ok {
+		return hew.Value{}, false
+	}
+	return hew.NodeValue(&yaml.Node{Kind: yaml.ScalarNode, Tag: c.tag, Value: c.text}), true
+}
+
+// comparedNode is the node the segment compares this element against, or false
+// when the element has nothing to compare. Splitting it out of matchesSeg is
+// what lets a failed match name the NEAR MISS it found (§10.3, O46).
+func comparedNode(n *tnode, seg hew.Segment) (*tnode, bool) {
 	if seg.Name == "" {
-		return n.kind == nScalar && scalarEq(n, want)
+		if n.kind != nScalar {
+			return nil, false
+		}
+		return n, true
 	}
 	if n.kind != nTable {
-		return false
+		return nil, false
 	}
 	e := n.lookup(seg.Name)
-	return e != nil && e.val.kind == nScalar && scalarEq(e.val, want)
+	if e == nil || e.val.kind != nScalar {
+		return nil, false
+	}
+	return e.val, true
 }
 
 // segNamesValue applies §4.2's key-match comparison to a value in hand, for a

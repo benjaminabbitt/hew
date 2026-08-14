@@ -240,7 +240,7 @@ func (r *run) planRemove(t hew.Transform) ([]edit, error) {
 		if t.Optional || t.Idempotent {
 			return nil, nil // §7.6, §7.5: nothing to remove is success here
 		}
-		he.Detail = "remove: node does not exist"
+		he.Detail = removeMissDetail(t.Path, he)
 		return nil, he
 	}
 	switch {
@@ -255,6 +255,18 @@ func (r *run) planRemove(t hew.Transform) ([]edit, error) {
 		return []edit{{start: rf.elem.blockStart, end: rf.elem.blockEnd}}, nil
 	}
 	return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, "remove: cannot remove the document root")
+}
+
+// removeMissDetail is what a failed remove says. "node does not exist" is the
+// right answer for a missing key — the reader can see that from the address —
+// but where the LAST segment is a key-match the resolver has already worked out
+// something the address cannot show (O46's near miss, §10.3), and throwing that
+// away to say "does not exist" is exactly the diagnostic the ruling forbids.
+func removeMissDetail(p hew.Path, he *hewerr.Error) string {
+	if p.Len() > 0 && p.Segment(p.Len()-1).Kind == hew.SegMatch && he.Path == p.String() {
+		return "remove: " + he.Detail
+	}
+	return "remove: node does not exist"
 }
 
 // --- replace ----------------------------------------------------------------

@@ -123,27 +123,43 @@ func TestDiffContextFlowsThrough(t *testing.T) {
 	}
 }
 
-// TestDiffOfScopedPackageJSONIsRefused is the reported defect end to end: a
+// TestDiffOfScopedPackageJSONIsPatchable is the reported defect end to end: a
 // real package.json whose scoped dependency gains a member. The key
-// "@scope/pkg" has no v0 §4 spelling — its bare form re-reads as a marker
-// segment — so `hew diff` must say so by name instead of emitting a patch that
-// addresses something else (§9.3). A quoted-key segment form is
-// ratified-pending (PR #1); this refusal is the honest behavior until then.
-func TestDiffOfScopedPackageJSONIsRefused(t *testing.T) {
+// "@scope/pkg" had no v0 §4 spelling — its bare form re-read as a marker
+// segment — so `hew diff` refused the whole file rather than emit a patch that
+// addressed something else (§9.3). O41 gave the key a spelling, so the honest
+// behaviour is now to produce the patch, in the literal form, and to have it
+// read back as the key it names. json/diff-scoped-key is the corpus half.
+func TestDiffOfScopedPackageJSONIsPatchable(t *testing.T) {
 	old := `{"dependencies":{"left-pad":"1.0.0","@scope/pkg":{"version":"1.0.0"}}}`
 	new := `{"dependencies":{"left-pad":"1.0.0","@scope/pkg":{"version":"1.0.0","resolved":"https://example.test/pkg"}}}`
 
 	tl, err := Diff([]byte(old), []byte(new), hew.FormatJSON, hew.DiffOptions{Target: "package.json"})
-	if err == nil {
-		out, rerr := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative})
-		t.Fatalf("diff of a scoped dependency must be refused; got a patch instead:\n%s\n(render err: %v)", out, rerr)
+	if err != nil {
+		t.Fatalf("a scoped dependency is an ordinary key and must diff: %v", err)
 	}
-	he, ok := hewerr.As(err)
-	if !ok || he.Code != hewerr.CodeInexpressible || he.Component != hewerr.ComponentDiffer {
-		t.Fatalf("want HEW020 at the differ, got %v", err)
+	out, rerr := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative, Preamble: true})
+	if rerr != nil {
+		t.Fatalf("rendering the patch: %v", rerr)
 	}
-	if he.Target != "package.json" || !strings.Contains(he.Detail, "@scope/pkg") {
-		t.Fatalf("the diagnostic must name the file and the key: %v", err)
+	if !strings.Contains(string(out), `@@ /dependencies/"@scope/pkg" @@`) {
+		t.Fatalf("the patch does not address the key in its literal form:\n%s", out)
+	}
+	// Producer to consumer: the address it wrote is the address it reads.
+	back, perr := hew.Parse(out)
+	if perr != nil {
+		t.Fatalf("re-parsing the emitted patch: %v", perr)
+	}
+	if len(back) != 1 || len(back[0].Transform) == 0 {
+		t.Fatalf("re-parse produced %d file sections", len(back))
+	}
+	for _, tr := range back[0].Transform {
+		if !tr.Path.Equal(tl.Transform[0].Path) && tr.Path.Len() < 2 {
+			t.Fatalf("re-parsed address %s does not name the scoped dependency", tr.Path)
+		}
+		if got := tr.Path.Segment(1); got.Name != "@scope/pkg" {
+			t.Fatalf("re-parsed segment is %+v, want the key @scope/pkg", got)
+		}
 	}
 }
 

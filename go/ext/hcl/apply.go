@@ -274,17 +274,30 @@ func (r *run) step(cur *ref, segs []hew.Segment) (*ref, int, error) {
 		return nil, 1, &resolveErr{code: hewerr.CodeInexpressible, final: true,
 			detail: fmt.Sprintf("segment kind %v has no HCL representation (§8.5)", seg.Kind)}
 	}
+	if seg.IsQuoted() {
+		// A quoted segment is a LABEL against a block set (§4.3, O41), and a
+		// label qualifies the name step before it — it cannot open one.
+		return nil, 1, &resolveErr{code: hewerr.CodeInexpressible, final: true,
+			detail: fmt.Sprintf("%s is a block label and must follow the block type it qualifies (§4.3)",
+				quoteHCL(seg.Name))}
+	}
 	b := cur.body()
 	if b == nil {
 		return nil, 1, noMatch("%q: an attribute has no body to descend into", seg.Name)
 	}
 
-	// Collect the label segments qualifying this name, and the ordinal, which
-	// the IR carries on whichever segment closed the tuple (§9.6, §11.10).
+	// Collect the label segments qualifying this name, the key-match segment
+	// that may select among the blocks they name (§4.2, O45), and the ordinal,
+	// which the IR carries on whichever segment closed the tuple (§9.6, §11.10).
 	used := 1
 	var labels []string
-	for used < len(segs) && segs[used].Kind == hew.SegLabel {
+	for used < len(segs) && segs[used].IsQuoted() {
 		labels = append(labels, segs[used].Name)
+		used++
+	}
+	var match *hew.Segment
+	if used < len(segs) && segs[used].Kind == hew.SegMatch {
+		match = &segs[used]
 		used++
 	}
 	ord, err := tupleOrdinal(segs[:used])
@@ -299,9 +312,36 @@ func (r *run) step(cur *ref, segs []hew.Segment) (*ref, int, error) {
 		}
 		cands = append(cands, it)
 	}
-	switch {
-	case len(cands) == 0:
+	if len(cands) == 0 {
 		return nil, used, noMatch("no %s here", tupleString(seg.Name, labels))
+	}
+	tuple := tupleString(seg.Name, labels)
+	if match != nil {
+		var kept []*itemNode
+		var vals []hew.Value
+		for _, it := range cands {
+			v, ok := r.d.attrValue(it, match.Name)
+			if !ok {
+				continue
+			}
+			vals = append(vals, v)
+			if v.Equal(match.Value.Value()) {
+				kept = append(kept, it)
+			}
+		}
+		if match.Name == "" {
+			return nil, used, &resolveErr{code: hewerr.CodeInexpressible, final: true,
+				detail: fmt.Sprintf("%s: a block has no value of its own, so the \"=value\" form of §4.2 "+
+					"cannot address one; match on an attribute instead", tuple)}
+		}
+		if len(kept) == 0 {
+			return nil, used, &resolveErr{code: hewerr.CodeNoMatch, final: true,
+				detail: fmt.Sprintf("among the %s blocks here, %s", tuple, hew.NoMatchDetail(*match, vals))}
+		}
+		cands = kept
+		tuple += " with " + match.String()
+	}
+	switch {
 	case ord != nil:
 		if *ord >= len(cands) {
 			return nil, used, noMatch("ord=%d selects the %s of only %d here",
@@ -310,10 +350,87 @@ func (r *run) step(cur *ref, segs []hew.Segment) (*ref, int, error) {
 		return &ref{item: cands[*ord], parent: b}, used, nil
 	case len(cands) > 1:
 		return nil, used, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
-			detail: fmt.Sprintf("%d blocks match %s; hew will not pick one — add \"! match ord=\" to select one (§7.2, §8.5)",
-				len(cands), tupleString(seg.Name, labels))}
+			detail: fmt.Sprintf("%d blocks match %s; hew will not pick one — %s, "+
+				"or add \"! match ord=\" to select one by position (§7.2, §8.5)",
+				len(cands), tuple, distinguishingHint(seg.Name, labels, cands, r.d))}
 	}
 	return &ref{item: cands[0], parent: b}, used, nil
+}
+
+// distinguishingHint is O45's half of the HEW012 message, and it comes FIRST
+// because §6.4.3 rule 1 says an ordinal is the last resort and not the first
+// tool: where the blocks differ in an attribute, the address can say WHICH
+// block it means, and the ordinal stops being forced. When they differ in
+// nothing the hint says so, because suggesting an address that cannot exist is
+// worse than admitting the ordinal is all there is (§6.4.3 rule 3).
+func distinguishingHint(name string, labels []string, cands []*itemNode, d *doc) string {
+	addr := "/" + name
+	for _, l := range labels {
+		addr += "/" + quoteHCL(l)
+	}
+	if attr, val, ok := d.distinguishingAttr(cands); ok {
+		if spelled, can := hew.MatchSpelling(val); can {
+			return fmt.Sprintf("address one by a distinguishing attribute, as %s/%s=%s (§4.2)",
+				addr, attr, spelled)
+		}
+	}
+	return "these blocks share every attribute, so no key-match can tell them apart (§6.4.3)"
+}
+
+// distinguishingAttr finds an attribute every candidate has as a scalar and no
+// two candidates share — §9.4-R4's identity rule, applied to a block set. The
+// value returned is the FIRST candidate's, so the suggestion in a diagnostic is
+// an address that resolves.
+func (d *doc) distinguishingAttr(cands []*itemNode) (string, hew.Value, bool) {
+	for _, it := range cands[0].namedAttrs() {
+		vals := make([]hew.Value, 0, len(cands))
+		seen := map[string]bool{}
+		ok := true
+		for _, c := range cands {
+			v, has := d.attrValue(c, it)
+			if !has || seen[v.String()] {
+				ok = false
+				break
+			}
+			seen[v.String()] = true
+			vals = append(vals, v)
+		}
+		if ok {
+			return it, vals[0], true
+		}
+	}
+	return "", hew.Value{}, false
+}
+
+// namedAttrs is the names of an item's direct scalar-bearing attributes, in
+// source order.
+func (it *itemNode) namedAttrs() []string {
+	if it.kind != itemBlock || it.body == nil {
+		return nil
+	}
+	var out []string
+	for _, c := range it.body.items {
+		if c.kind == itemAttr {
+			out = append(out, c.name)
+		}
+	}
+	return out
+}
+
+// attrValue is the decoded value of a block's direct attribute, for the
+// key-match comparison of §4.2 over a block set (O45). A named attribute of a
+// nested block is not a direct child and does not answer.
+func (d *doc) attrValue(it *itemNode, name string) (hew.Value, bool) {
+	if name == "" || it.kind != itemBlock || it.body == nil {
+		return hew.Value{}, false
+	}
+	for _, c := range it.body.items {
+		if c.kind == itemAttr && c.name == name {
+			v, err := d.exprValue(c.expr)
+			return v, err == nil
+		}
+	}
+	return hew.Value{}, false
 }
 
 // labelsMatch reports whether an item answers to the label segments given. No

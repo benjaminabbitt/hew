@@ -224,6 +224,13 @@ func decodeDocument(doc *yaml.Node) (TransformList, error) {
 		return tl, atLine(irErr("", "a .hewt document must be a mapping"), root.Line)
 	}
 
+	// The declared format is read BEFORE any address is, so that every path in
+	// the document is lexed under the active format's segment grammar (§8.8).
+	// §9.6 puts `format:` ahead of `transforms:`, but a decoder that relied on
+	// that would read a differently-ordered document differently, which is the
+	// kind of order dependence a canonical serialization exists to remove.
+	format := documentFormat(root)
+
 	seen := map[string]bool{}
 	var haveTransforms bool
 	for i := 0; i < len(root.Content); i += 2 {
@@ -266,7 +273,7 @@ func decodeDocument(doc *yaml.Node) (TransformList, error) {
 				return tl, atLine(irErr("", "%s must be a sequence", keyTransforms), v.Line)
 			}
 			for _, item := range v.Content {
-				ts, err := decodeTransform(item)
+				ts, err := decodeTransform(item, format)
 				if err != nil {
 					return tl, err
 				}
@@ -288,7 +295,19 @@ func decodeDocument(doc *yaml.Node) (TransformList, error) {
 	return tl, nil
 }
 
-func decodeTransform(m *yaml.Node) ([]Transform, error) {
+// documentFormat reads a .hewt document's `format:` without validating it —
+// validation is decodeDocument's, and a malformed value simply scopes no
+// extension rather than failing twice.
+func documentFormat(root *yaml.Node) FormatID {
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == keyFormat && root.Content[i+1].Kind == yaml.ScalarNode {
+			return FormatID(root.Content[i+1].Value)
+		}
+	}
+	return ""
+}
+
+func decodeTransform(m *yaml.Node, format FormatID) ([]Transform, error) {
 	if m.Kind != yaml.MappingNode {
 		return nil, atLine(irErr("", "a transform must be a mapping"), m.Line)
 	}
@@ -304,7 +323,7 @@ func decodeTransform(m *yaml.Node) ([]Transform, error) {
 			return nil, atLine(irErr("", "duplicate transform field %q", key), k.Line)
 		}
 		seen[key] = true
-		if err := assignField(&t, key, v); err != nil {
+		if err := assignField(&t, key, v, format); err != nil {
 			return nil, atLine(err, v.Line)
 		}
 	}
@@ -317,7 +336,7 @@ func decodeTransform(m *yaml.Node) ([]Transform, error) {
 	return []Transform{t}, nil
 }
 
-func assignField(t *Transform, key string, v *yaml.Node) error {
+func assignField(t *Transform, key string, v *yaml.Node, format FormatID) error {
 	str := func(dst *string) error {
 		s, err := stringValue(v)
 		if err != nil {
@@ -331,7 +350,7 @@ func assignField(t *Transform, key string, v *yaml.Node) error {
 		if err != nil {
 			return irErr("", "%s: %v", key, err)
 		}
-		p, perr := ParsePath(s)
+		p, perr := ParsePathIn(format, s)
 		if perr != nil {
 			return perr
 		}

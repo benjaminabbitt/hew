@@ -176,10 +176,10 @@ fixture, so dropping the dialect is the removal of one directory.
 | `jsonc/` | 5 |
 | `yaml/` | 25 |
 | `toml/` | 8 |
-| `hcl/` | 12 |
+| `hcl/` | 13 |
 | `markdown/` | 7 (severable) |
 | `cli/` | 17 |
-| **total** | **96** |
+| **total** | **97** |
 
 Three families pin the human's 2026-08-14 rulings specifically: the reapply pair
 (`yaml/reapply-not-idempotent`, `json/reapply-add-exists`) and the pragma pair

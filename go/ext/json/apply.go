@@ -179,15 +179,23 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 			return nil, &resolveErr{detail: "not an array"}
 		}
 		var found *jNode
+		var cands []hew.Value
 		count := 0
 		for _, e := range n.elems {
-			if d.matchesSegMatch(e.value, seg) {
+			v, has := d.comparedValue(e.value, seg)
+			if !has {
+				continue
+			}
+			cands = append(cands, v)
+			if v.Equal(seg.Value.Value()) {
 				found = e.value
 				count++
 			}
 		}
 		if count == 0 {
-			return nil, &resolveErr{detail: "no element matches " + seg.String()}
+			// O46: the near miss, named with its type (§10.3). The wording is
+			// the core's, so every binding says it the same way.
+			return nil, &resolveErr{detail: hew.NoMatchDetail(seg, cands)}
 		}
 		if count > 1 {
 			return nil, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
@@ -198,22 +206,30 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 	}
 }
 
-func (d *doc) matchesSegMatch(n *jNode, seg hew.Segment) bool {
-	want := scalarToValue(seg.Value)
+// comparedValue is the value a key-match compares this element against (§4.2):
+// the element itself for `=value`, the named member for `field=value`. It is
+// separate from the test so that a failed match can report the NEAR MISS it
+// found (§10.3, O46) instead of only reporting that nothing matched.
+func (d *doc) comparedValue(n *jNode, seg hew.Segment) (hew.Value, bool) {
 	if seg.Name == "" {
 		v, err := d.nodeValue(n)
-		return err == nil && v.Equal(want)
+		return v, err == nil
 	}
 	if n.kind != jObj {
-		return false
+		return hew.Value{}, false
 	}
 	for _, m := range n.members {
 		if m.key == seg.Name {
 			v, err := d.nodeValue(m.value)
-			return err == nil && v.Equal(want)
+			return v, err == nil
 		}
 	}
-	return false
+	return hew.Value{}, false
+}
+
+func (d *doc) matchesSegMatch(n *jNode, seg hew.Segment) bool {
+	v, ok := d.comparedValue(n, seg)
+	return ok && v.Equal(scalarToValue(seg.Value))
 }
 
 // nodeValue decodes a parsed node's own source span into a hew.Value, for
