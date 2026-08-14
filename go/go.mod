@@ -1,4 +1,4 @@
-module github.com/hew-format/hew
+module github.com/benjaminabbitt/hew
 
 go 1.25.0
 

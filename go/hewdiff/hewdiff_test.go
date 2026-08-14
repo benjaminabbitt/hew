@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 func diffText(t *testing.T, old, new string, format hew.FormatID, opt hew.DiffOptions) string {

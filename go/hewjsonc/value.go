@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hew-format/hew"
+	"github.com/benjaminabbitt/hew"
 	"gopkg.in/yaml.v3"
 )
 

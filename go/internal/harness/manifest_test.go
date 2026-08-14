@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 func TestParseManifestDecodesEveryField(t *testing.T) {

@@ -1,6 +1,6 @@
 package conformance
 
-import "github.com/hew-format/hew/internal/harness"
+import "github.com/benjaminabbitt/hew/internal/harness"
 
 // skipRules is the milestone skip table (spec §13.7). Every entry is a
 // recorded reason satisfying "no case is skipped without a recorded skip

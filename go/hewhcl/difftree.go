@@ -3,8 +3,8 @@ package hewhcl
 import (
 	"gopkg.in/yaml.v3"
 
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // DiffTree parses source bytes into the format-neutral tree hew.DiffTrees

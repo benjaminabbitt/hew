@@ -3,8 +3,8 @@ package hewjsonc
 import (
 	"testing"
 
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // A comment is a positional CHILD, standing where the file writes it — a

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // corpusDir resolves a corpus case's directory, walking up from the package

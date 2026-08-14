@@ -3,8 +3,8 @@ package hewjsonc
 import (
 	"strconv"
 
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // --- test -------------------------------------------------------------------

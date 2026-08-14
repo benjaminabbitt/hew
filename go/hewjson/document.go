@@ -1,8 +1,8 @@
 package hewjson
 
 import (
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // Document parses target bytes into the read-only view hew.Resolve projects

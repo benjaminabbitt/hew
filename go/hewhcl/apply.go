@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // Apply is the HCL binding's apply half (§8.5, Appendix A.4's Applier.Apply

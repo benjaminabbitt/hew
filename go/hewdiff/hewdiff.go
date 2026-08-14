@@ -10,13 +10,13 @@
 package hewdiff
 
 import (
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/hewhcl"
-	"github.com/hew-format/hew/hewjson"
-	"github.com/hew-format/hew/hewjsonc"
-	"github.com/hew-format/hew/hewtoml"
-	"github.com/hew-format/hew/hewyaml"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/hewhcl"
+	"github.com/benjaminabbitt/hew/hewjson"
+	"github.com/benjaminabbitt/hew/hewjsonc"
+	"github.com/benjaminabbitt/hew/hewtoml"
+	"github.com/benjaminabbitt/hew/hewyaml"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // Diff computes the transform list that turns old into new (§9.4).

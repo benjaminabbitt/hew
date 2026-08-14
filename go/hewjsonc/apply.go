@@ -3,8 +3,8 @@ package hewjsonc
 import (
 	"fmt"
 
-	"github.com/hew-format/hew"
-	"github.com/hew-format/hew/internal/hewerr"
+	"github.com/benjaminabbitt/hew"
+	"github.com/benjaminabbitt/hew/internal/hewerr"
 )
 
 // Apply is the JSONC binding's apply half (§8.2, Appendix A.4's Applier.Apply

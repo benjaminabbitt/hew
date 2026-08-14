@@ -10,7 +10,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/hew-format/hew/internal/harness"
+	"github.com/benjaminabbitt/hew/internal/harness"
 )
 
 func readCaseFile(c *harness.Case, name string) ([]byte, error) {

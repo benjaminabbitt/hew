@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hew-format/hew/internal/harness"
+	"github.com/benjaminabbitt/hew/internal/harness"
 )
 
 var (

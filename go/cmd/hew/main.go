@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/hew-format/hew/internal/hewcli"
+	"github.com/benjaminabbitt/hew/internal/hewcli"
 )
 
 func main() {
