@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/cucumber/godog v0.16.0
 	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/spf13/afero v1.11.0
 	github.com/zclconf/go-cty v1.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )

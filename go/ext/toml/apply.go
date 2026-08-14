@@ -168,7 +168,7 @@ func (r *run) resolve(p hew.Path, line int) (*ref, *hewerr.Error, bool) {
 	for i, seg := range p.Segments() {
 		next, re := r.step(cur, seg)
 		if re != nil {
-			failed := hew.NewPath(p.Segments()[:i+1]...)
+			failed := hew.RootPath().Append(p.Segments()[:i+1]...)
 			return nil, r.err(re.code, failed.String(), line, re.detail), re.final
 		}
 		cur = next

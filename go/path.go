@@ -240,10 +240,8 @@ type Path struct {
 // RootPath is the document root, "/".
 func RootPath() Path { return Path{origin: originAbsolute} }
 
-// NewPath builds an absolute path from segments. NewPath() is RootPath.
-func NewPath(segs ...Segment) Path {
-	return Path{origin: originAbsolute, segs: append([]Segment(nil), segs...)}
-}
+// NewPath builds an absolute path from typed segment arguments; it lives in
+// segarg.go with the constructors that feed it (A.0, review point 20).
 
 // NewRelativePath builds a `.`-relative path (§4.6), resolved against the
 // enclosing hunk's anchor.

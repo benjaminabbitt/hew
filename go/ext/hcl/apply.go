@@ -245,7 +245,7 @@ func (r *run) resolve(p hew.Path, t hew.Transform) (*ref, *hewerr.Error, bool) {
 		next, used, err := r.step(cur, segs[i:])
 		if err != nil {
 			re := err.(*resolveErr)
-			failed := hew.NewPath(segs[:i+used]...)
+			failed := hew.RootPath().Append(segs[:i+used]...)
 			return nil, r.err(re.code, failed.String(), r.lineFor(t, i+used), re.detail), re.final
 		}
 		cur = next

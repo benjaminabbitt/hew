@@ -154,7 +154,7 @@ func authoredAnchor(p Path) (string, *int, error) {
 	}
 	ord := *segs[len(segs)-1].Ordinal
 	segs[len(segs)-1].Ordinal = nil
-	bare := NewPath(segs...)
+	bare := RootPath().Append(segs...)
 	if p.IsRelative() {
 		bare = NewRelativePath(segs...)
 	}

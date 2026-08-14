@@ -312,7 +312,7 @@ func (r *resolver) walk(p Path, line int) (string, Node, error) {
 	var b strings.Builder
 	for i, seg := range segs {
 		if cur == nil {
-			return "", nil, r.err(hewerr.CodeNoMatch, NewPath(segs[:i]...).String(), line,
+			return "", nil, r.err(hewerr.CodeNoMatch, RootPath().Append(segs[:i]...).String(), line,
 				"resolve: this address has no children to descend into")
 		}
 		tok, next, err := r.step(cur, seg)
@@ -324,7 +324,7 @@ func (r *resolver) walk(p Path, line int) (string, Node, error) {
 			if err.inexpressible {
 				code = hewerr.CodeInexpressible
 			}
-			return "", nil, r.err(code, NewPath(segs[:i+1]...).String(), line, "resolve: %s", err.detail)
+			return "", nil, r.err(code, RootPath().Append(segs[:i+1]...).String(), line, "resolve: %s", err.detail)
 		}
 		b.WriteByte('/')
 		b.WriteString(tok)

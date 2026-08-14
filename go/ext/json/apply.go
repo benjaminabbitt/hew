@@ -247,7 +247,7 @@ func (d *doc) resolveFull(target string, path hew.Path, line int) (*jNode, error
 	}
 	failPath := path
 	if failedAt >= 0 {
-		failPath = hew.NewPath(path.Segments()[:failedAt+1]...)
+		failPath = hew.RootPath().Append(path.Segments()[:failedAt+1]...)
 	}
 	return nil, appErr(code, target, failPath.String(), line, re.Error())
 }
