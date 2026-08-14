@@ -34,9 +34,9 @@ func diffText(t *testing.T, old, new string, format hew.FormatID, opt hew.DiffOp
 // killer of its own when the corpus suite is not running.
 func TestDiffMatchesCorpusRoundTrips(t *testing.T) {
 	root := filepath.Join("..", "..", "corpus")
-	// The extension is the file's, not the format's: HCL's is ".tf".
+	// The extension is the file's, not the format's.
 	for _, c := range []struct{ format, ext string }{
-		{"json", "json"}, {"jsonc", "jsonc"}, {"yaml", "yaml"}, {"toml", "toml"}, {"hcl", "tf"},
+		{"json", "json"}, {"jsonc", "jsonc"}, {"yaml", "yaml"}, {"toml", "toml"},
 	} {
 		t.Run(c.format, func(t *testing.T) {
 			dir := filepath.Join(root, c.format, "roundtrip-basic")

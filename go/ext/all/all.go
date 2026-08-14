@@ -11,7 +11,6 @@
 package all
 
 import (
-	_ "github.com/benjaminabbitt/hew/go/ext/hcl"
 	_ "github.com/benjaminabbitt/hew/go/ext/json"
 	_ "github.com/benjaminabbitt/hew/go/ext/jsonc"
 	_ "github.com/benjaminabbitt/hew/go/ext/markdown"

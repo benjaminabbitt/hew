@@ -1,7 +1,6 @@
 package hew
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -152,10 +151,10 @@ func TestRenderNativeUnknownFormatFallsBack(t *testing.T) {
 	}
 }
 
-// TOML and HCL write `key = value`, and a string is always quoted: neither
+// TOML writes `key = value`, and a string is always quoted: neither
 // grammar has a bare-string spelling (§8.4, §8.5).
 func TestRenderNativeEqDialects(t *testing.T) {
-	for _, format := range []FormatID{FormatTOML, FormatHCL} {
+	for _, format := range []FormatID{FormatTOML} {
 		got := renderNative(t, format,
 			Transform{Op: OpTest, Path: MustParsePath("/a/k"), Value: mustYAML(t, "v")},
 			Transform{Op: OpTest, Path: MustParsePath("/a/n"), Value: mustYAML(t, "30")},
@@ -163,75 +162,6 @@ func TestRenderNativeEqDialects(t *testing.T) {
 		if !strings.Contains(got, `  k = "v"`) || !strings.Contains(got, "  n = 30") {
 			t.Fatalf("%s:\n%s", format, got)
 		}
-	}
-}
-
-// §8.5's alignment rule, applied to a rendered hunk: the `=` signs of a run of
-// member lines line up one column past the widest name, whatever margin each
-// line carries. TOML does not align — its emitter writes one space.
-func TestRenderNativeHCLAligns(t *testing.T) {
-	ts := []Transform{
-		{Op: OpTest, Path: MustParsePath("/p/project"), Value: mustYAML(t, "old")},
-		{Op: OpAdd, Path: MustParsePath("/p/region"), After: MustParsePath("/p/project"), Value: mustYAML(t, "us")},
-	}
-	got := renderNative(t, FormatHCL, ts...)
-	if !strings.Contains(got, `  project = "old"`) || !strings.Contains(got, `+ region  = "us"`) {
-		t.Fatalf("hcl alignment:\n%s", got)
-	}
-	if strings.ContainsRune(got, 0) {
-		t.Fatalf("alignment placeholder leaked into the output:\n%q", got)
-	}
-	toml := renderNative(t, FormatTOML, ts...)
-	if !strings.Contains(toml, `+ region = "us"`) {
-		t.Fatalf("toml must not align:\n%s", toml)
-	}
-}
-
-// A line that is not a member breaks the alignment run, exactly as it does in
-// the document: a comment between two attributes leaves each side to its own
-// width.
-func TestRenderNativeHCLAlignmentRunsBreak(t *testing.T) {
-	got := renderNative(t, FormatHCL,
-		Transform{Op: OpTest, Path: MustParsePath("/p/a"), Value: mustYAML(t, "1")},
-		Transform{Op: OpTest, Path: MustParsePath("/p/#0"), Value: CommentValue("note")},
-		Transform{Op: OpTest, Path: MustParsePath("/p/bbbb"), Value: mustYAML(t, "2")},
-	)
-	for _, want := range []string{"  a = 1", "  # note", "  bbbb = 2"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("want %q in:\n%s", want, got)
-		}
-	}
-}
-
-// blockSetFormat registers a binding that declares what ext/hcl declares: this
-// format resolves a quoted segment against a BLOCK SET, so the quoted form is a
-// label there and not a key (§4.3, Binding.QuotedLabels). The core cannot know
-// that on its own — that is the whole of O48's SegLabel restructure — so a core
-// test that is about labels has to say which format has them.
-func blockSetFormat(t *testing.T, id FormatID) {
-	t.Helper()
-	isolate(t)
-	b := fakeBinding(id, []string{"." + string(id)}, nil)
-	b.QuotedLabels = true
-	Register(id, b)
-}
-
-// A label is half of a block's address, and the mirror grammar has no body
-// line that spells one. Appendix C's rule is to say so, not to write a line
-// that would read as something else (§9.4-R6).
-func TestRenderRefusesALabelBodyLine(t *testing.T) {
-	blockSetFormat(t, FormatHCL)
-	ts := []Transform{
-		{Op: OpTest, Path: MustParsePath(`/provider/"b"`), Value: mustYAML(t, "{k: 1}")},
-		{Op: OpRemove, Path: MustParsePath(`/provider/"b"`)},
-	}
-	_, err := Render(TransformList{Target: "t.tf", Format: FormatHCL, Transform: ts},
-		RenderOptions{Fragment: FragmentNative})
-	if !errors.Is(err, ErrInexpressible) {
-		t.Fatalf("want ErrInexpressible, got %v", err)
-	}
-	if !strings.Contains(err.Error(), `/provider/"b"`) {
-		t.Fatalf("diagnostic does not name the address: %v", err)
 	}
 }
 
@@ -249,36 +179,25 @@ func TestRenderWritesAQuotedKeyAsABodyLine(t *testing.T) {
 	}
 }
 
-// A label in the ANCHOR is fine — that is where hcl/roundtrip-basic puts one.
-func TestRenderAcceptsALabelInTheAnchor(t *testing.T) {
-	got := renderNative(t, FormatHCL,
-		Transform{Op: OpTest, Path: MustParsePath(`/provider/"google"/project`), Value: mustYAML(t, "p")},
-	)
-	if !strings.Contains(got, `@@ /provider/"google" @@`) || !strings.Contains(got, `  project = "p"`) {
-		t.Fatalf("got:\n%s", got)
-	}
-}
-
 func TestDialectFor(t *testing.T) {
 	cases := []struct {
-		style                       FragmentStyle
-		format                      FormatID
-		json, block, eq, quote, aln bool
-		native                      bool
-		marker                      string
+		style                  FragmentStyle
+		format                 FormatID
+		json, block, eq, quote bool
+		native                 bool
+		marker                 string
 	}{
-		{FragmentNeutral, FormatJSON, false, false, false, false, false, false, "# "},
-		{FragmentNative, FormatJSON, true, false, false, false, false, true, "// "},
-		{FragmentNative, FormatJSONC, true, false, false, false, false, true, "// "},
-		{FragmentNative, FormatYAML, false, true, false, false, false, true, "# "},
-		{FragmentNative, FormatTOML, false, false, true, true, false, true, "# "},
-		{FragmentNative, FormatHCL, false, false, true, true, true, true, "# "},
-		{FragmentNative, FormatMarkdown, false, false, false, false, false, true, "# "},
+		{FragmentNeutral, FormatJSON, false, false, false, false, false, "# "},
+		{FragmentNative, FormatJSON, true, false, false, false, true, "// "},
+		{FragmentNative, FormatJSONC, true, false, false, false, true, "// "},
+		{FragmentNative, FormatYAML, false, true, false, false, true, "# "},
+		{FragmentNative, FormatTOML, false, false, true, true, true, "# "},
+		{FragmentNative, FormatMarkdown, false, false, false, false, true, "# "},
 	}
 	for _, c := range cases {
 		d := dialectFor(c.style, c.format)
 		if d.json != c.json || d.block != c.block || d.native != c.native || d.marker != c.marker ||
-			d.eq != c.eq || d.quote != c.quote || d.align != c.aln {
+			d.eq != c.eq || d.quote != c.quote {
 			t.Fatalf("dialectFor(%q,%q) = %+v", c.style, c.format, d)
 		}
 	}

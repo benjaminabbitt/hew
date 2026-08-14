@@ -16,7 +16,6 @@ const (
 	FormatJSONC    FormatID = "jsonc"
 	FormatYAML     FormatID = "yaml"
 	FormatTOML     FormatID = "toml"
-	FormatHCL      FormatID = "hcl"
 	FormatMarkdown FormatID = "markdown"
 )
 

@@ -134,32 +134,6 @@ func TestRoundTripIdentity(t *testing.T) {
 			"[a]\nk = 1\n\n[b]\nk = 1\n",
 			"[a]\nk = 2\n\n[b]\nk = 3\n"},
 
-		// HCL. A block is addressed by its `(type, labels)` tuple (§4.3), and
-		// an attribute's expression is a leaf compared as source text (§8.5).
-		{"attribute edit in a block", hew.FormatHCL,
-			"terraform {\n  required_version = \">= 1.6\"\n}\n",
-			"terraform {\n  required_version = \">= 1.7\"\n}\n"},
-		{"attribute edit in a labelled block", hew.FormatHCL,
-			"provider \"google\" {\n  project = \"old\"\n}\n",
-			"provider \"google\" {\n  project = \"new\"\n}\n"},
-		{"attribute added to a labelled block", hew.FormatHCL,
-			"provider \"google\" {\n  project = \"old-project\"\n}\n",
-			"provider \"google\" {\n  project = \"old-project\"\n  region  = \"us-central1\"\n}\n"},
-		{"attribute removed from a block", hew.FormatHCL,
-			"provider \"google\" {\n  project = \"p\"\n  region  = \"r\"\n}\n",
-			"provider \"google\" {\n  project = \"p\"\n}\n"},
-		{"two-label block", hew.FormatHCL,
-			"resource \"aws_instance\" \"web\" {\n  ami = \"old\"\n}\n",
-			"resource \"aws_instance\" \"web\" {\n  ami = \"new\"\n}\n"},
-		{"nested block attribute edit", hew.FormatHCL,
-			"terraform {\n  backend \"s3\" {\n    bucket = \"old\"\n  }\n}\n",
-			"terraform {\n  backend \"s3\" {\n    bucket = \"new\"\n  }\n}\n"},
-		{"two blocks edited at once", hew.FormatHCL,
-			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"1\"\n}\n",
-			"provider \"a\" {\n  k = \"2\"\n}\n\nprovider \"b\" {\n  k = \"3\"\n}\n"},
-		{"interpolated attribute edit", hew.FormatHCL,
-			"locals {\n  x = \"${var.old}\"\n}\n",
-			"locals {\n  x = \"${var.new}\"\n}\n"},
 		{"standalone comment added", hew.FormatTOML,
 			"[hooks]\non_start = \"x\"\n",
 			"[hooks]\non_start = \"x\"\n# note\n"},
@@ -175,22 +149,6 @@ func TestRoundTripIdentity(t *testing.T) {
 		{"two array-of-tables elements added", hew.FormatTOML,
 			"[[plugin]]\nname = \"beta\"\n",
 			"[[plugin]]\nname = \"beta\"\n\n[[plugin]]\nname = \"gamma\"\n\n[[plugin]]\nname = \"delta\"\n"},
-		{"two attributes appended", hew.FormatHCL,
-			"provider \"a\" {\n  k = \"1\"\n}\n",
-			"provider \"a\" {\n  k = \"1\"\n  m = \"2\"\n  n = \"3\"\n}\n"},
-		{"edit in the second block of a type", hew.FormatHCL,
-			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"1\"\n}\n",
-			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"2\"\n}\n"},
-		// O45: two blocks sharing a `(type, labels)` tuple. RT1 is the whole
-		// assertion here — the differ has to pick an address that the applier
-		// resolves back to the SAME block, which for a repeated tuple is the
-		// key-match of §4.2 and was, until the ruling, nothing at all.
-		{"edit inside a repeated tuple", hew.FormatHCL,
-			"provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-west-1\"\n}\n\nprovider \"aws\" {\n  alias  = \"east\"\n  region = \"us-east-1\"\n}\n",
-			"provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-west-1\"\n}\n\nprovider \"aws\" {\n  alias  = \"east\"\n  region = \"us-east-2\"\n}\n"},
-		{"attribute added inside a repeated tuple", hew.FormatHCL,
-			"resource \"aws_s3_bucket\" \"a\" {\n  bucket = \"one\"\n}\n\nresource \"aws_s3_bucket\" \"a\" {\n  bucket = \"two\"\n}\n",
-			"resource \"aws_s3_bucket\" \"a\" {\n  bucket = \"one\"\n}\n\nresource \"aws_s3_bucket\" \"a\" {\n  bucket = \"two\"\n  acl    = \"private\"\n}\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

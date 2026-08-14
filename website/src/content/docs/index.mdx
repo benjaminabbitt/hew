@@ -1,6 +1,6 @@
 ---
 title: hew
-description: A structure-aware replacement for patch(1) and diff(1) — for JSON, JSONC, YAML, TOML and HCL.
+description: A structure-aware replacement for patch(1) and diff(1) — for JSON, JSONC, YAML and TOML.
 template: splash
 hero:
   tagline: A patch that reads like a diff and addresses nodes, not lines. It survives reordering and reformatting — and it fails loudly, by name, rather than misapplying.
@@ -73,9 +73,9 @@ attention.
 
 ## Five formats, one notation
 
-JSON, JSONC, YAML, TOML and HCL, with Markdown managed blocks under evaluation. A body
+JSON, JSONC, YAML and TOML, with Markdown managed blocks under evaluation. A body
 line in a hunk *is* a line of the target's own syntax, so a YAML patch looks like YAML
-and an HCL patch looks like HCL — there is no intermediate language to learn and no
+and a TOML patch looks like TOML — there is no intermediate language to learn and no
 second grammar for hard cases. The operations the mirror grammar genuinely cannot say —
 node moves and copies — are written in the IR instead, which
 [had to exist anyway](/hew/architecture/).

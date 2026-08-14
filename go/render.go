@@ -366,9 +366,6 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 
 	for i := range ts {
 		t := &ts[i]
-		if err := checkLabelBody(dial, anchor, *t); err != nil {
-			return nil, err
-		}
 		switch t.Op {
 		case OpTest:
 			if t.Exhaustive || t.Absent || t.Count != nil || t.NodeKind != nil {
@@ -529,28 +526,7 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("hew: render: hunk at %s has no body lines", anchor)
 	}
-	return dial.alignLines(lines), nil
-}
-
-// checkLabelBody refuses a transform whose first step below the anchor is an
-// HCL label. A label is half of a block's `(type, labels)` address (§4.3), and
-// the mirror grammar writes a block as `type "label" { … }` in the container
-// that holds it — there is no body line that spells a label on its own. Saying
-// so is Appendix C's rule: what the notation cannot express is refused, never
-// approximated by a line that would read as something else (§9.4-R6).
-//
-// Only a format whose extension declares it has block sets can have a label at
-// all (dialect.labels, from Binding.QuotedLabels). In every other format the
-// same lexical form is a KEY — `/dependencies/"@scope/pkg"` — which has an
-// ordinary body line and must not be refused here; that is O41's quoted key,
-// and json/quoted-key-scoped's render seam is what pins it.
-func checkLabelBody(dial dialect, anchor Path, t Transform) error {
-	rel, ok := relSegs(anchor, t.Path)
-	if !ok || len(rel) == 0 || !dial.labels || !rel[0].IsQuoted() {
-		return nil
-	}
-	return fmt.Errorf("%w: %s addresses an HCL block by its label, which the mirror grammar writes as a `type \"label\" { … }` body in %s's own container, not as a body line of %s (§8.5, Appendix C)",
-		ErrInexpressible, t.Path, anchor, anchor)
+	return lines, nil
 }
 
 // groupSurface reads the one TOML surface directive a hunk may carry. The
@@ -729,16 +705,10 @@ type dialect struct {
 	native bool
 	json   bool   // JSON/JSONC: quoted keys, quoted strings, flow collections
 	block  bool   // YAML: "- " sequence markers and block-style values
-	eq     bool   // TOML/HCL: members are `key = value` (§8.4, §8.5)
-	quote  bool   // TOML/HCL: a string is always written quoted
-	align  bool   // HCL: `=` lines up within a run of member lines (§8.5)
+	eq     bool   // TOML: members are `key = value` (§8.4)
+	quote  bool   // TOML: a string is always written quoted
 	marker string // standalone comment marker, trailing space included
 
-	// labels is the target format's answer to "is a quoted segment a label"
-	// (§4.3), read from the registered extension (Binding.QuotedLabels). It is
-	// an ADDRESSING fact rather than a spelling one, so it holds whatever the
-	// fragment style is: a label has no body line in any dialect.
-	labels bool
 }
 
 func dialectFor(style FragmentStyle, format FormatID) dialect {
@@ -752,10 +722,7 @@ func dialectFor(style FragmentStyle, format FormatID) dialect {
 		d = dialect{native: true, block: true, marker: "# "}
 	case format == FormatTOML:
 		d = dialect{native: true, eq: true, quote: true, marker: "# "}
-	case format == FormatHCL:
-		d = dialect{native: true, eq: true, quote: true, align: true, marker: "# "}
 	}
-	d.labels = quotedIsLabel(format)
 	return d
 }
 
@@ -764,52 +731,13 @@ func dialectFor(style FragmentStyle, format FormatID) dialect {
 // them, so it never reaches the output.
 const alignMark = "\x00"
 
-// sep is the member separator: TOML and HCL write `key = value`, everything
-// else `key: value`. An aligning dialect defers the padding to alignLines,
-// which is the only place a line's width can be compared with its neighbours'.
+// sep is the member separator: TOML writes `key = value`, everything else
+// `key: value`.
 func (d dialect) sep() string {
-	switch {
-	case d.align:
-		return alignMark + "= "
-	case d.eq:
+	if d.eq {
 		return " = "
 	}
 	return ": "
-}
-
-// alignLines reproduces hclfmt's rule inside a rendered hunk: within a run of
-// consecutive member lines the `=` signs line up one column past the widest
-// name, and any other line — a comment, an annotation, a block header — breaks
-// the run (§8.5). Doing it here rather than per line is the point: the padding
-// is a property of the run, not of the member, which is why hcl/roundtrip-basic
-// widens an ADDED `region` to sit under the `=` of the context line above it.
-func (d dialect) alignLines(lines []string) []string {
-	if !d.align {
-		return lines
-	}
-	for i := 0; i < len(lines); {
-		end, width := i, -1
-		for end < len(lines) {
-			at := strings.Index(lines[end], alignMark)
-			if at < 0 {
-				break
-			}
-			if at > width {
-				width = at
-			}
-			end++
-		}
-		if end == i {
-			i++
-			continue
-		}
-		for j := i; j < end; j++ {
-			at := strings.Index(lines[j], alignMark)
-			lines[j] = lines[j][:at] + strings.Repeat(" ", width-at+1) + lines[j][at+len(alignMark):]
-		}
-		i = end
-	}
-	return lines
 }
 
 // memberLines renders one context/"-"/"+" body entry for a direct-child

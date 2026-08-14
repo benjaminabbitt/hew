@@ -42,7 +42,6 @@ func TestSegmentArgConstructors(t *testing.T) {
 			Segment{Kind: SegMatch, Value: Scalar{Kind: ScalarString, Text: "alpha", Quoted: true}}},
 		{"match value number", MatchValueNumber("3"),
 			Segment{Kind: SegMatch, Value: Scalar{Kind: ScalarNumber, Text: "3"}}},
-		{"label", Label("google"), Segment{Kind: SegKey, Name: "google", Quoted: true}},
 		{"quoted", Quoted("google"), Segment{Kind: SegKey, Name: "google", Quoted: true}},
 		{"comment", Comment(1), Segment{Kind: SegComment, Index: 1}},
 		{"trailing comment", TrailingComment(), Segment{Kind: SegComment, Trailing: true}},

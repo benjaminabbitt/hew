@@ -96,17 +96,10 @@ func MatchValueNumber(literal string) SegmentArg {
 	return Segment{Kind: SegMatch, Value: Scalar{Kind: ScalarNumber, Text: literal}}
 }
 
-// Quoted is the double-quoted segment form (§4.1's quoted key, §4.3's block
-// label): ONE lexical shape whose meaning the container decides — a label
-// against a block set, a key against a mapping (O41/O48). It is the permanent
-// escape hatch for any spelling the bare grammar cannot carry.
+// Quoted is the double-quoted segment form (§4.1): a key said literally. It is
+// the permanent escape hatch for any spelling the bare grammar cannot carry —
+// `/deps/"@scope/pkg"`, a digit-only key, the empty key.
 func Quoted(s string) SegmentArg { return Segment{Kind: SegKey, Name: s, Quoted: true} }
-
-// Label is Quoted under §4.3's name, kept because A.0 spells it that way and
-// because "label" is what an HCL author calls it. The two are one constructor:
-// O48 restructured the label into a quoted segment resolved by container kind,
-// which is why they can be.
-func Label(s string) SegmentArg { return Quoted(s) }
 
 // Comment addresses a container's n'th comment child (§4.5b).
 func Comment(ord int) SegmentArg { return Segment{Kind: SegComment, Index: ord} }

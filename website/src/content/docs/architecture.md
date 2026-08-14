@@ -19,7 +19,7 @@ flowchart LR
 
     subgraph format ["format side"]
         DOCS["two documents<br/>old · new"]
-        FILE["a document<br/>JSON · YAML · TOML<br/>JSONC · HCL"]
+        FILE["a document<br/>JSON · YAML<br/>TOML · JSONC"]
     end
 
     HEW -->|"parse"| TL

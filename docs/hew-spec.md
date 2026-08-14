@@ -9,13 +9,13 @@ patch* remains the generic descriptive phrase for what hew is; **hew** is the pr
 This supersedes the working name "Structured Patch (SP)" used while the workstream was scoped
 in `ugly-icy-squid/structured-patch-standard.plan.md`; the error-code prefix moved with it
 (`SP010` → `HEW010`). Formats implemented: JSON,
-JSONC, YAML, TOML, Markdown, HCL. Formats documented only: INI-family, dotenv, XML (§12).
+JSONC, YAML, TOML, Markdown. Formats documented only: INI-family, dotenv, XML (§12).
 
 **Notation (human, 2026-08-14, superseding the earlier hybrid ruling): Hew v0 is one grammar.**
 A shape-mirroring body with in-place `+`/`-` margins and match/assert annotations. There is
 **no op-list escape hatch** — not fenced, not severable, not present. The two cases the hatch
-was going to carry are absorbed into the mirror grammar itself: HCL repeated-label blocks are
-selected with an ordinal annotation (§7.2, the survey's design-A rendering made normative),
+was going to carry are absorbed into the mirror grammar itself: repeated siblings are
+selected by key-match addressing (§4.2),
 and assert-only patches are annotation-only mirrors (§7.4). The operations the mirror grammar
 still cannot say — node moves and copies — are written as a **transform list** (§9.6), the
 IR's canonical serialization, which had to exist for the corpus and for RFC 6902 interop
@@ -203,11 +203,11 @@ anchors at the document root.
 The anchor node must exist and must resolve to exactly one node, or the hunk fails
 (`HEW013 no-match` / `HEW012 ambiguous-match`) — with two exceptions: a trailing `?` on the last
 path segment (§4.4) permits the anchor to be created, and a `! match ord=` first body line
-(§7.2) selects among same-tuple siblings.
+(§4.2) selects among siblings by a distinguishing attribute.
 
 **Body indentation is relative to the anchor.** The body is written as though the anchor's
 subtree were the whole document: the anchor's own container delimiters (`{`/`}` in JSON, the
-`server:` key line in YAML, the `[table]` header in TOML, the `provider "aws" {` line in HCL,
+`server:` key line in YAML, the `[table]` header in TOML,
 the `## Heading` line in Markdown) are **not** written in the body. Only its children are.
 
 ```
@@ -243,7 +243,7 @@ Column 1 is the margin. Column 2 is a mandatory single space. The body text begi
 | `-` | **remove** | This node must exist and be equal. It is deleted. |
 | `+` | **add** | This node is created. It must not already exist (unless `! idempotent`). |
 | `?` | **assert** | An annotation line carrying an assertion (§7.1, §7.4). Not part of either projection. |
-| `!` | **directive** | An annotation line changing how application works (§7.2, §7.3, §7.5). Not part of either projection. |
+| `!` | **directive** | An annotation line changing how application works (§7.3, §7.5). Not part of either projection. |
 | `#` | **comment** | A hew comment. Ignored entirely. Not part of either projection. |
 
 A completely blank line (zero characters, or whitespace only) is **insignificant**: it is a
@@ -253,7 +253,7 @@ Markdown has a body-line notion of blank, and there it is structural rather than
 A line whose column 1 is none of the six margin characters is `HEW001 parse-error`. There is
 no "loose" mode.
 
-**Target comments are ordinary body text.** A `#` comment in a YAML/TOML/HCL target, or a
+**Target comments are ordinary body text.** A `#` comment in a YAML/TOML target, or a
 `//` comment in JSONC, is written as context/add/remove like any other line:
 
 ```
@@ -281,14 +281,14 @@ quoted   := '"' ( char | '\"' | '\\' )* '"'
 ```
 
 There is **no ordinal segment**. Selecting among same-shaped siblings that a path cannot
-distinguish is an annotation (§7.2), not an address — so that a path is always a statement
+distinguish is an annotation, not an address — so that a path is always a statement
 about identity and never about position in the file.
 
 **A quoted segment is the literal form**, and it is what makes the grammar closed: every other
 segment form is recognized by its shape, so a key whose text happens to have one of those
 shapes needs a spelling that says "this is literal text, not a form". §4.1 gives the rule and
 [O41](#p5--the-api-ratification-2026-08-14) gives the reasoning. Quoting is **container-kind
-resolved**: against an HCL block set a quoted segment is a label (§4.3, unchanged), against a
+resolved**: against a
 mapping it is a key. The two contexts are disjoint — a container is one or the other — so one
 spelling serves both without ambiguity.
 
@@ -319,8 +319,8 @@ at all**, which is one of the holes the quoted form closes: it is written `/""`.
 #### The quoted-key form
 
 **Ratified ([O41](#p5--the-api-ratification-2026-08-14)).** A double-quoted segment is a
-**literal**. Against a mapping it is an object key; against an HCL block set it is a label
-(§4.3, unchanged). Escapes inside the quotes are `\"` and `\\`; `~0`/`~1`/`~2` are neither
+**literal**: against a mapping it is an object key
+Escapes inside the quotes are `\"` and `\\`; `~0`/`~1`/`~2` are neither
 needed nor interpreted there, because nothing inside quotes is being disambiguated.
 
 ```
@@ -362,7 +362,7 @@ only proven answer to keyed-array addressing:
 /servers/enabled=true              non-string scalars compare after format-native decoding
 ```
 
-- The container must be a sequence, **or an HCL set of same-`(type, labels)` blocks** — see
+- The container must be a sequence.
   below. The field must be a direct child of each element.
 - **Exactly one element must match**, or `HEW012 ambiguous-match` / `HEW013 no-match`. This is
   the loud-staleness rule applied to addressing: an array that grew a duplicate key is a
@@ -383,12 +383,6 @@ read back as a number, a boolean, `null`, or an empty token. A programmatically-
 a different element, or none; there is no error, only the wrong node. The differ already
 sidesteps this by quoting every string it emits, which is the fix generalized.
 
-**Key-match over HCL block sets** ([O45](#p5--the-api-ratification-2026-08-14)). §6.4.3 rule 1
-recommends key-match addressing as the mitigation for repeated HCL blocks — the construct
-[O25](#residual--genuinely-open) names as the one place hew can silently patch the wrong node
-— and until now §4.2 restricted key-match to sequences, so the recommended remedy had no
-spelling. A set of blocks sharing a `(type, labels)` tuple is therefore an addressable
-container for key-match, matched on a direct attribute:
 
 ```
 /resource/"aws_instance"/name="web"      among identically-labelled blocks, the one whose
@@ -397,7 +391,6 @@ container for key-match, matched on a direct attribute:
 
 The uniqueness rule is unchanged (`HEW012`/`HEW013`), and the effect is to **strictly reduce**
 how often an ordinal annotation is the only option: an ordinal remains legal, and remains the
-admission §4.3 says it is, but it stops being forced wherever the blocks differ in any
 attribute. Implementation pending.
 
 **The empty-field form — `/tags/=gamma`.** With no field name, the segment matches the
@@ -412,35 +405,6 @@ Same uniqueness rule: zero matches is `HEW013`, more than one is `HEW012` — a 
 in a list is drift, and Hew names it instead of picking the first. This is the address the
 differ prefers for primitive lists (§9.4-R4) and the one that makes a removal survive
 reordering (OP-15, adopted from strategic merge's `$deleteFromPrimitiveList`).
-
-### 4.3 Label segments — HCL blocks
-
-An HCL block is keyed by a tuple of (block type, ordered labels), not by a name. Labels are
-written as **quoted segments** following the block-type segment:
-
-```
-/provider/"aws"                    block: provider "aws" { ... }
-/resource/"aws_instance"/"web"     block: resource "aws_instance" "web" { ... }
-/terraform                         block: terraform { ... }  (no labels)
-/provider/"aws"/region             the region attribute inside that block
-```
-
-A quoted segment is a label; an unquoted segment is an attribute name or a nested block type.
-That is the whole disambiguation rule, and it works because HCL attribute names are bare
-identifiers.
-
-This is unchanged by [O41](#p5--the-api-ratification-2026-08-14)'s quoted-key form, and the
-two do not collide: a quoted segment resolves **by the kind of container it is applied to**,
-which the resolver knows at every step. Against a block set it is a label, here; against a
-mapping it is a key, §4.1. O5's original rationale — "quoting the whole segment collides with
-the label syntax HCL needs, which would make the address grammar ambiguous" — assumed the two
-uses could meet, and they cannot: a container is a block set or a mapping, never both. O5's
-*decision* stands (the `~2` escape is kept, and it is what keeps ordinary keys unquoted); only
-that one clause of its reasoning is overturned.
-
-**A repeated `(type, labels)` tuple is `HEW012 ambiguous-match` unless the hunk carries an
-ordinal annotation** (§7.2). The path stays an identity statement; the ordinal is a separate,
-visible admission that identity was insufficient here.
 
 ### 4.4 Optional segments — trailing `?`
 
@@ -477,7 +441,7 @@ index; see [O7](#decisions-and-residual-open-questions).
 
 ### 4.5b Comment segments
 
-Comments are nodes in JSONC, YAML, TOML and HCL (§8), so they need addresses. Two forms:
+Comments are nodes in JSONC, YAML and TOML (§8), so they need addresses. Two forms:
 
 ```
 /server/#0                 the first standalone comment node inside "server"
@@ -667,7 +631,7 @@ restate every untouched element of a touched array.
 | Mapping / object | **Subset.** Every listed key must exist with an equal value. Unlisted keys are ignored. |
 | Sequence / array | **Ordered subsequence.** Listed elements must appear in the target in the listed relative order. Unlisted elements may appear before, between, or after. |
 | Scalar | **Exact**, after format-native decoding (`8080` == `8080`, `8080` != `"8080"`). |
-| Comment (JSONC/YAML/TOML/HCL) | **Exact text**, after stripping the comment marker and one leading space. |
+| Comment (JSONC/YAML/TOML) | **Exact text**, after stripping the comment marker and one leading space. |
 | Markdown block | **Exact source bytes** of the block, after trailing-whitespace normalization. |
 
 `? exhaustive` (§7.1) upgrades subset to exact-set and subsequence to exact-sequence for the
@@ -730,7 +694,7 @@ drift than fuzz does, because it does not match by position at all.
 
 A mirror context line for a sibling key compiles to a `test` on that key's **presence and
 value** (§9.0) — never on its position. This is normative for every mapping-shaped node in
-all six formats: JSON/JSONC objects, YAML mappings, TOML tables, HCL bodies, and the child
+all five formats: JSON/JSONC objects, YAML mappings, TOML tables, and the child
 sets of Markdown sections.
 
 ```
@@ -767,27 +731,7 @@ If no field satisfies all three, the sequence has no identity and Hew addresses 
 | Spot | Why | Mitigation |
 |---|---|---|
 | **Plain positional arrays** (`/tags/0`) | The elements have no identity; position is genuinely all there is. | Prefer the `=value` address (§4.2) for scalar lists — `/tags/=gamma` is identity addressing for a list that has no key field. Only fall back to `/tags/0` when the list has duplicates. |
-| **HCL repeated-label blocks** (`! match ord=1`) | Two `provider "aws"` blocks are indistinguishable by path; an inserted earlier sibling shifts every later ordinal. | §7.2, tightened below. |
 
-**Normative mitigation for ordinals** (strengthening §7.2, and adopting ytt's
-`overlay.subset()` idiom): an ordinal is the **last resort**, not the first tool.
-
-1. If the block has a distinguishing child attribute, **address it by that attribute
-   instead** of by ordinal — a hew path may descend into the block and assert
-   (`? expect ./alias = "east"`), and, since
-   [O45](#p5--the-api-ratification-2026-08-14), may *select* the block by that attribute:
-   `/provider/"aws"/alias="east"`. Until O45 this rule recommended a mitigation that §4.2 did
-   not actually offer a spelling for, which is why the ruling extends key-match to
-   same-`(type, labels)` block sets. Implementation pending.
-2. **An ordinal-addressed transform MUST carry at least one distinguishing assert** — a
-   context line or a `? expect` on a child that differs between the same-label siblings. A
-   patch that carries `! match ord=` with no distinguishing assert is `HEW001`. The reason is
-   the whole tolerance model in one sentence: *if the ordinal shifts, the patch must fail
-   loudly rather than silently edit the wrong block.*
-3. If the siblings are genuinely indistinguishable in every child, the ordinal stands alone —
-   and that is the one construct in Hew that can silently patch the wrong node. The corpus
-   pins the diagnostic, and [O25](#residual--genuinely-open) asks whether such a patch
-   should be refused outright.
 
 #### 6.4.4 Two different things called "move"
 
@@ -820,7 +764,6 @@ Normative. Each row is corpus-case material (§13), one per format family.
 | A key-match or heading now matches **two** nodes | **`HEW012` ambiguous-match** | Drift Hew will not resolve by guessing |
 | The patch was **already applied** | **`HEW014`/`HEW011`** (§10.6), unless `! idempotent` or the `idempotent:` pragma (§7.5) | Ruled O3: strict default |
 | Plain-array elements reordered | **`HEW010`** if a positional address was used | The one honest failure; use `=value` addressing |
-| An earlier same-label HCL block was inserted | **`HEW010`/`HEW011`** via the required distinguishing assert (§6.4.3) | Loud, not silent |
 
 ---
 
@@ -872,72 +815,6 @@ Container-scoped `? exhaustive`, shown at both levels so the attachment rule is 
 
 The first asserts `server` is the document's only top-level key; the second asserts `port` is
 `server`'s only key.
-
-### 7.2 `! match` — ordinal selection among identical siblings
-
-This is the notation's answer to HCL's repeated-label case, promoted from the survey's
-design-A rendering into normative grammar. Target:
-
-```hcl
-provider "aws" {
-  region  = "us-west-1"
-  profile = "default"
-}
-
-provider "aws" {
-  alias  = "east"
-  region = "us-east-1"
-}
-```
-
-`/provider/"aws"` names two nodes, so it is `HEW012` on its own. The ordinal is written as an
-annotation, in place, beside the block it selects:
-
-```
---- main.tf format=hcl
-
-@@ / @@
-! match label=["aws"] ord=0
-  provider "aws" {
--   region  = "us-west-1"
-+   region  = "us-west-2"
-    profile = "default"
-  }
-! match label=["aws"] ord=1
-  provider "aws" {
-    alias  = "east"
-    region = "us-east-1"
-+   profile = "ctxloom"
-  }
-```
-
-Or, hunk-anchored, using the first-body-line form:
-
-```
-@@ /provider/"aws" @@
-! match ord=1
-  alias = "east"
-+ profile = "ctxloom"
-```
-
-Grammar: `! match [label=[<label>, …]] ord=<n>`.
-
-- `ord` is **required**, 0-based, and counts same-`(type, labels)` siblings in source order.
-- `label=[…]` is **optional and redundant by design**: when present it is checked against the
-  selected block's actual labels and a mismatch is `HEW011`. It exists because a bare `ord=1`
-  is unreadable in a long file, and because a redundant assertion is the cheapest possible
-  guard on a fragile selector.
-- An ordinal is only legal where the path is genuinely ambiguous. `! match` on a path that
-  resolves to exactly one node is `HEW001` — an unnecessary ordinal is a latent misapply
-  waiting for the file to grow a sibling, and Hew refuses it rather than tolerating it.
-- **Every hunk using `! match ord=` MUST carry at least one distinguishing assert** — a
-  context line or a `? expect` on a child that differs between the same-label siblings. A
-  hunk with `! match ord=` and no distinguishing assert is `HEW001`. The `alias = "east"`
-  context line above is what makes the second example safe: if a third `provider "aws"` block
-  is inserted earlier, the ordinal still selects index 1 but the context no longer matches,
-  and the apply fails by name instead of editing the wrong provider. See §6.4.3 for the
-  tolerance rationale, and prefer addressing by the distinguishing attribute outright when one
-  exists.
 
 ### 7.3 `! anchor` and `! surface`
 
@@ -1053,7 +930,6 @@ format-agnostic.
 | `jsonc` | `.jsonc`, well-known names | `settings.json`, `tasks.json`, `launch.json`, `tsconfig.json`, `.mcp.json` are JSONC by convention despite the extension. The well-known-name list is data, not spec — [O4](#decisions-and-residual-open-questions). |
 | `yaml` | `.yaml`, `.yml` | |
 | `toml` | `.toml` | |
-| `hcl` | `.tf`, `.hcl`, `.tfvars`, `.nomad`, `.pkr.hcl` | `.tf.json` is `json`, not `hcl`. |
 | `markdown` | `.md`, `.markdown` | |
 
 Explicit `format=` on the target line always wins. Ambiguity without an explicit declaration
@@ -1207,35 +1083,6 @@ own delimiters are omitted — because here the header belongs to the *added chi
 anchor `/mcp_servers`. Array-of-tables (`[[x]]`) children are addressed as sequence elements
 and support key-match (`/tool/plugins/name=foo`).
 
-### 8.5 HCL — attributes, blocks, labels
-
-Node kinds: body, attribute, block, expression, comment.
-
-- An **attribute** body line contains a top-level `=`: `region = "us-west-1"`.
-- A **block** body line ends in `{` and its body is written indented, closing with `}`:
-
-```
---- main.tf format=hcl
-
-@@ /terraform @@
-  required_version = ">= 1.6"
-+ required_providers {
-+   aws = {
-+     source  = "hashicorp/aws"
-+     version = "~> 5.0"
-+   }
-+ }
-```
-
-- **Expressions are compared as source text**, normalized for whitespace only. Hew does not
-  evaluate HCL: `"${var.x}"` and `var.x` are different values even where HCL would agree.
-  This keeps the format binding honest about what it can prove.
-- Alignment: `hclwrite` re-aligns `=` within a body. Hew adopts the backend's alignment on any
-  body it modified, and leaves untouched bodies byte-identical. The corpus pins this.
-- **Repeated `(type, labels)` tuples**: `HEW012 ambiguous-match` unless a `! match ord=`
-  annotation (§7.2) selects one. This is the case the notation was checked against in the
-  survey's HCL section, and the check is now the grammar.
-
 ### 8.6 Markdown — sections and blocks
 
 Markdown is the one format where Hew is not addressing a keyed tree, and it gets a dialect
@@ -1295,7 +1142,7 @@ Markdown backend is built.
 The tolerance model (§6.4) is where Hew earns its keep, and **its central asymmetry runs
 against Markdown**:
 
-| | Keyed trees (JSON/JSONC/YAML/TOML/HCL) | Prose (Markdown) |
+| | Keyed trees (JSON/JSONC/YAML/TOML) | Prose (Markdown) |
 |---|---|---|
 | Is sibling order meaningful? | **No.** Reordering `settings.json` changes nothing. | **Yes.** Paragraph order *is* the document. |
 | So reorder-blindness is… | the single largest win over `patch(1)` | **worth approximately nothing** |
@@ -1339,7 +1186,7 @@ score where each fails.
 | Survives the drift? | Per §6.4's table, adapted to prose |
 | Reviewable? | Is the patch legible in a PR — the criterion that started this whole workstream |
 | Authoring cost | Hand-writing the patch; and, for the differ, generation cost |
-| Implementation cost | A Markdown block model with byte preservation is the most expensive of the six backends — there is no `hclwrite` equivalent to lean on |
+| Implementation cost | A Markdown block model with byte preservation is the most expensive of the five backends |
 
 #### 8.7.3 Possible outcomes
 
@@ -1401,7 +1248,7 @@ segment := key | quoted | index | "-" | keymatch | extension-claimed
 An extension registers the segment shapes it claims; the core lexes a segment into
 `(raw token)` and offers it to the active format's extension before defaulting to `key`. The
 quoted segment already works exactly this way and is the proof the mechanism is sound: one
-lexical form, interpreted as a label against an HCL block set and as a key against a mapping,
+lexical form, interpreted as a key against a mapping,
 resolved by the container the resolver is already standing on (§4.1, O41).
 
 **Format-specific qualifiers move behind an extension-owned mechanism, and the wire format does
@@ -1419,16 +1266,15 @@ Every format-specific element currently in the core, with a verdict.
 |---|---|---|---|
 | `SegKey`, `SegIndex`, `SegAppend`, `SegMatch` | all | **keep in core** | Genuinely universal: every format in the implement tier and both documented-only families (§12) have keyed containers and ordered containers. RFC 6901 is the evidence — these are the shapes a format-neutral pointer standard needed. |
 | Quoted segment (§4.1) | all | **keep in core** | A *literal* is universal; what a literal means is not. The core lexes it; the container's kind decides label-or-key, and the container comes from the extension. This is the pattern every other row below is measured against. |
-| `SegLabel` | HCL | **restructure** | There is no such thing as a label segment. There is a *quoted segment* resolved against a block set, which is the same lexical form as a quoted key resolved against a mapping. The distinct kind disappears from the core; `ext/hcl` supplies "quoted, against a block set, means label". §4.3's text and every existing path spelling are unchanged. |
 | `SegHeading`, `SegBlock`, `SegMarker` | Markdown | **relocate to `ext/markdown`** | The clearest case in the audit. `# text`, `code:0` and `@name` are prose-document vocabulary with no meaning in any config format, and they are three of the four things §8.7.4 has to name when it argues Markdown is severable. Moving them means **the core loses all Markdown vocabulary**, and O29's severability stops being a claim the reader has to audit — dropping the family becomes deleting a directory. |
 | `BlockKind` (para/code/list/table/quote/html) | Markdown | **relocate to `ext/markdown`** | A closed enum of prose block types in a config-patching core. It exists solely to give `SegBlock` its kinds and moves with it. |
-| `SegComment`, `CommentValue` | JSONC, YAML, TOML, HCL (not JSON) | **restructure** | The awkward one, and the audit should say so rather than round it to a neat answer: it is neither universal nor single-format. It is **capability**-scoped — "does this format have comment nodes" — which JSON answers no and §8.1 already enforces as `HEW020`. Ruling: the `#` form leaves the core segment vocabulary like the others, and the four comment-capable extensions share one `ext/comment` helper. Shared code, not core vocabulary — the distinction the whole ruling turns on. |
-| `NodeKind.KindBlock`, `KindSection` | HCL, Markdown | **restructure** | `KindMap`/`KindSeq`/`KindScalar` are universal and stay. The other two become **extension-declared kind names**: `? kind` (OP-28) carries a string, and the active extension validates it against the set it declares. An unknown kind is `HEW001`, exactly as today; the `.hewt` spelling is unchanged. |
+| `SegComment`, `CommentValue` | JSONC, YAML, TOML (not JSON) | **restructure** | The awkward one, and the audit should say so rather than round it to a neat answer: it is neither universal nor single-format. It is **capability**-scoped — "does this format have comment nodes" — which JSON answers no and §8.1 already enforces as `HEW020`. Ruling: the `#` form leaves the core segment vocabulary like the others, and the four comment-capable extensions share one `ext/comment` helper. Shared code, not core vocabulary — the distinction the whole ruling turns on. |
+| `NodeKind.KindBlock`, `KindSection` | Markdown | **restructure** | `KindMap`/`KindSeq`/`KindScalar` are universal and stay. The other two become **extension-declared kind names**: `? kind` (OP-28) carries a string, and the active extension validates it against the set it declares. An unknown kind is `HEW001`, exactly as today; the `.hewt` spelling is unchanged. |
 | `Transform.Anchor` | YAML | **restructure — ownership moves, spelling does not** | The `anchor:` key stays exactly as §9.6 defines it, because §9.6 is normative and the corpus pins those bytes. `ext/yaml` declares and validates it. See the tension below. |
 | `Transform.Surface` | TOML | **restructure — same** | Same treatment, `ext/toml`. |
 | `FormatID.Valid()`'s six-format switch | all | **restructure** | A live defect found by this audit, not just a layering complaint: `Valid()` hardcodes the six v0 formats, so a correctly-registered seventh extension is rejected by the *parser* before any binding is consulted. Validity must be a registry lookup (A.6), which is what makes §12's "documented-only" families addable without touching the core. |
 | §8.0's detection table | all | **relocate to the extensions** | Already half-ruled by [O4](#ratified-by-the-coordinator-2026-08-14) ("the mechanism is normative; the list is binding data") and [O35](#p5--the-api-ratification-2026-08-14) (each binding carries its `DetectRule`). This ruling finishes it: §8.0's table becomes a **non-normative record of the shipped defaults**, and the normative statement is the mechanism plus "detection reads the name, never the content". |
-| Binding packages `hewjson`, `hewjsonc`, `hewyaml`, `hewtoml`, `hewhcl`, `hewmarkdown` | each | **relocate: rename to `ext/<format>`** | The isolation should be visible in the import path. `github.com/benjaminabbitt/hew/go/ext/yaml` says what `hewyaml` only implies, and a reviewer scanning imports can see at a glance whether the core has grown a format dependency. **This is a breaking rename**, landing with the rest of the P5 implementation; consumers pinned at `v0.1.0` are unaffected until they upgrade. |
+| Binding packages `hewjson`, `hewjsonc`, `hewyaml`, `hewtoml`, `hewmarkdown` | each | **relocate: rename to `ext/<format>`** | The isolation should be visible in the import path. `github.com/benjaminabbitt/hew/go/ext/yaml` says what `hewyaml` only implies, and a reviewer scanning imports can see at a glance whether the core has grown a format dependency. **This is a breaking rename**, landing with the rest of the P5 implementation; consumers pinned at `v0.1.0` are unaffected until they upgrade. |
 
 #### The tensions, recorded rather than forced
 
@@ -1478,7 +1324,7 @@ interop surface, and the thing the corpus pins.
   anything, knows no format mechanics.** Its output is fully determined by the patch text.
 - **Applier** (IR + target bytes → patched bytes). One implementation per format, each
   wrapping that format's byte-preserving editor library (`tailscale/hujson`,
-  `pelletier/go-toml/v2` `unstable/edit`, `hashicorp/hcl/v2/hclwrite`, `yaml.v3` node surgery,
+  `pelletier/go-toml/v2` `unstable/edit`, `yaml.v3` node surgery,
   a Markdown block editor). **Never sees a margin, a hunk, or an annotation.**
 - **Differ** (old bytes, new bytes → IR). One implementation per format, parsing both sides
   with the *same* library its applier uses, computing a structural diff into the IR. P4 work;
@@ -1939,7 +1785,7 @@ target, the patch file line number, and — where applicable — the expected an
 | `HEW003` | `target-path-error` | The target path escapes the apply root, or is not a regular file. |
 | `HEW010` | `stale-target` | A context or `-` line's node is absent or unequal. The characteristic drift error. |
 | `HEW011` | `assertion-failed` | A `? expect` / `? absent` / `? exhaustive` / `? count` / `? kind`, or a `! match label=` cross-check, did not hold. |
-| `HEW012` | `ambiguous-match` | A key-match, HCL label tuple, or Markdown heading selected more than one node and no ordinal annotation resolved it. |
+| `HEW012` | `ambiguous-match` | A key-match or Markdown heading selected more than one node. |
 | `HEW013` | `no-match` | A required node does not exist: a `-` line's node, an anchor without `?`, an `ord=` beyond the sibling count, a merge-key-inherited key. |
 | `HEW014` | `already-exists` | A `+` line's node already exists and the hunk is not `! idempotent`. |
 | `HEW020` | `inexpressible` | The requested edit cannot be represented in Hew v0 or in the target format — a node move or copy (Appendix C), a comment node in JSON, a sub-block Markdown edit, a TOML surface migration. The message names Appendix C's condition for a spec revision. |
@@ -2125,7 +1971,7 @@ Format column key: `✓` supported · `—` not applicable to this format's data
 | **RFC 6901** | `-` append token, `~0`/`~1` escapes | §4.1, OP-11. |
 | **RFC 7386 merge patch** | implicit set; `null` = delete; whole-array replace | OP-01, OP-05, OP-08. `null`-as-delete **rejected** (OP-10). |
 | **K8s strategic merge** | `$patch: delete`, `$patch: replace`, `$patch: merge`, merge-key list semantics, `$setElementOrder`, `$deleteFromPrimitiveList` | OP-05, OP-08, OP-09 (rejected), OP-16, OP-19 (deferred), OP-15. |
-| **ytt overlay** | `@overlay/match` (`by=`, `expects=`, `missing_ok=`), `@overlay/remove`, `@overlay/replace`, `@overlay/insert before=/after=`, `@overlay/append`, `@overlay/assert`, `@overlay/replace via=λ` | §4.2 + §7.2 (`by=`/`ord=`), OP-05, OP-01, OP-13, OP-11, OP-24–OP-28, OP-27 (`expects=`), OP-04 (`missing_ok=`), OP-29 (rejected: `via=λ`). |
+| **ytt overlay** | `@overlay/match` (`by=`, `expects=`, `missing_ok=`), `@overlay/remove`, `@overlay/replace`, `@overlay/insert before=/after=`, `@overlay/append`, `@overlay/assert`, `@overlay/replace via=λ` | §4.2 (`by=`), OP-05, OP-01, OP-13, OP-11, OP-24–OP-28, OP-27 (`expects=`), OP-04 (`missing_ok=`), OP-29 (rejected: `via=λ`). |
 | **go-patch / yaml-patch** | `type: replace/remove`, `path` with `name=value`, trailing `?` | §4.2, §4.4, OP-01, OP-05, OP-16. |
 | **jd** | path-scoped hunks, `-`/`+` values, set/multiset modes | The margin grammar itself; OP-20 (rejected: set semantics). |
 | **kustomize** | target selector; `patchesStrategicMerge`; `patchesJson6902`; `replacements` (field→field) | §2.2 `--- ` target line; OP-23. |
@@ -2158,8 +2004,8 @@ Format column key: `✓` supported · `—` not applicable to this format's data
 + timeout: 60
 ```
 **IR** `{op: test, path: /server/timeout, value: 30}` then `{op: replace, path: /server/timeout, value: 60}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown — (no keys)
-**Errors** `HEW010` `HEW013` · **Corpus** `json/set-scalar`, `yaml/set-scalar`, `toml/set-scalar-dotted`, `hcl/set-attribute`
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown — (no keys)
+**Errors** `HEW010` `HEW013` · **Corpus** `json/set-scalar`, `yaml/set-scalar`, `toml/set-scalar-dotted`
 
 #### OP-02 `add-key` — create a key that must not exist
 **Status** v0 · **Disp** `CORE` — `add` · **Sources** 6902 `add`, ytt `@overlay/match missing_ok=True` + insert
@@ -2172,8 +2018,8 @@ adding over an existing key is a drift signal, not a convenience.
 + tls: true
 ```
 **IR** `{op: add, path: /server/tls, value: true, after: /server/port}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown —
-**Errors** `HEW014` · **Corpus** `json/add-key`, `hcl/add-attribute`
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown —
+**Errors** `HEW014` · **Corpus** `json/add-key`
 
 #### OP-03 `upsert-key` — add, or replace whatever is there
 **Status** v0 · **Disp** `CORE` — `add` + `on_conflict: replace` · **Sources** go-patch trailing `?`, ytt `missing_ok`, M5 install
@@ -2187,7 +2033,7 @@ cannot detect drift; use it only where ctxloom owns the key outright (M5's exact
 + taskloom = { command = "taskloom" }
 ```
 **IR** `{op: add, path: /mcp_servers/taskloom, on_conflict: replace, value: {...}}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown —
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown —
 **Errors** — (this op has no failure of its own) · **Corpus** `toml/upsert-key`
 
 #### OP-04 `default-key` — add only if absent, leave an existing value alone
@@ -2201,7 +2047,7 @@ cannot detect drift; use it only where ctxloom owns the key outright (M5's exact
 + timeout: 30
 ```
 **IR** `{op: add, path: /server/timeout, on_conflict: keep, value: 30}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown —
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown —
 **Errors** — · **Corpus** `yaml/default-key-present`, `yaml/default-key-absent`
 
 #### OP-05 `remove-key`
@@ -2216,7 +2062,7 @@ Removing the last child leaves an empty container; it does **not** cascade-delet
 - host: localhost
 ```
 **IR** `{op: test, path: /server/host, value: localhost}` then `{op: remove, path: /server/host}`
-**Formats** json ✓ · jsonc ✓ (with its leading comment, §8.2) · yaml ✓ · toml ✓ · hcl ✓ · markdown —
+**Formats** json ✓ · jsonc ✓ (with its leading comment, §8.2) · yaml ✓ · toml ✓ · markdown —
 **Errors** `HEW010` `HEW013` · **Corpus** `json/delete-key`, `jsonc/delete-key-with-comment`
 
 #### OP-06 `remove-key-if-present`
@@ -2239,7 +2085,7 @@ do nothing**, which is why §7.6 requires a justifying comment and a linter warn
 **Mirror** IR-only. The mirror form (`- old: v` / `+ new: v`) is a delete-and-add and loses
 the node's comments and source bytes — see [O16](#decisions-and-residual-open-questions).
 **IR** `{op: copy, from: /server/timeout, path: /server/timeout_seconds}` then `{op: remove, path: /server/timeout}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown —
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown —
 **Errors** `HEW013` `HEW014` · **Corpus** `yaml/ir-rename-key`
 
 #### OP-08 `replace-container-wholesale`
@@ -2255,7 +2101,7 @@ it the way a merge tool would.
 + tags: []
 ```
 **IR** `{op: replace, path: /server/tags, value: []}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown ✓ (a section's body)
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown ✓ (a section's body)
 **Errors** `HEW010` `HEW013` · **Corpus** `json/replace-array-wholesale`
 
 #### OP-09 `deep-merge-container`
@@ -2290,7 +2136,7 @@ as the only element, legal.
 + - gamma
 ```
 **IR** `{op: add, path: /tags, after: /tags/=beta, value: gamma}` (or `end` with no context)
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ (array + array-of-tables) · hcl ✓ (tuple exprs) · markdown ✓ (list blocks)
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ (array + array-of-tables) (tuple exprs) · markdown ✓ (list blocks)
 **Errors** `HEW013` · **Corpus** `yaml/list-append`, `json/array-append`
 
 #### OP-12 `prepend-element`
@@ -2340,7 +2186,7 @@ value-match address for scalar sequences rather than an index, so the patch surv
 reordering.
 **IR** `{op: remove, path: /tags/=beta}` — the `=value` form of §4.2 with an empty field name,
 meaning "the element that equals this".
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown — · **Errors** `HEW012` `HEW013`
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown — · **Errors** `HEW012` `HEW013`
 **Corpus** `yaml/list-remove-by-value`, `yaml/list-remove-by-value-duplicate` (error)
 
 #### OP-16 `add-or-replace-keyed-element` — the headline operation
@@ -2358,7 +2204,7 @@ implies. Without `?`: absent → `HEW013`. Two elements with the same key → `H
 +   args: [mcp]
 ```
 **IR** `{op: add, path: /mcpServers, after: /mcpServers/name=github, value: {...}}`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ (`[[x]]`) · hcl ✓ (blocks by label) · markdown —
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ (`[[x]]`) (blocks by label) · markdown —
 **Errors** `HEW012` `HEW013` `HEW014` · **Corpus** `yaml/keyed-array-add`, `json/keyed-array-add`, `toml/array-of-tables-add`
 
 #### OP-17 `remove-keyed-element`
@@ -2408,7 +2254,7 @@ semantics wants `? exhaustive` plus key-match addressing, which Hew has.
 the source subtree → `HEW001` (6902's own prohibition).
 **Mirror** IR-only. §9.6 is the authoring surface; Appendix C.1 is the rationale.
 **IR** `{op: copy, from: /server/host, path: /network/host}` then `{op: remove, path: /server/host}`
-**Formats** json ✓ · jsonc ✓ (comments travel) · yaml ✓ · toml ✓ · hcl ✓ · markdown ✓ (a block or section)
+**Formats** json ✓ · jsonc ✓ (comments travel) · yaml ✓ · toml ✓ · markdown ✓ (a block or section)
 **Errors** `HEW001` `HEW013` `HEW014` · **Corpus** `yaml/ir-move-node`, `markdown/ir-move-section`
 
 #### OP-22 `copy-node`
@@ -2445,7 +2291,7 @@ a value fails *as an assertion* when it is missing).
 **Semantics** The listed children are the container's complete child set (§6.1). **This is the
 operation that makes Merge Patch's expensive accident cheap and deliberate.**
 **IR** desugars to `{op: test, path: /permissions, count: 2}` plus one `{op: test, …, value: …}` per listed child · **Mirror** `? exhaustive`
-**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown ✓ (a section's block list)
+**Formats** json ✓ · jsonc ✓ · yaml ✓ · toml ✓ · markdown ✓ (a section's block list)
 **Errors** `HEW011` · **Corpus** `json/assert-exhaustive-fail`
 
 #### OP-27 `assert-count`
@@ -2471,7 +2317,7 @@ one property §1 exists to protect. Equality and existence only.
 
 ### 11.6 Comment operations
 
-Comments are nodes in JSONC, YAML, TOML and HCL, and Hew treats them as such. **Decision (this
+Comments are nodes in JSONC, YAML and TOML, and Hew treats them as such. **Decision (this
 spec, resolving the brief's open point): a patch CAN carry a comment for a node it adds.**
 Two forms, both v0.
 
@@ -2486,7 +2332,7 @@ required by ctxloom's own managed-marker practice (M1/M2 both write explanatory 
   timeout: 60
 ```
 **IR** `{op: add, path: /server/#0, before: /server/timeout, value: {comment: "ctxloom-managed — …"}}`
-**Formats** json ✗ (`HEW020`) · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown ✓ (HTML comment block)
+**Formats** json ✗ (`HEW020`) · jsonc ✓ · yaml ✓ · toml ✓ · markdown ✓ (HTML comment block)
 **Errors** `HEW020` · **Corpus** `toml/add-comment-line`, `json/comment-inexpressible` (error)
 
 #### OP-31 `attach-comment-to-added-node`
@@ -2502,7 +2348,7 @@ mirror form; the IR carries it as a qualifier so an applier need not reconstruct
 + command = "taskloom"
 ```
 **IR** desugars to `{op: add, path: /mcp_servers/#0, value: {comment: "added by taskloom manage install"}, before: /mcp_servers/taskloom}` plus `{op: add, path: /mcp_servers/taskloom, value: {...}}`
-**Formats** json ✗ · jsonc ✓ · yaml ✓ · toml ✓ · hcl ✓ · markdown —
+**Formats** json ✗ · jsonc ✓ · yaml ✓ · toml ✓ · markdown —
 **Errors** `HEW020` · **Corpus** `jsonc/add-with-leading-comment`
 
 #### OP-32 `remove-comment` · #### OP-33 `replace-comment-text`
@@ -2514,28 +2360,6 @@ mirror form; the IR carries it as a qualifier so an applier need not reconstruct
 ---
 
 ### 11.7 Format-specific operations
-
-#### OP-34 `hcl-block-create` · #### OP-35 `hcl-block-remove`
-**Status** v0 · **Disp** `CORE` — `add`, label address · **Sources** HCL's block/attribute duality (§8.5); `hclwrite`'s DOM API
-**Absent/empty** Create over an existing identical tuple → `HEW014` unless the intent is a
-second sibling, which requires `! match ord=` on neither line (a genuinely new sibling is an
-`add` at the body level, and the corpus pins that it does not accidentally target the
-existing one).
-**Mirror** a `+`/`-` run covering the whole block including its braces (§8.5).
-**IR** `{op: add, path: /provider/"aws", value: {region: "us-west-1"}}` — the label is in the address, never in the value
-**Formats** hcl ✓ only · **Errors** `HEW012` `HEW014` · **Corpus** `hcl/add-block`, `hcl/remove-block`
-
-#### OP-36 `hcl-block-relabel`
-**Status** v0, **IR-only** · **Disp** `SUGAR` — → `copy` + `remove` · A relabel is a `move` between label tuples (OP-21).
-**IR** `{op: copy, from: /provider/"aws", path: /provider/"aws-legacy"}` then `{op: remove, path: /provider/"aws"}`
-**Errors** `HEW012` `HEW013` `HEW014` · **Corpus** `hcl/ir-relabel-block`
-
-#### OP-37 `select-repeated-block` (ordinal selector)
-**Status** v0 · **Disp** `CORE` — addressing mode, not an op · Not an operation but a **selector**, cataloged because the survey's HCL check
-treated it as a missing capability. §7.2 `! match [label=[…]] ord=<n>`.
-**Formats** hcl ✓ · others — (no format else permits repeated identical keys)
-**Errors** `HEW001` (unnecessary ordinal) `HEW011` (label cross-check) `HEW012` `HEW013`
-**Corpus** `hcl/repeated-label-ordinal`, `hcl/repeated-label-ambiguous` (error), `hcl/ordinal-context-guard` (error)
 
 #### OP-38 `toml-surface-placement-on-add`
 **Status** v0 · **Disp** `CORE` — `surface` qualifier · **Sources** the TOML dotted/table wrinkle (§8.4)
@@ -2656,8 +2480,6 @@ byte preservation and attached comments, because those are contract in this form
    as intended: it forced the node model to become uniform instead of letting a qualifier
    paper over a gap.
 4. **`ord` / `labels` → addressing.** An ordinal is an addressing mode, not an operation. It
-   belongs on the path in the IR, exactly as it belongs *off* the path in the notation (§4.3,
-   §7.2). The notation keeps ordinals visible as annotations because a human should see the
    fragility; the ASM puts them in the address because that is what they are.
 
 **The case examined hardest: ordering-sensitive inserts (OP-11, OP-12, OP-13).**
@@ -2701,7 +2523,7 @@ must therefore be **dialect-parameterized**, not universal:
 
 | Dialect | Example | Addressing sketch |
 |---|---|---|
-| git-style | `[remote "origin"]` | Quoted subsection = a **label segment** (§4.3), reusing HCL's rule: `/remote/"origin"/url`. |
+| git-style | `[remote "origin"]` | Quoted subsection = a **quoted key** (§4.1): `/remote/"origin"/url`. |
 | systemd-style | `[Service]` with repeatable keys | `/Service/ExecStart` addresses a *sequence* when the key repeats; a repeated key that the patch addresses as a scalar is `HEW012`. |
 | Java `.properties` / `.npmrc` | `a.b.c=1`, flat | **Flat, not a tree.** `/a.b.c` is one segment. The `~1` escape is mandatory for any `/` in a key. A binding MUST NOT split on `.`. |
 
@@ -2762,7 +2584,6 @@ corpus/                        (repo root — ratified O15)
   jsonc/<case>/
   yaml/<case>/
   toml/<case>/
-  hcl/<case>/
   markdown/<case>/
   cli/<case>/
 ```
@@ -3020,7 +2841,7 @@ not code. **It is now ratified**, in two halves that must be read differently:
   that is how this half becomes the first half.
 
 **Package path:** `github.com/benjaminabbitt/hew/go`, with **format extensions at
-`.../ext/json`, `ext/jsonc`, `ext/yaml`, `ext/toml`, `ext/hcl`, `ext/markdown`**
+`.../ext/json`, `ext/jsonc`, `ext/yaml`, `ext/toml`, `ext/markdown`**
 ([O48](#p5--the-format-isolation-audit-2026-08-14) — the isolation is visible in the import
 path, and a reviewer scanning imports can see whether the core has grown a format dependency),
 the differ front end at `hewdiff`, and the CLI at `cmd/hew`. **The core package imports no host
@@ -3161,7 +2982,6 @@ func MatchKey(field, value string) SegmentArg        // §4.2, always a quoted s
 func MatchKeyNumber(field, literal string) SegmentArg
 func MatchKeyBool(field string, v bool) SegmentArg
 func MatchKeyNull(field string) SegmentArg
-func Label(s string) SegmentArg                      // §4.3 — or the quoted-segment
                                                      // constructor, once O48 restructures
                                                      // labels into quoted segments
 ```
@@ -3474,8 +3294,7 @@ type ResolvedOp struct {
 `AnchorPath`/`AnchorLine` exist because a resolution failure *inside* an anchor is the
 **anchor's** failure: when `@@ /provider/"google" @@` matches two blocks, the reviewer must be
 sent to the `@@` line, not to the first context line that happened to ask a question. Two
-corpus cases pin exactly that reporting (`hcl/repeated-label-ambiguous`,
-`markdown/duplicate-heading`), and a transform that does not know which hunk it came from
+corpus cases pin exactly that reporting (`markdown/duplicate-heading`), and a transform that does not know which hunk it came from
 cannot produce it. The fields are provenance in the strict sense — not serialized to `.hewt`
 (§9.6 already rules `line` emitted-and-ignored), not compared by `Equal`, and therefore
 invisible to every corpus byte comparison.
@@ -3578,7 +3397,7 @@ const (
     KindSeq
     KindScalar
     KindComment
-    KindBlock   // HCL block, Markdown block
+    KindBlock   // Markdown block
     KindSection // Markdown section
 )
 ```
@@ -3628,7 +3447,6 @@ const (
     FormatJSONC    FormatID = "jsonc"
     FormatYAML     FormatID = "yaml"
     FormatTOML     FormatID = "toml"
-    FormatHCL      FormatID = "hcl"
     FormatMarkdown FormatID = "markdown"
 )
 
@@ -3665,7 +3483,7 @@ unnoticed. A registry with one entry point makes "which formats can this build a
 answerable, and answerable is what a `--format` error message needs.
 
 ```go
-package yaml   // ext/yaml; likewise ext/json, ext/jsonc, ext/toml, ext/hcl, ext/markdown
+package yaml   // ext/yaml; likewise ext/json, ext/jsonc, ext/toml, ext/markdown
 
 func init() { hew.Register(hew.FormatYAML, hew.Binding{ /* … */ }) }
 
@@ -3687,7 +3505,7 @@ announces everything the core would otherwise have had to know about it.
 **Precedent, and the alternative that was rejected.** Import-for-effect registration is Go's
 own answer to this problem — `image/png`, `database/sql`, `net/http/pprof` — and it is the one
 that lets a program pay for the formats it uses: a tool that only edits `.json` should not link
-an HCL parser. `ext/all` exists so the common case is still one import.
+a Markdown parser. `ext/all` exists so the common case is still one import.
 
 The alternative — **explicit registration**, `hew.Register(hew.FormatYAML, yaml.Binding())`
 at program start — was considered and **rejected**. It reads better in isolation, and it fails
@@ -4172,7 +3990,7 @@ reason that decided it.
 | **O1** | Standalone `hew` binary vs `ctxloom patch` subcommand. | **Standalone.** Settled by construction: the human created `~/workspace/hew` as its own repository with `go/` and `rust/` trees and a corpus-driven justfile. A standard intended to outlive its host project cannot ship as that host's subcommand. |
 | **O2** | Doc filename convention. | **`docs/hew-spec.md`** at the standalone repo root. Settled by the same repository. This is a spec, not a design note, so it does not take the `*.design.md` convention of ctxloom's `docs/design/`. |
 | **O4** | JSONC-by-well-known-name. | **The mechanism is normative; the list is binding data.** §8.0 specifies that a binding carries a `DetectRule` with extensions and well-known names; the names themselves ship with the binding and are always overridable by an explicit `format=`. A hard-coded name list in the *standard* would age badly; one in an implementation's detection table is just a default. |
-| **O5** | Extending RFC 6901's escape set with `~2` for `=`. | **Adopted.** One character, unambiguous, and it keeps segments readable. The alternative — quoting the whole segment — collides with the label-segment syntax HCL needs (§4.3), which would make the address grammar ambiguous exactly where it must not be. |
+| **O5** | Extending RFC 6901's escape set with `~2` for `=`. | **Adopted.** One character, unambiguous, and it keeps segments readable. The alternative — quoting the whole segment — collides with the label-segment syntax an HCL-like block grammar would need, which would have made the address grammar ambiguous. |
 | **O6** | Key-match comparison operators. | **Equality only in v0.** go-patch, the one proven prior art for this idiom, has only equality. Regex or multi-field match is a compatible future extension to the segment grammar; shipping it now would mean designing a match language against zero measured demand. |
 | **O7** | Markdown kind-scoped block ordinals (`code:0`) in a path. | **Allowed, and scoped to Markdown's fate.** Markdown has no keys at all, so the dialect is unusable without them. Revisited only if [O29](#residual--genuinely-open) keeps Markdown in the implement tier; if Markdown drops, this question drops with it. |
 | **O8** | `! match ord=` on an unambiguous path. | **`HEW001`.** Consistent with §6.4.3's MUST: an unnecessary ordinal is a latent misapply waiting for the file to grow a sibling. A patch that breaks when the file *stops* being ambiguous is a patch that told you something changed, which is the contract. |
@@ -4187,7 +4005,6 @@ reason that decided it.
 | **O19** | Default context radius = 1 sibling. | **1.** The smallest radius that still pins insertion position (§6.2), which is the property context must carry. Unified diff's 3 is a line-oriented number with no structural meaning here. Because context compiles into assertions (§9.0), a larger default would silently make every generated patch stricter than its author asked for; `-U` raises it deliberately. |
 | **O21** | Name and extension of the serialized IR. | **`.hewt`, `hew apply --transforms`.** The extension mirrors `.hew` so the pair reads as one family; the flag names the concept rather than the file type. Sniffing the positional argument was rejected — two input grammars with invisible precedence is how a tool starts guessing. |
 | **O23** | Comment attachment on added nodes. | **Yes** (OP-30, OP-31), `HEW020` for JSON which has no comments. No surveyed patch format can do this, and ctxloom's own managed writers require it — every managed region carries an explanatory header. The implementation cost lands on the appliers, which is the right place for it. |
-| **O25** | *(moved to residual — see below)* | |
 | **O26** | `replace` vs `add`+`on_conflict: replace` overlap. | **Both kept.** They differ in *precondition*, not effect: `replace` requires the node (`HEW013` if absent), `add` does not. A precondition is orthogonal to an effect, so this is not the duplication the reduction forbids. Removing `replace` would make the most common operation a two-record composition. |
 | **O27** | Two tolerance flags rather than one. | **Both kept.** `optional` tolerates an absent node; `idempotent` tolerates an already-applied state. Different conditions, and a single `tolerate:` enum would spell them less obviously while saving one field. |
 | **O28** | Comment addresses (`/x/#0`, `/x/timeout/#t`). | **Kept.** They had to exist for OP-32/OP-33 regardless, and their existence is what let the comment-attachment qualifier reduce away entirely (§11.10). The positional-drift hazard is real and bounded: a comment address is only used by a patch that is editing that comment, and such a patch asserts the comment's text, so a shifted ordinal fails loudly rather than editing the wrong comment. |
@@ -4210,7 +4027,7 @@ that are specified here and **not yet built**; O38 and O39 amend behaviour that 
 | **O32** | Is `! idempotent` legal on a `test`? | **Yes** (A.1, §7.5). §7.5's rule is stated over the *hunk*, and a hunk lowers to a before-image `test` **and** a write; a tolerance riding only the write would leave the paired `test` failing loudly and convergence unreachable. `copy` is the one exclusion — it asserts nothing about its destination. |
 | **O33** | Does `ResolvedOp` carry every assertion mode, or only the ones RFC 6902 has? | **Every one — `Exhaustive` and `NodeKind` included** (A.1). The resolved list is what `--record` embeds (§9.7), and a record that drops an assertion the applier really evaluated under-reports what happened to the file. A record must not under-report. |
 | **O34** | What does a program that wants to edit a config file call? | **A fluent document API — `hew.Open` → `.At(path)` → operation → terminal** (A.0). Three rules, each a restatement of one the format already has: format appears only at the open boundary and is detected from the **name** (§8.0, never sniffed, overridable by `hew.As` exactly where a patch would say `format=`); addressing is the **§4 path**, one language in two encodings, with typed segment constructors for computed paths and deliberately no navigation method-chain; and **reads become asserts** — `Replace` records `test`(current) + `replace`, which is §9.1's lowering with the before-image taken from the open document. `Set`/`Default` are the documented unasserted forms (OP-03/OP-04). The builder's output is ordinary IR, indistinguishable from parsed-patch IR, and `RenderPatch` turns any edit into a reviewable `.hew`. |
-| **O35** | Registry, or a `switch` per call site? | **Registry, with bindings self-registering from `init()` on import** (A.6). Import-for-effect is Go's own answer (`image/png`, `database/sql`) and makes "linked" and "capable" the same fact, so a JSON-only tool links no HCL parser; `hewall` keeps the common case to one import. **Explicit registration was considered and rejected**: it reads better in isolation and fails by giving `HEW021` for a plainly-visible `.yaml`, at runtime, from a library that was linked and ready. Cost stated: an unused blank import is invisible to `goimports`. |
+| **O35** | Registry, or a `switch` per call site? | **Registry, with bindings self-registering from `init()` on import** (A.6). Import-for-effect is Go's own answer (`image/png`, `database/sql`) and makes "linked" and "capable" the same fact, so a JSON-only tool links no YAML parser; `hewall` keeps the common case to one import. **Explicit registration was considered and rejected**: it reads better in isolation and fails by giving `HEW021` for a plainly-visible `.yaml`, at runtime, from a library that was linked and ready. Cost stated: an unused blank import is invisible to `goimports`. |
 | **O36** | What may `hewfs` import? | **Nothing from any host project** (A.8). The draft spelled §10.5 in ctxloom's vocabulary (`agent.WithFileLock`, `iox.WriteFileAtomicFs`); that text is superseded. §10.5 requires a *property* — atomic temp-and-rename, no backup file — and a host that wants its own locking wraps `hewfs` from outside, as `config-write` already does. |
 | **O37** | Is `applied_at` a wall clock, or pinnable? | **Pinnable: `HEW_APPLIED_AT`, then `SOURCE_DATE_EPOCH`, then the clock** (§9.7, A.8). Every other field of a record is a function of its inputs; the timestamp was the one thing making a deterministic artifact differ per run, which breaks the callers most likely to keep records. A malformed pin is exit 2, never a silent fallback — a pin that quietly does not pin is worse than none, because the artifact still looks reproducible. |
 | **O38** | What does `hew diff` emit for identical inputs, and what does `hew apply` do with it? | **A preamble-only patch, which applies as a no-op** (B.2.2, §9.4-R8, §10.2 amended). Emitting zero bytes produces a file `apply` then refuses as `HEW001`, turning "nothing changed" into an error one command later. §10.2's line moves to *did the author say which file this is about*: `hew: 1` + a `--- ` line + no hunks is a complete statement and exits 0; zero bytes, or a preamble with no file section, stays `HEW001`. |
@@ -4225,11 +4042,10 @@ fixes addresses that are wrong on disk today.
 
 | # | Question | Ruling |
 |---|---|---|
-| **O41** | `Path.String()` is not injective: a key like `@scope/pkg` renders `/@scope~1pkg` and reparses as a **marker**; a digit-only key reparses as an **index**; `-` as **append**; a trailing `?` flips a match into create-if-absent; an empty key vanishes into the root. | **A quoted-key segment form, plus a normative canonical-rendering rule** (§4, §4.1). A quoted segment resolves **by container kind** — block set → label (§4.3, unchanged), mapping → key — and `String()` MUST emit it for any key whose bare spelling would not reparse as the same segment. **`String()`↔`ParsePath` becomes a stated bijection.** This overturns one clause of [O5](#ratified-by-the-coordinator-2026-08-14)'s reasoning ("quoting collides with the label syntax") and not its decision: the two contexts are disjoint, because a container is a block set or a mapping and never both, and the resolver knows which at every step. **This is a live defect, not a hypothesis**: the differ builds key segments straight from the target's own keys and `.hewt` stores every address as this text, so a `package.json` with a scoped dependency produces a transform list whose addresses already mean something else. Also corrected here: §4.1's "RFC 6901, unchanged" was false at the root — hew spells the document `/` where RFC 6901 spells it `""`, and RFC's empty-key member had no hew spelling at all until this form. |
+| **O41** | `Path.String()` is not injective: a key like `@scope/pkg` renders `/@scope~1pkg` and reparses as a **marker**; a digit-only key reparses as an **index**; `-` as **append**; a trailing `?` flips a match into create-if-absent; an empty key vanishes into the root. | **A quoted-key segment form, plus a normative canonical-rendering rule** (§4, §4.1). A quoted segment is a key said literally, and `String()` MUST emit it for any key whose bare spelling would not reparse as the same segment. **`String()`↔`ParsePath` becomes a stated bijection.** **This is a live defect, not a hypothesis**: the differ builds key segments straight from the target's own keys and `.hewt` stores every address as this text, so a `package.json` with a scoped dependency produces a transform list whose addresses already mean something else. Also corrected here: §4.1's "RFC 6901, unchanged" was false at the root — hew spells the document `/` where RFC 6901 spells it `""`, and RFC's empty-key member had no hew spelling at all until this form. |
 | **O42** | `Scalar.pathString()` quotes only when `Quoted` is set, so a programmatic string scalar `"8080"` renders `name=8080` and re-decodes as a **number**. | **Force-quote any string scalar whose bare rendering would not reparse identically** (§4.2) — the same bijection rule as O41, one level down. And in the API (A.0), `MatchKey(field, value string)` always produces a quoted string scalar, with `MatchKeyNumber`/`MatchKeyBool`/`MatchKeyNull` for typed comparisons, so **the comparison's type is visible at the construction site** rather than inferred from a value's shape. The differ already dodges this by quoting every string it emits, which is the fix generalized rather than invented. |
 | **O43** | How does a caller get a runtime value into a path? | **Typed holes: `At(pattern string, args ...SegmentArg)`** (A.0). Normatively: `At` parses **only the pattern** — literal spans go through the §4 grammar — and each `{}` consumes the next arg as a **structural `Segment` value slotted into the parsed skeleton**, never substituted into text and re-parsed. The invariant that follows is the ruling's whole point: **user data supplied through a typed constructor is never parsed as path text.** It enters as struct data, so there is no escaping step and **no injection channel** — a value cannot introduce a segment boundary, a key-match, an ordinal or an optional marker. The precedent is `database/sql`: parameters travel out-of-band from the statement text, and a placeholder is not a paste site. `SegmentArg` is a **sealed interface** (unexported method, implementable only inside the module); its constructors are `Key`, `Index`, `MatchKey` (always a quoted string scalar, [O42](#p5--the-addressing-language-review-2026-08-14)), `MatchKeyNumber`/`Bool`/`Null`, and `Label` (or the quoted-segment constructor once [O48](#p5--the-format-isolation-audit-2026-08-14) restructures labels) — and **every string parameter to them is opaque data**. An address that is programmatic all the way down skips the pattern entirely: build a `Path` from the same constructors and pass it to `doc.AtPath(p)`. **Soundness depends on [O41](#p5--the-addressing-language-review-2026-08-14)**: a structural segment holding hostile data is safe in memory for free, but the path is later written into a `.hew`, a `.hewt` or an error message and read back, so without canonical rendering's bijection the injection prevented at construction would simply move to serialization. The pattern language is **§4-plus-holes, owned by `At`** — and since `{}` is a legal *key* spelling in bare §4, a literal `{}` key needs the quoted form or `AtPath`. A hole/argument count mismatch is an **immediate error, not a partial path**. String concatenation into `At` is documented as a **defect**, not guarded against. Recorded **rejected**: printf-style character-level escaping (an escaper cannot know which of key/label/field/value its argument stands for, and they escape differently), and concatenation-detection heuristics (false positives on legitimately-computed paths train the reader to route around the warning). |
 | **O44** | Should v0 reserve the tokens its own named extensions would need? | **Yes, two** (§4.7). A key-match **field** ending `<`, `>` or `!` is `HEW001`, reserved for [O6](#ratified-by-the-coordinator-2026-08-14)'s comparison operators — `count>=5` **parses today** as a match on a field named `count>`, a working address a later `>=` would silently reinterpret. A bare `*` segment is `HEW001`, reserved for a wildcard. Both are affordable **only because O41 gives every literal a spelling**: `*` is a real key in `tsconfig.json`, written `/paths/"*"`. The quoted form is named as the permanent escape hatch for any token this spec reserves later, so a reservation can never make a real document unpatchable. |
-| **O45** | §6.4.3 rule 1 recommends key-match addressing as the mitigation for repeated HCL blocks, but §4.2 restricted key-match to sequences and no binding implements it over block sets. | **Extend §4.2 to same-`(type, labels)` block sets** — `/resource/"aws_instance"/name="web"`. The spec was recommending a remedy for its own most dangerous construct ([O25](#residual--genuinely-open)) without providing a spelling for it. Extending strictly *reduces* ordinal usage: the ordinal stays legal and stays the visible admission §4.3 says it is, but stops being forced wherever the blocks differ in any attribute. Implementation pending. |
 | **O46** | A key-match that hits nothing reports "no match", which sends the author looking for an element that is in front of them. | **`HEW013` MUST name the nearest miss and its type** (§10.3) — `1 element has version="1.0" (string) — quote the value to match a string`. Because §4.2 compares after decoding, a match can fail for a reason that is invisible in the address, and the remedy (quote the value) is not guessable from "no match". |
 | **O47** | At a comment address, is `#<n>` on an `add` a selector or a position? | **A selector on `test`/`remove`/`replace`; a POSITION on `add`, with `#-` to append** (§4.5b, with the per-projection worked example the section lacked). The two readings genuinely diverge only here, and leaving it to be guessed means two conformant implementations insert in different places. `#t` is never an `add` position — a member has one trailing comment, so an `add` where one exists is `HEW014` and `! upsert` replaces it. |
 
@@ -4261,7 +4077,6 @@ Four. Each needs evidence that does not exist yet; none blocks implementation of
 |---|---|---|
 | **O22** | File-level effects derived from node-level results (OP-48 `create-file-if-absent`, OP-49 `delete-file-when-empty`). | The P5 ctxloom-adoption slice. M2 genuinely removes the file when nothing user-authored remains and never creates an absent one. If hew is to replace M2, either the IR grows file-level effects or the adapter keeps owning them — and the second answer means hew does not actually replace M2. Deciding before attempting the migration would be guessing. |
 | **O24** | Catalog completeness (§11.9 claims exhaustiveness over the surveyed systems). | A reviewer who knows a verb in a system absent from §11.1's table. The claim is only as good as the survey, and the survey records two of its own gaps: no TOML notation candidate existed in any surveyed tool, and no format-prevalence census was obtainable. This is a standing invitation to falsify, not a decision awaiting a decider. |
-| **O25** | An HCL ordinal with no distinguishing assert available — genuinely identical sibling blocks. | Real HCL. §6.4.3 rule 3 currently lets the ordinal stand alone, which is the one construct in hew that can silently patch the wrong node; refusing it outright would leave legal HCL files unpatchable by hew at all. Nobody has measured how often truly indistinguishable sibling blocks occur in practice, and the answer decides which cost is worse. |
 | **O29** | Is Markdown in the implement tier at all? | The §8.7 evaluation — a rendered side-by-side of six scenarios against plain `patch(1)`, scored. The crux is already stated: reorder-blindness is hew's largest win over `patch(1)` and it is worth approximately nothing for prose, where order *is* the content. The corpus's skip registry already encodes the deferral (`markdown/*` is skipped with a recorded reason, §13.7), and the family is severable. |
 
 ### Deliberately not specified in v0
