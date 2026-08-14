@@ -36,7 +36,7 @@ const (
 	// It carries both spellings of a name, bare and quoted, because O41's
 	// quoted segment is not a kind of its own: `"aws"` is the same lexical form
 	// as `aws`, said literally, and what it MEANS is decided by the container
-	// the resolver is standing on — a key against a mapping, an HCL block label
+	// the resolver is standing on: a key against a mapping, said
 	// against a block set (§4.3, §8.8's SegLabel row). Segment.Quoted records
 	// which spelling this segment is.
 	SegKey SegmentKind = iota
@@ -141,7 +141,7 @@ type Segment struct {
 	// what Equal compares.
 	//
 	// On a SegKey it is also the label/attribute distinction §4.3 turns on: a
-	// quoted segment against an HCL block set is a label, an unquoted one is an
+	// quoted segment is a key said literally; an unquoted one is an
 	// attribute name or a nested block type.
 	Quoted bool
 
@@ -171,7 +171,7 @@ type Segment struct {
 
 // IsQuoted reports whether this segment is the LITERAL form of §4.1 — the
 // spelling that says "this text is data, not a form". Against a mapping it is
-// a key, against an HCL block set a label (§4.3); a container is one or the
+// a key said literally (§4.1); the container decides how a name reads, and the
 // other and never both, which is why one spelling serves both (O41).
 //
 // It answers for the CANONICAL rendering, not for the authored one: a name
@@ -771,7 +771,7 @@ func parseSegment(raw string, allowOrdinal bool, sc scope) (Segment, error) {
 	switch {
 	case strings.HasPrefix(body, `"`):
 		// The literal form (§4.1, O41). What it MEANS is the container's
-		// business — a key against a mapping, a label against an HCL block set
+		// business — a key against a mapping
 		// (§4.3) — so the parse records the spelling and stops there.
 		name, after, err := unquotePrefix(body)
 		if err != nil {

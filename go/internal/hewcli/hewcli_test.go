@@ -557,7 +557,7 @@ func TestApplyRecordThatCannotBeResolvedLeavesTheTargetUntouched(t *testing.T) {
 // registered and detectable, so the patch parses and names a real format, but
 // it ships no applier at all while §8.7's dialect evaluation is open (O29).
 //
-// This was a YAML case, then an HCL one; both gained what they lacked. If
+// This was a YAML case, then an HCL one before HCL was dropped. If
 // markdown ever ships an applier this test FAILS rather than quietly passing,
 // and whatever is genuinely unbound then becomes the case.
 func TestApplyOpsKnownFormatWithoutABindingExitsTwo(t *testing.T) {

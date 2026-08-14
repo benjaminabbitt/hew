@@ -103,8 +103,6 @@ func TestFenceFor(t *testing.T) {
 		"region.hew":    "diff",
 		"move.hewt":     "yaml",
 		"old.patch":     "diff",
-		"main.tf":       "hcl",
-		"config.hcl":    "hcl",
 		"app.json":      "json",
 		"config.yml":    "yaml",
 		"pyproject.tml": "text",

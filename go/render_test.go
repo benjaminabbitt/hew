@@ -138,7 +138,7 @@ func TestRenderCopyIsInexpressible(t *testing.T) {
 // TestRenderRoundTripCorpusIRFixtures runs RT2 over every corpus
 // transforms.hewt that belongs to a parse-seam case: those fixtures ARE the
 // pinned IR, so anything the parser produces the renderer must be able to
-// write back — comments (§4.5b), TOML surfaces (§8.4) and HCL ordinals
+// write back — comments (§4.5b) and TOML surfaces (§8.4)
 // (§7.2) included.
 func TestRenderRoundTripCorpusIRFixtures(t *testing.T) {
 	cases := []string{

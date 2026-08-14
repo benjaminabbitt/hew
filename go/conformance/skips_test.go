@@ -13,7 +13,7 @@ import "github.com/benjaminabbitt/hew/go/internal/harness"
 //
 // P5 state: the notation parser and renderer cover every non-markdown
 // fragment syntax (§8.1-§8.5); the JSON (§8.1), JSONC (§8.2), YAML (§8.3),
-// TOML (§8.4) and HCL (§8.5) appliers are bound, as are Resolve (§9.2),
+// TOML (§8.4) applier is bound, as are Resolve (§9.2),
 // --ops/--record (§9.7), the differ (§9.4) over every non-markdown format,
 // and git source resolution (§9.5, Appendix A.7).
 //
@@ -55,14 +55,5 @@ var skipRules = []harness.SkipRule{
 	// §9.1 lowers in phases — step 2 emits EVERY context and `-` line's test in
 	// body order, steps 4 and 5 then emit the removes and adds/replaces — and
 	// three passing cases pin those phases against the same shape:
-	// hcl/repeated-label-ordinal (a `-`/`+` pair followed by a context line,
-	// fixture: test, test, replace — the exact contradiction),
-	// json/array-remove-element (test, test, test, remove) and json/add-key
-	// (test, test, add). Implementing the fixture's order turns those three
-	// red, so the two readings cannot both be conformant and this fixture is
-	// the outlier: it was written with the ruling and has never been executed.
-	// The fix is a two-record reorder in
-	// corpus/json/quoted-key-digits/transforms.hewt, and it belongs to whoever
-	// owns the corpus.
-	{Case: "json/quoted-key-digits", Seam: "parse", Reason: "corpus defect (not a gap): the fixture interleaves test/replace, contradicting §9.1's phases and hcl/repeated-label-ordinal, json/add-key, json/array-remove-element — see the note above"},
+	{Case: "json/quoted-key-digits", Seam: "parse", Reason: "corpus defect (not a gap): the fixture interleaves test/replace, contradicting §9.1's phases and json/add-key, json/array-remove-element — see the note above"},
 }

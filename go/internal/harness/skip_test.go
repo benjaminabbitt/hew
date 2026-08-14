@@ -73,7 +73,7 @@ func TestSkipRegistryFirstMatchWins(t *testing.T) {
 func TestSkipRegistryHitCountingAndUnused(t *testing.T) {
 	rules := []SkipRule{
 		{Case: "json/*", Seam: "parse", Reason: "used"},
-		{Case: "hcl/*", Seam: "diff", Reason: "never fires"},
+		{Case: "nosuch/*", Seam: "diff", Reason: "never fires"},
 	}
 	r := NewSkipRegistry(rules, false)
 	if u := r.Unused(); len(u) != 2 {
@@ -90,7 +90,7 @@ func TestSkipRegistryHitCountingAndUnused(t *testing.T) {
 		t.Fatalf("Unused = %v, want exactly the dead rule", unused)
 	}
 	if unused[0].Reason != "never fires" {
-		t.Errorf("Unused = %v, want the hcl rule", unused)
+		t.Errorf("Unused = %v, want the unmatched rule", unused)
 	}
 }
 

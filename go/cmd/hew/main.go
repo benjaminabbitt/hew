@@ -5,7 +5,7 @@
 // It is also where this program's format capability is DECIDED. hewcli names
 // no format package; the blank ext/all import below is what registers the six
 // v0 extensions, and dropping it to a single `_ ext/json` would produce a
-// working hew that links no HCL parser (O35). Nothing else has to change for
+// working hew that links no YAML parser (O35). Nothing else has to change for
 // that to hold — which is the property import-for-effect registration buys.
 package main
 

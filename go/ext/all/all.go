@@ -4,7 +4,7 @@
 //	import _ "github.com/benjaminabbitt/hew/go/ext/all"
 //
 // A program that edits only one format should NOT import this: import
-// ext/json and link no HCL parser. That choice is the reason registration is
+// ext/json and link no YAML parser. That choice is the reason registration is
 // import-for-effect at all — it makes "linked" and "capable" the same fact, so
 // what a build can do is visible in its import graph rather than in a switch
 // somewhere it cannot see.

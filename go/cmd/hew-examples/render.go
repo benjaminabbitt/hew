@@ -22,8 +22,6 @@ func fenceFor(path string) string {
 		return "yaml"
 	case ".toml":
 		return "toml"
-	case ".tf", ".hcl":
-		return "hcl"
 	default:
 		return "text"
 	}

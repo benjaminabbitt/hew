@@ -827,7 +827,7 @@ func (d dialect) valueLines(v Value) []string {
 	case d.json:
 		return []string{jsonText(n)}
 	case d.quote && n.Kind == yaml.ScalarNode:
-		// TOML and HCL have no bare-string spelling: `project = old-project`
+		// TOML has no bare-string spelling: `project = old-project`
 		// is not a string in either grammar, so a string is written quoted
 		// whether or not the neutral dialect would need to.
 		if n.ShortTag() == "!!str" {

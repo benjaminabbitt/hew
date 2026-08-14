@@ -77,7 +77,7 @@ type Binding struct {
 	Detect DetectRule
 
 	// Kinds are the node-kind names this extension DECLARES beyond the
-	// universal map/seq/scalar (§8.8): "block" for HCL, "block"/"section" for
+	// universal map/seq/scalar (§8.8): "block"/"section" for
 	// Markdown. `? kind` (OP-28) carries a string and the registered set is
 	// what makes it valid; an unknown kind is HEW001, exactly as before.
 	Kinds []NodeKind

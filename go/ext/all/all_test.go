@@ -66,7 +66,7 @@ func TestShippedHalves(t *testing.T) {
 
 // TestShippedDetectionDefaults is §8.0's table, restated as the behaviour it
 // describes. Every row of that table is here, plus the two rows it states in
-// prose: package.json is plain JSON, and .tf.json is JSON and not HCL.
+// prose: package.json is plain JSON.
 func TestShippedDetectionDefaults(t *testing.T) {
 	for _, c := range []struct {
 		name string

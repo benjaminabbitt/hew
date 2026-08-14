@@ -48,7 +48,7 @@ type Node interface {
 // --ops` prints it and `--record` embeds it (§9.7); hew cannot read it back,
 // and v0 defines no way to author one. The qualifiers with no RFC 6902
 // representation — anchor, surface, on_conflict, optional, idempotent, the
-// ordinal selectors, and the Markdown/HCL/comment addressing forms — are
+// ordinal selectors, and the Markdown/comment addressing forms — are
 // consumed during resolution, which is the lossy direction §9.2 names.
 //
 // Two fields extend Appendix A.1's ResolvedOp, for the same reason

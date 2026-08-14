@@ -34,7 +34,7 @@ func (f FormatID) Valid() bool {
 
 // NodeKind is the vocabulary of `? kind` / `test`+`kind` (§7.1, OP-28).
 //
-// Three kinds are universal and live here. The others — HCL's `block`,
+// Three kinds are universal and live here. The others —
 // Markdown's `section` — are EXTENSION-DECLARED (§8.8): an extension names them
 // in its Binding.Kinds and the registry is what makes them assertable. The
 // `.hewt` spelling is unchanged, and an unknown kind is HEW001 exactly as
@@ -167,10 +167,6 @@ type Transform struct {
 	// are provenance, like PatchLine — never serialized, never compared —
 	// and they exist because a resolution failure INSIDE the anchor is the
 	// ANCHOR's failure and must be reported where the reviewer can fix it.
-	// The corpus pins that reporting in two places, hcl/repeated-label-ambiguous
-	// (HEW012 at the `@@` line, not at the context line that asked first) and
-	// markdown/duplicate-heading; Appendix A.1's Transform has no field for
-	// it, which is a spec gap found while implementing the HCL binding.
 	AnchorPath Path
 	AnchorLine int
 }

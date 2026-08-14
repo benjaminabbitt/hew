@@ -256,7 +256,7 @@ func TestComputeCoverage(t *testing.T) {
 		opsCase("json/b", "OP-01"),
 		opsCase("yaml/c", "OP-40", "OP-99"),
 		opsCase("toml/d", "OP-77"),
-		opsCase("hcl/e"),
+		opsCase("toml/e"),
 	}
 	cov := ComputeCoverage(catalog, cases)
 
