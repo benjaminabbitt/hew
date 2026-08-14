@@ -91,6 +91,23 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 	for i := range tl.Transform {
 		op, err := r.transform(tl.Transform[i])
 		if err != nil {
+			// OP-06: an OPTIONAL transform whose address is absent is a
+			// legitimate no-op, not a failure — the appliers already read it
+			// that way (ext/json's planRemove checks Optional itself and emits
+			// no edit). Resolution has to agree, or the same transform is a
+			// no-op to Apply and a HEW013 to Resolve, and every caller that
+			// wants both — anything producing a §9.7 record, which resolves
+			// what it just applied — has to re-implement the tolerance by
+			// resolving one transform at a time to catch and drop the miss.
+			//
+			// It produced no edit, so it contributes no resolved op: dropping
+			// it is what makes the resolved list state what actually happened.
+			// Only a MISSING address is tolerated; every other failure (an
+			// unparseable address, a kind mismatch) is still an error, because
+			// `optional` says "this may not be here", not "ignore problems".
+			if tl.Transform[i].Optional && isMissing(err) {
+				continue
+			}
 			return nil, err
 		}
 		out = append(out, op)

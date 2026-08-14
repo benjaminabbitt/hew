@@ -738,3 +738,52 @@ func TestJSONLiteralFallbacks(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// --- optional tolerance (OP-06) ---------------------------------------------
+
+// An OPTIONAL transform whose address is absent is a legitimate no-op, and the
+// appliers already read it that way. Resolution has to agree, or the same
+// transform is a no-op to Apply and a HEW013 to Resolve — which forces anything
+// that resolves what it just applied (a §9.7 record) to re-implement the
+// tolerance by resolving one transform at a time.
+func TestResolveOptionalMissingAddressYieldsNoOp(t *testing.T) {
+	doc := mustDoc(t, servers)
+	ops := list(t, tlOf(
+		Transform{Op: OpRemove, Path: MustParsePath("/server/host")},
+		Transform{Op: OpRemove, Path: MustParsePath("/server/nope"), Optional: true},
+	), doc)
+	// The optional miss contributes NOTHING: the resolved list must state what
+	// actually happened, and nothing happened at that address.
+	wantPaths(t, ops, "remove /server/host")
+}
+
+// The tolerance must be earned by `optional`, not granted to every remove.
+// Without this, the test above would pass against a Resolve that swallowed
+// every no-match.
+func TestResolveMissingAddressStillFailsWithoutOptional(t *testing.T) {
+	doc := mustDoc(t, servers)
+	err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath("/server/nope")}), doc)
+	mustCode(t, err, hewerr.CodeNoMatch)
+}
+
+// `optional` says "this may not be here", NOT "ignore problems". A failure that
+// is not a missing address stays an error even when the transform is optional —
+// here the address asks for a key-match against a mapping, which cannot match
+// whether or not the caller is tolerant.
+func TestResolveOptionalStillFailsOnNonMissingErrors(t *testing.T) {
+	doc := mustDoc(t, "servers: [{name: a}, {name: a}]")
+	err := resolveErrOf(t, tlOf(
+		Transform{Op: OpRemove, Path: MustParsePath("/servers/name=a"), Optional: true},
+	), doc)
+	mustCode(t, err, hewerr.CodeAmbiguousMatch)
+}
+
+// An optional transform whose address IS present resolves exactly like a
+// required one — tolerance changes the miss case only.
+func TestResolveOptionalPresentAddressResolvesNormally(t *testing.T) {
+	doc := mustDoc(t, servers)
+	ops := list(t, tlOf(
+		Transform{Op: OpRemove, Path: MustParsePath("/server/host"), Optional: true},
+	), doc)
+	wantPaths(t, ops, "remove /server/host")
+}
