@@ -1,0 +1,56 @@
+# hew
+
+A structure-aware replacement for `patch(1)` and `diff(1)` for structured files —
+JSON, JSONC, YAML, TOML, HCL (and, under evaluation, Markdown managed blocks).
+
+A `.hew` patch reads like a unified diff — the patch mirrors the document's own
+shape, with `+`/`-` margins in place and surrounding context — but it addresses
+**nodes, not lines**. A patch survives key reordering, reformatting, comment
+edits, and unrelated changes anywhere in the file, and fails loudly (never
+silently misapplies) when the nodes it asserts have drifted.
+
+```hew
+provider "aws" {
+-   region  = "us-west-1"
++   region  = "us-west-2"
+    profile = "default"
+}
+```
+
+## The standard is the corpus
+
+hew is spec-first. The normative definition lives in [`docs/hew-spec.md`](docs/hew-spec.md);
+the executable definition is [`corpus/`](corpus/) — input/patch/expected triples
+(plus expected-failure and CLI-contract cases) that every implementation must
+pass. The [`features/`](features/) directory expresses the corpus obligations as
+Cucumber acceptance criteria; an implementation is conformant when those
+features pass against it.
+
+## Layout
+
+| dir | contents |
+|---|---|
+| `docs/` | the specification |
+| `corpus/` | the conformance corpus (per-format case directories + README) |
+| `features/` | Cucumber acceptance criteria driving the corpus |
+| `go/` | Go implementation — library + `hew` CLI (first implementation) |
+| `rust/` | Rust implementation (planned port; runs the same corpus) |
+
+## Architecture (from the spec)
+
+Four components around one IR (the transform list):
+
+- **parse** (`.hew` → transforms) and **render** (transforms → `.hew`) — notation side
+- **diff** (two documents → transforms) and **apply** (transforms + document → document) — format side
+
+The IR has five primitives — `test`, `add`, `remove`, `replace`, `copy` —
+everything richer desugars in the parser. Context lines compile into `test`
+transforms: staleness detection is in the IR, not applier goodwill. The IR's
+serialization (`.hewt`) is also the escape hatch for edits the mirror grammar
+cannot express (`hew apply --transforms`).
+
+## Status
+
+Specification draft + conformance corpus v0. No implementation yet; the Go
+library and CLI are next. 29 open design questions are listed at the end of the
+spec.
