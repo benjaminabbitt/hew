@@ -1,0 +1,10 @@
+hew: 1
+
+--- transcribed.yaml format=yaml
+
+@@ /server @@
+- host: localhost
+  port: 8080
+
+@@ /network @@
++ host: localhost

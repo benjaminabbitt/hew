@@ -1,0 +1,7 @@
+hew: 1
+
+--- mcp.json format=json
+
+@@ /mcpServers/name=github @@
+- "command": "npx"
++ "command": "npx-18"

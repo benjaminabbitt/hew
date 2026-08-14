@@ -1,0 +1,68 @@
+title: Adding to a keyed array
+description: Registering an MCP server in a list whose elements have moved — identity addressing, and one-field context.
+order: 4
+show:
+  - mcp.json
+  - add-github.hew
+intro: |
+  An `mcpServers` list is the ordinary case for a config-editing tool: an array of
+  objects, each identified by a `name`, whose order carries no meaning and is therefore
+  rearranged constantly — by a formatter, by a merge, by whoever last edited it by hand.
+
+  Two things in this patch are doing work. The context element is written as
+  `{ "name": "filesystem" }` and nothing else: hew matches an element by the *subset* of
+  fields you state, so anchoring to an element costs one field rather than a full
+  transcription of it. And that anchor names an identity, not a position — which is what
+  makes the next step a non-event.
+steps:
+  - title: Somebody re-sorts the list
+    note: |
+      `taskloom` is first now, `filesystem` second, and a fourth field has appeared on
+      one of them. No positional patch survives this.
+    write:
+      - path: mcp.json
+        label: "**`mcp.json`** — as it stands now"
+        content: |
+          {
+            "mcpServers": [
+              { "name": "taskloom", "command": "taskloom", "args": ["mcp"] },
+              { "name": "filesystem", "command": "npx", "args": ["-y", "@mcp/filesystem"], "readOnly": true }
+            ]
+          }
+
+  - title: Apply the patch
+    note: |
+      `+` under a context element means *after this one*. The position hew inserts at is
+      resolved against the document in front of it, so "after filesystem" means index 2
+      today and would have meant index 1 yesterday.
+    run: [apply, -i, add-github.hew]
+    expect_exit: 0
+    watch: [mcp.json]
+    caption: |
+      The new element landed after `filesystem`, wherever `filesystem` turned out to be.
+      Note also what did *not* happen: `readOnly` is still there. The context element
+      stated one field, so hew asserted one field, and a subset match has nothing to say
+      about the fields it did not mention.
+
+  - title: Look at what the address resolved to
+    note: |
+      `--transforms-out` prints the patch's IR — the transform list, which is what the
+      parser produces and the applier consumes. It writes no target, so this is safe to
+      run on anything.
+    run: [apply, --transforms-out, "-", add-github.hew]
+    expect_exit: 0
+    caption: |
+      The `test` transform is the context element, compiled. Notice that the IR is still
+      addressing by identity — `/mcpServers/name=filesystem` — because the abstract
+      transform list is *pre-resolution*. It becomes an index only when a concrete
+      document is in front of it, which is what
+      [`--ops`](../ops-and-record/) shows.
+outro: |
+  ## Why this beats a merge
+
+  The overlay formats — RFC 7386 merge patch, Kubernetes strategic merge, spruce — reach
+  arrays by restating them. To add one server you write all three, and now your patch
+  asserts the value of two elements it did not intend to touch and silently overwrites
+  whatever a colleague changed about them in the meantime. Identity addressing is the
+  same idea as strategic merge's merge key, made general and moved into the address,
+  where the patch declares it and a reviewer can see it.

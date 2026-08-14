@@ -1,0 +1,62 @@
+title: Surviving a reorder
+description: The same removal expressed twice — as a unified diff and as a hew patch — against a file somebody else has since re-sorted.
+order: 3
+show:
+  - settings.yaml
+  - drop-sample.hew
+  - drop-sample.patch
+intro: |
+  Two patches, one intent: drop `sample_rate` from the telemetry block. The first is a
+  `.hew` patch. The second is the unified diff `diff -u` would have produced from the
+  same pair of files, included here so the two can be compared against the same target.
+
+  They are the same change and they are not the same artifact. The unified diff says
+  *"line 4, and to prove I am looking at the right line 4, lines 1 through 3 read like
+  this"*. The hew patch says *"the `sample_rate` member of `/telemetry`, and to prove I
+  am looking at the right document, there is an `enabled` member set to `true` in
+  there"*. Only one of those two claims survives someone else editing the file.
+steps:
+  - title: Meanwhile, on main
+    note: |
+      A colleague sorts the block's keys alphabetically and adds an unrelated `headers`
+      map. They have not touched `sample_rate`, and they have not touched `enabled`.
+      They have moved both of them.
+    write:
+      - path: settings.yaml
+        label: "**`settings.yaml`** — as it stands now"
+        content: |
+          telemetry:
+            enabled: true
+            endpoint: https://otel.example.com
+            headers:
+              x-tenant: acme
+            sample_rate: 0.1
+    caption: |
+      `drop-sample.patch` is already dead. Its hunk header claims four lines starting at
+      line 1 and its context is `endpoint` *then* `enabled` — an order that no longer
+      exists, at an offset that no longer exists, in a block that is now six lines long.
+      `patch(1)` will either reject the hunk or, with fuzz turned up, find something that
+      superficially matches and cut the wrong line out of the file.
+
+  - title: Apply the hew patch
+    note: |
+      hew never looked at a line number. `@@ /telemetry @@` addresses a mapping;
+      `sample_rate` names a member of it; the `enabled: true` context line asserts a
+      *node*, not a position, so a sort cannot invalidate it and an unrelated key cannot
+      either.
+    run: [apply, -i, drop-sample.hew]
+    expect_exit: 0
+    watch: [settings.yaml]
+    caption: |
+      Exit 0. The colleague's sort survived, the colleague's `headers` block survived,
+      and `sample_rate` is gone.
+outro: |
+  ## The general shape of this
+
+  The tolerance is not leniency — hew is *stricter* than `patch(1)`, not looser. It is
+  that the two tools assert different things. A unified diff's context is a claim about
+  the file's layout, and layout is exactly what an unrelated commit changes. A hew
+  patch's context is a claim about the document's content, and unrelated commits mostly
+  do not change that. What hew refuses (see [when the target has
+  drifted](../stale-refusal/)) is a claim about *content* turning out false, which is
+  the case where a human should be looking.

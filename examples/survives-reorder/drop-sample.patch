@@ -1,0 +1,7 @@
+--- settings.yaml
++++ settings.yaml
+@@ -1,4 +1,3 @@
+ telemetry:
+   endpoint: https://otel.example.com
+   enabled: true
+-  sample_rate: 0.1

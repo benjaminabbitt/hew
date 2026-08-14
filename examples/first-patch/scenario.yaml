@@ -1,0 +1,49 @@
+title: Your first patch
+description: The README's provider/region change, applied — a patch that reads like a diff and addresses a node.
+order: 1
+show:
+  - main.tf
+  - region.hew
+intro: |
+  This is the patch from the front page, run for real. A `.hew` file reads the way a
+  unified diff reads — `-` for what goes, `+` for what arrives, unmarked lines for the
+  surroundings — but the surroundings are not lines. The `@@ /provider/"aws" @@` header
+  is an address into the document's shape, and the `profile` line under the margins is
+  a *context node*: hew looks for a `profile` attribute whose value is `"default"` in
+  that block, and refuses if it does not find one.
+
+  Nothing in the patch mentions a line number, and nothing in it will.
+steps:
+  - title: Apply it in place
+    note: |
+      `-i` writes the result back over the target. It is also the default when the patch
+      names a target and no `-o` is given, so the flag here is documentation for the
+      reader rather than a switch.
+    run: [apply, -i, region.hew]
+    expect_exit: 0
+    watch: [main.tf]
+    caption: |
+      The `region` attribute moved. Everything else — the block's `=` alignment, the two
+      spaces before it, the `profile` line hew asserted on the way past — is the same
+      bytes it was.
+
+  - title: Apply it a second time
+    note: |
+      `patch(1)` would notice the change is already present and, depending on its mood,
+      either reverse it or write a `.rej` file. hew does neither. An unannotated hunk is
+      strict: the before-image is gone, so the patch does not apply, and it says which
+      node and which patch line made the claim it could not honor.
+    run: [apply, -i, region.hew]
+    expect_exit: 1
+    unchanged: [main.tf]
+    caption: |
+      Exit 1 in hew means one specific thing: **the patch did not apply and nothing was
+      written**. There is no partial application to clean up and no reject file to find.
+outro: |
+  ## What to take from this
+
+  - The patch mirrors the document, so the change is legible without executing it in your head.
+  - Context lines are assertions. They cost nothing to read and they are the reason a
+    misapplication is impossible rather than unlikely.
+  - Re-applying is a failure, loudly, by default. If you want convergence you ask for it
+    in the patch text with `! idempotent`, where a reviewer can see it.

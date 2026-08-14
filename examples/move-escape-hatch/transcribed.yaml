@@ -1,0 +1,6 @@
+server:
+  # the bind address; the health checker reads this too, so
+  # changing it means restarting both
+  host: localhost
+  port: 8080
+network: {}

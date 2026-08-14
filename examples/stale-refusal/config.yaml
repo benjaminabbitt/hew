@@ -1,0 +1,4 @@
+service:
+  name: gateway
+  replicas: 5
+  timeout: 30
