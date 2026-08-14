@@ -2,9 +2,11 @@ package all
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	hew "github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
 // This is the one package that can see every shipped extension at once, so it
@@ -143,5 +145,64 @@ func TestExtensionDeclaredVocabulary(t *testing.T) {
 	}
 	if hew.OwnsQualifier("json", "anchor") {
 		t.Error("ext/json owns `anchor:`, which is YAML's")
+	}
+	if b, _ := hew.Lookup("hcl"); !b.QuotedLabels {
+		t.Error("ext/hcl does not declare that a quoted segment is a block label (§4.3, O48)")
+	}
+	for _, id := range []hew.FormatID{"json", "jsonc", "yaml", "toml", "markdown"} {
+		if b, _ := hew.Lookup(id); b.QuotedLabels {
+			t.Errorf("%q declares block-set labels; a quoted segment there is a KEY (§4.1, O41)", id)
+		}
+	}
+}
+
+// TestEveryBindingNamesTheNearestMiss is O46 across the formats that have an
+// applier (§10.3). The rule is the same sentence everywhere because the wording
+// is the core's (hew.NoMatchDetail) — a diagnostic that told a YAML author to
+// quote a value and a TOML author only that nothing matched would be five
+// answers to one question.
+//
+// Each target holds a version field whose value reads "1.0" as a STRING, and
+// each address asks for the number. §4.2 compares after decoding, so the match
+// fails for a reason the address cannot show.
+func TestEveryBindingNamesTheNearestMiss(t *testing.T) {
+	for _, c := range []struct {
+		id     hew.FormatID
+		target string
+	}{
+		{"json", `{"deps":[{"name":"a","version":"1.0"}]}`},
+		{"jsonc", "{\n  // pinned\n  \"deps\": [{\"name\": \"a\", \"version\": \"1.0\"}]\n}"},
+		{"yaml", "deps:\n  - name: a\n    version: \"1.0\"\n"},
+		{"toml", "[[deps]]\nname = \"a\"\nversion = \"1.0\"\n"},
+	} {
+		t.Run(string(c.id), func(t *testing.T) {
+			b, ok := hew.Lookup(c.id)
+			if !ok || b.Applier == nil {
+				t.Fatalf("%q has no applier", c.id)
+			}
+			tl := hew.TransformList{
+				Target: "t", Format: c.id,
+				Transform: []hew.Transform{{
+					Op:   hew.OpRemove,
+					Path: hew.MustParsePath("/deps/version=1.0"),
+				}},
+			}
+			_, err := b.Applier([]byte(c.target), tl)
+			if err == nil {
+				t.Fatal("a number address must not match a string field (§4.2)")
+			}
+			he, ok := hewerr.As(err)
+			if !ok || he.Code != hewerr.CodeNoMatch {
+				t.Fatalf("want HEW013, got %v", err)
+			}
+			for _, want := range []string{
+				`1 element has version="1.0" (string)`,
+				"quote the value to match a string",
+			} {
+				if !strings.Contains(he.Detail, want) {
+					t.Errorf("detail %q does not contain %q", he.Detail, want)
+				}
+			}
+		})
 	}
 }

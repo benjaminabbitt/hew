@@ -379,7 +379,24 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 	if t.Optional {
 		return nil, nil
 	}
-	return nil, appErr(hewerr.CodeNoMatch, target, t.Path.String(), t.PatchLine, "remove: node does not exist")
+	return nil, appErr(hewerr.CodeNoMatch, target, t.Path.String(), t.PatchLine, d.removeMiss(parent, last))
+}
+
+// removeMiss is the detail a failed remove reports. A remove scans for its last
+// segment itself rather than resolving it, so it has to say what the resolver
+// would have said — including O46's near miss, which is the whole reason a
+// remove of a keyed element fails in a way the address does not show (§10.3).
+func (d *doc) removeMiss(parent *jNode, last hew.Segment) string {
+	if last.Kind != hew.SegMatch || parent.kind != jArr {
+		return "remove: node does not exist"
+	}
+	var cands []hew.Value
+	for _, e := range parent.elems {
+		if v, ok := d.comparedValue(e.value, last); ok {
+			cands = append(cands, v)
+		}
+	}
+	return "remove: " + hew.NoMatchDetail(last, cands)
 }
 
 // --- replace ----------------------------------------------------------------

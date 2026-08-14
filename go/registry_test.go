@@ -492,3 +492,126 @@ func TestBindingDeclaresItsQualifierKeys(t *testing.T) {
 		t.Error("an unregistered format owns a qualifier")
 	}
 }
+
+// --- the claim SCOPE (§8.8, decided by O41's work package) -------------------
+
+// stanzaFormat registers an extension that claims "%…", the shape these tests
+// use to watch a claim's scope.
+func stanzaFormat(t *testing.T, id FormatID) {
+	t.Helper()
+	b := fakeBinding(id, []string{"." + string(id)}, nil)
+	b.Segments = []SegmentForm{{Name: "stanza", Claim: func(raw string) (bool, error) {
+		return strings.HasPrefix(raw, "%"), nil
+	}}}
+	Register(id, b)
+}
+
+// TestSegmentClaimsAreScopedToTheActiveFormat is the ruling §8.8 states and the
+// parser now honours: a token is offered to the ACTIVE format's extension, not
+// to every grammar the build happens to link. Without it, linking an extension
+// changes how a program reads a JSON key — the same class of defect O41 closed
+// one level down.
+func TestSegmentClaimsAreScopedToTheActiveFormat(t *testing.T) {
+	isolate(t)
+	stanzaFormat(t, "ini")
+	Register("json", fakeBinding("json", []string{".json"}, nil))
+
+	inIni, err := ParsePathIn("ini", "/%x")
+	if err != nil {
+		t.Fatalf("ParsePathIn(ini): %v", err)
+	}
+	if got := inIni.Segment(0); got.Kind != SegExtension || got.Form != "stanza" {
+		t.Errorf("under its own format the token is the claim, got %+v", got)
+	}
+	inJSON, err := ParsePathIn("json", "/%x")
+	if err != nil {
+		t.Fatalf("ParsePathIn(json): %v", err)
+	}
+	if got := inJSON.Segment(0); got.Kind != SegKey || got.Name != "%x" {
+		t.Errorf("under another format the same token is an ordinary key, got %+v", got)
+	}
+	// An absent or unregistered format claims nothing: the core's own shapes,
+	// and `key` as the floor.
+	unknown, err := ParsePathIn("", "/%x")
+	if err != nil {
+		t.Fatalf(`ParsePathIn(""): %v`, err)
+	}
+	if got := unknown.Segment(0); got.Kind != SegKey {
+		t.Errorf("with no active format the token is a key, got %+v", got)
+	}
+	// The unscoped entry point keeps BUILD scope, for a caller with no target
+	// in hand.
+	anyFormat, err := ParsePath("/%x")
+	if err != nil {
+		t.Fatalf("ParsePath: %v", err)
+	}
+	if got := anyFormat.Segment(0); got.Kind != SegExtension {
+		t.Errorf("ParsePath is build-scoped and must see the claim, got %+v", got)
+	}
+}
+
+// TestAuthoredPathsAreScopedToo pins the same scope on the authored entry
+// point, which is the one the .hew parser uses.
+func TestAuthoredPathsAreScopedToo(t *testing.T) {
+	isolate(t)
+	stanzaFormat(t, "ini")
+
+	p, err := ParseAuthoredPathIn("json", "/%x")
+	if err != nil {
+		t.Fatalf("ParseAuthoredPathIn: %v", err)
+	}
+	if got := p.Segment(0); got.Kind != SegKey {
+		t.Errorf("got %+v, want an ordinary key under a format that claims nothing", got)
+	}
+	if _, err := ParseAuthoredPathIn("ini", "/%x[1]"); err == nil {
+		t.Error("the authored parser must still refuse an IR-only ordinal (§7.2)")
+	}
+}
+
+// TestTheParserScopesItsAddresses is the same rule where it matters: a patch
+// declares its format on the `--- ` line (§2.2), so a key spelled like another
+// format's segment shape is read as a key.
+func TestTheParserScopesItsAddresses(t *testing.T) {
+	isolate(t)
+	stanzaFormat(t, "ini")
+	Register("json", fakeBinding("json", []string{".json"}, nil))
+
+	tls, err := Parse([]byte("hew: 1\n\n--- t.json format=json\n\n@@ /%x @@\n- a: 1\n+ a: 2\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	seg := tls[0].Transform[0].Path.Segment(0)
+	if seg.Kind != SegKey || seg.Name != "%x" {
+		t.Fatalf("the anchor parsed as %+v; a JSON address is lexed under JSON's grammar (§8.8)", seg)
+	}
+	// And the .hewt codec reads its own `format:` before any address.
+	tl, err := UnmarshalTransforms([]byte(
+		"hew-transforms: 1\ntarget: t.json\nformat: json\ntransforms:\n  - op: test\n    path: /%x/a\n    value: 1\n"))
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := tl.Transform[0].Path.Segment(0); got.Kind != SegKey {
+		t.Fatalf(".hewt address parsed as %+v, want a key", got)
+	}
+}
+
+// TestQuotedLabelsIsADeclaration pins O48's SegLabel restructure at the
+// registry: the core cannot know which formats have block sets, so a format
+// says so, and every other format's quoted segment stays a key.
+func TestQuotedLabelsIsADeclaration(t *testing.T) {
+	isolate(t)
+	b := fakeBinding("hcl", []string{".tf"}, nil)
+	b.QuotedLabels = true
+	Register("hcl", b)
+	Register("json", fakeBinding("json", []string{".json"}, nil))
+
+	if !quotedIsLabel("hcl") {
+		t.Error("a format that declared block-set labels does not have them")
+	}
+	if quotedIsLabel("json") {
+		t.Error("a format that declared nothing has labels")
+	}
+	if quotedIsLabel("nope") {
+		t.Error("an unregistered format has labels")
+	}
+}

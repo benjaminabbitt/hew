@@ -23,5 +23,13 @@ func init() {
 			Extensions: []string{".tf", ".hcl", ".tfvars", ".nomad"},
 		},
 		Kinds: []hew.NodeKind{KindBlock},
+
+		// HCL is the format that HAS block sets, so a quoted segment resolves
+		// against one here and is a LABEL (§4.3). Everywhere else the same
+		// lexical form is a key (§4.1) — one spelling, two container kinds, and
+		// the container is what decides. This declaration is what is left of
+		// SegLabel after O48's restructure: the KIND left the core, the meaning
+		// stayed with the extension that has it.
+		QuotedLabels: true,
 	})
 }

@@ -225,8 +225,14 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 			return nil, noMatch("not an array")
 		}
 		var found *elem
+		var cands []hew.Value
 		count := 0
 		for _, el := range n.elems {
+			c, has := comparedValue(el.val, seg)
+			if !has {
+				continue
+			}
+			cands = append(cands, c)
 			if matchesSeg(el.val, seg) {
 				found = el
 				count++
@@ -234,7 +240,9 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		}
 		switch count {
 		case 0:
-			return nil, noMatch("no element matches %s", seg.String())
+			// O46: name the near miss and its type (§10.3), in the core's
+			// wording so every binding says it the same way.
+			return nil, noMatch("%s", hew.NoMatchDetail(seg, cands))
 		case 1:
 			return &ref{node: found.val, parent: n, elem: found}, nil
 		}

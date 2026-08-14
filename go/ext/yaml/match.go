@@ -97,15 +97,28 @@ func scalarEq(a, b *yaml.Node) bool {
 // (§4.2): "name=github" against the element's field, "=beta" against the
 // element itself.
 func (d *doc) matchesSeg(n *ynode, seg hew.Segment) bool {
-	want := scalarNode(seg.Value)
+	v, ok := d.comparedValue(n, seg)
+	return ok && scalarEq(v.Node(), scalarNode(seg.Value))
+}
+
+// comparedValue is the value the segment compares this element against, or
+// false when the element has nothing to compare. Splitting it out of matchesSeg
+// is what lets a failed match name the NEAR MISS it found (§10.3, O46).
+func (d *doc) comparedValue(n *ynode, seg hew.Segment) (hew.Value, bool) {
 	if seg.Name == "" {
-		return n.kind == nScalar && scalarEq(n.y, want)
+		if n.kind != nScalar {
+			return hew.Value{}, false
+		}
+		return hew.NodeValue(n.y), true
 	}
 	if n.kind != nMap {
-		return false
+		return hew.Value{}, false
 	}
 	e := n.lookup(seg.Name)
-	return e != nil && e.val.kind == nScalar && scalarEq(e.val.y, want)
+	if e == nil || e.val.kind != nScalar {
+		return hew.Value{}, false
+	}
+	return hew.NodeValue(e.val.y), true
 }
 
 // scalarNode converts a path segment's identity Scalar into a YAML scalar

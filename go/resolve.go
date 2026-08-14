@@ -391,9 +391,18 @@ func (r *resolver) stepMatch(n Node, seg Segment) (string, Node, *stepErr) {
 		return "", nil, &stepErr{detail: "not a sequence"}
 	}
 	var hits []matched
+	var cands []Value
 	for i := 0; i < n.Len(); i++ {
 		e, ok := n.Elem(i)
-		if ok && matchesSegment(e, seg) {
+		if !ok {
+			continue
+		}
+		v, has := comparedValue(e, seg)
+		if !has {
+			continue
+		}
+		cands = append(cands, v)
+		if v.Equal(seg.Value.Value()) {
 			hits = append(hits, matched{index: i, node: e})
 		}
 	}
@@ -409,12 +418,97 @@ func (r *resolver) stepMatch(n Node, seg Segment) (string, Node, *stepErr) {
 	}
 	switch len(hits) {
 	case 0:
-		return "", nil, &stepErr{detail: "no element matches " + seg.String()}
+		return "", nil, &stepErr{detail: NoMatchDetail(seg, cands)}
 	case 1:
 		return strconv.Itoa(hits[0].index), hits[0].node, nil
 	default:
 		return "", nil, &stepErr{ambiguous: true,
 			detail: fmt.Sprintf("%d elements match %s", len(hits), seg.String())}
+	}
+}
+
+// --- the no-match diagnostic (§10.3, O46) ------------------------------------
+
+// NoMatchDetail is the detail a key-match that matched NOTHING must report, and
+// it is shared by every binding on purpose: §4.2 compares after decoding, so a
+// match can fail for a reason that is invisible in the address — the element is
+// there, and its field differs only in scalar TYPE. "no element matched" then
+// sends the author looking for an element that is in front of them, and the
+// remedy (quote the value, or unquote it) is not guessable from those words.
+//
+// candidates are the values the segment actually COMPARED, one per element that
+// had something to compare: the element's own value for the `=value` form, the
+// named member's value for `field=value`. An element that lacks the field
+// contributes nothing, because it is not a near miss — it is a different shape.
+func NoMatchDetail(seg Segment, candidates []Value) string {
+	base := "no element matches " + seg.String()
+	miss, n := nearestMiss(seg, candidates)
+	if n == 0 {
+		return base
+	}
+	elements := "1 element has"
+	if n > 1 {
+		elements = strconv.Itoa(n) + " elements have"
+	}
+	field := seg.Name
+	if field != "" {
+		field = seg.nameString() + "="
+	}
+	return fmt.Sprintf("%s (%s); %s %s%s (%s) — %s",
+		base, seg.Value.Kind, elements, field, miss.pathString(), miss.Kind, missRemedy(miss))
+}
+
+// nearestMiss finds the candidate that differs from the segment's value only in
+// TYPE, and how many elements carry it. Same text, different kind: that is the
+// whole of the near-miss relation, and it is the only failure a reader cannot
+// see in the address.
+func nearestMiss(seg Segment, candidates []Value) (Scalar, int) {
+	var miss Scalar
+	n := 0
+	for _, v := range candidates {
+		got, ok := scalarOf(v)
+		if !ok || got.Text != seg.Value.Text || got.Kind == seg.Value.Kind {
+			continue
+		}
+		if n == 0 {
+			miss = got
+		} else if got.Kind != miss.Kind {
+			continue // a second SHAPE of miss; the first one named is enough
+		}
+		n++
+	}
+	return miss, n
+}
+
+// missRemedy is the sentence §10.3 pins: the fix is a spelling change, and
+// which one depends on the direction the types disagree in. A near miss that
+// is a STRING was addressed unquoted; anything else was addressed as the
+// quoted string it is not, because that is the only other way two scalars can
+// share their text and differ in kind.
+func missRemedy(got Scalar) string {
+	if got.Kind == ScalarString {
+		return "quote the value to match a string"
+	}
+	return "remove the quotes to match a " + got.Kind.String()
+}
+
+// scalarOf projects a decoded document value back onto the path grammar's
+// scalar vocabulary (§4.2), so a diagnostic can spell it the way an address
+// would have to spell it. A non-scalar has no such spelling and reports false.
+func scalarOf(v Value) (Scalar, bool) {
+	n := v.Node()
+	if n == nil || n.Kind != yaml.ScalarNode {
+		return Scalar{}, false
+	}
+	switch n.ShortTag() {
+	case "!!int", "!!float":
+		return Scalar{Kind: ScalarNumber, Text: n.Value}, true
+	case "!!bool":
+		return Scalar{Kind: ScalarBool, Text: n.Value}, true
+	case "!!null":
+		return Scalar{Kind: ScalarNull, Text: "null"}, true
+	default:
+		return Scalar{Kind: ScalarString, Text: n.Value}, true
 	}
 }
 
@@ -425,22 +519,28 @@ type matched struct {
 	node  Node
 }
 
-// matchesSegment reports whether node satisfies a key-match segment (§4.2):
-// the `=value` form compares the element itself, the `field=value` form
-// compares that member.
-func matchesSegment(node Node, seg Segment) bool {
-	want := seg.Value.Value()
+// comparedValue is the value a key-match segment compares an element against
+// (§4.2): the element itself for the `=value` form, the named member for
+// `field=value`. It reports false when there is nothing to compare, which is
+// what keeps an element of a different shape out of the near-miss report.
+func comparedValue(node Node, seg Segment) (Value, bool) {
 	if seg.Name == "" {
-		return node.Value().Equal(want)
+		return node.Value(), true
 	}
 	if node.Kind() != KindMap {
-		return false
+		return Value{}, false
 	}
 	m, ok := node.Member(seg.Name)
 	if !ok {
-		return false
+		return Value{}, false
 	}
-	return m.Value().Equal(want)
+	return m.Value(), true
+}
+
+// matchesSegment reports whether node satisfies a key-match segment (§4.2).
+func matchesSegment(node Node, seg Segment) bool {
+	v, ok := comparedValue(node, seg)
+	return ok && v.Equal(seg.Value.Value())
 }
 
 // Value converts a key-match segment's decoded scalar (§4.2) into a Value, so
