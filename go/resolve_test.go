@@ -321,12 +321,34 @@ func TestResolveInexpressibleSegments(t *testing.T) {
 	// The extension-claimed forms (a Markdown heading, block or marker) are
 	// inexpressible for exactly the same reason and are covered in
 	// ext/markdown's suite, which is the build that has that grammar (§8.8).
-	for _, p := range []string{`/"aws"`, "/#0"} {
+	for _, p := range []string{"/#0", "/server/#t"} {
 		err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath(p)}), doc)
 		mustCode(t, err, hewerr.CodeInexpressible)
 		if !strings.Contains(err.Error(), "no RFC 6901 representation") {
 			t.Fatalf("%s: message: %v", p, err)
 		}
+	}
+}
+
+// TestResolveQuotedSegmentIsAKeyAgainstAMapping is O41's container-kind rule at
+// the resolver: `/"aws"` used to be a LABEL and inexpressible here. Against a
+// mapping — which is the only kind of container this projection has — the same
+// spelling is a key, so the failure is an ordinary lookup failure and not a
+// statement about the segment form.
+func TestResolveQuotedSegmentIsAKeyAgainstAMapping(t *testing.T) {
+	doc := mustDoc(t, servers)
+	err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath(`/"aws"`)}), doc)
+	mustCode(t, err, hewerr.CodeNoMatch)
+	if !strings.Contains(err.Error(), `no key "aws"`) {
+		t.Fatalf("message: %v", err)
+	}
+	// And it reaches a key that exists, which is the point of the form.
+	ops, rerr := Resolve(tlOf(Transform{Op: OpRemove, Path: MustParsePath(`/"server"/port`)}), doc)
+	if rerr != nil {
+		t.Fatalf("a quoted key must resolve like any other key: %v", rerr)
+	}
+	if ops[0].Path != "/server/port" {
+		t.Fatalf("resolved to %q, want /server/port", ops[0].Path)
 	}
 }
 

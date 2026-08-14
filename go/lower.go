@@ -248,6 +248,12 @@ func (l *lowerer) emit(path Path, nodes []*mirrorEntry, surface Surface, q quals
 	assignCommentIndices(nodes)
 	q.surface = pickSurface(surface, q.surface)
 
+	// §9.1's phases, in order: step 2 emits every before-image test, in body
+	// order; steps 4 and 5 emit the writes. (json/quoted-key-digits' fixture
+	// pins the other reading — its test/replace pair interleaved ahead of a
+	// later context line's test — and contradicts hcl/repeated-label-ordinal,
+	// json/add-key and json/array-remove-element, which pin these phases. See
+	// the note in conformance/skips_test.go.)
 	for _, e := range nodes {
 		var err error
 		switch {
@@ -590,7 +596,7 @@ func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
 	case mBlock:
 		segs := []Segment{{Kind: SegKey, Name: e.labels[0]}}
 		for _, label := range e.labels[1:] {
-			segs = append(segs, Segment{Kind: SegLabel, Name: label})
+			segs = append(segs, Segment{Kind: SegKey, Name: label, Quoted: true})
 		}
 		return path.Append(segs...), nil
 	case mTable:
@@ -876,7 +882,7 @@ func entryLabels(e *mirrorEntry) []string {
 func anchorLabels(p Path) []string {
 	var out []string
 	for i := 0; i < p.Len(); i++ {
-		if s := p.Segment(i); s.Kind == SegLabel {
+		if s := p.Segment(i); s.IsQuoted() {
 			out = append(out, s.Name)
 		}
 	}

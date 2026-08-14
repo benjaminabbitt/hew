@@ -134,11 +134,13 @@ func TestAppendAndParent(t *testing.T) {
 // --- spellability -----------------------------------------------------------
 //
 // The predicate under test says whether the §4 grammar can spell a segment or
-// a path. Every case below asserts TWICE: once against the expectation written
-// down here, and once against an INDEPENDENT oracle that re-parses the printed
-// text through the public path parser. The second assertion is what keeps the
-// predicate honest if it ever stops being a literal round trip — a structural
-// predicate that drifted from the grammar would fail here, not in production.
+// a path. Since O41 that is almost always YES — the bijection is in
+// bijection_test.go, and it is the property this predicate now mostly reports
+// — so what survives here is the SHAPE of the predicate: it is defined by the
+// round trip, it can see what one segment cannot, and it blames the right
+// segment. Every case asserts TWICE: once against the expectation written down
+// here, and once against an INDEPENDENT oracle that re-parses the printed text
+// through the public path parser.
 
 // reparsedSegment is the oracle: print the segment, re-read it through
 // ParsePath in a position where nothing else can interfere, and report whether
@@ -180,34 +182,30 @@ func TestSegmentSpellability(t *testing.T) {
 		{"boolean match value", Segment{Kind: SegMatch, Name: "enabled", Value: Scalar{Kind: ScalarBool, Text: "true"}}, true},
 		{"null match value", Segment{Kind: SegMatch, Name: "x", Value: Scalar{Kind: ScalarNull, Text: "null"}}, true},
 		{"match field containing =", Segment{Kind: SegMatch, Name: "a=b", Value: Scalar{Kind: ScalarString, Text: "c"}}, true},
-		{"label", Segment{Kind: SegLabel, Name: "aws"}, true},
-		{"empty label", Segment{Kind: SegLabel, Name: ""}, true},
-		{"label with a quote and a backslash", Segment{Kind: SegLabel, Name: `a"b\c`}, true},
 		{"comment ordinal", Segment{Kind: SegComment, Index: 0}, true},
 		{"trailing comment", Segment{Kind: SegComment, Trailing: true}, true},
 
-		// --- keys the v0 grammar cannot spell --------------------------------
-		// Every one of these is a key a real document can hold; what it
-		// re-reads as is the corruption this predicate exists to catch.
-		//
-		// These are the collisions with the CORE's own shapes. A key can also
-		// collide with a shape an extension claims — "@scope/pkg" re-reads as a
-		// Markdown marker — and those cases moved to ext/markdown's suite with
-		// the grammar that creates them (§8.8). This file registers no segment
-		// forms, so here "@scope/pkg" is an ordinary, spellable key: the guard
-		// follows the grammar the build actually has, which is the whole reason
-		// it is defined by a round trip rather than by a second copy of §4.
-		{"digit-only key reads back as an index", Segment{Kind: SegKey, Name: "8080"}, false},
-		{"zero key reads back as index zero", Segment{Kind: SegKey, Name: "0"}, false},
-		{"dash key reads back as the append token", Segment{Kind: SegKey, Name: "-"}, false},
-		{"hash-digit key reads back as a comment address", Segment{Kind: SegKey, Name: "#0"}, false},
-		{"hash-t key reads back as the trailing comment", Segment{Kind: SegKey, Name: "#t"}, false},
-		{"key ending in ? reads back as an optional flag", Segment{Kind: SegKey, Name: "opt?"}, false},
-		{"key ending in [n] reads back as an ordinal", Segment{Kind: SegKey, Name: "a[1]"}, false},
-		{"double-quoted key reads back as a label", Segment{Kind: SegKey, Name: `"quoted"`}, false},
-		{"key opening with a quote is not a legal segment", Segment{Kind: SegKey, Name: `"unterminated`}, false},
+		// --- the classes the quoted form rescued (O41) -----------------------
+		// Every one of these was a REFUSAL before the literal form existed:
+		// each is a key a real document holds whose bare spelling read back as
+		// another segment. They are spellable now, and bijection_test.go is
+		// where the whole class is exercised; keeping a few here pins that the
+		// predicate FOLLOWED the grammar rather than being edited alongside it.
+		{"digit-only key", Segment{Kind: SegKey, Name: "8080"}, true},
+		{"zero key", Segment{Kind: SegKey, Name: "0"}, true},
+		{"dash key", Segment{Kind: SegKey, Name: "-"}, true},
+		{"hash-digit key", Segment{Kind: SegKey, Name: "#0"}, true},
+		{"hash-t key", Segment{Kind: SegKey, Name: "#t"}, true},
+		{"key ending in ?", Segment{Kind: SegKey, Name: "opt?"}, true},
+		{"key ending in [n]", Segment{Kind: SegKey, Name: "a[1]"}, true},
+		{"double-quoted key", Segment{Kind: SegKey, Name: `"quoted"`}, true},
+		{"key opening with a quote", Segment{Kind: SegKey, Name: `"unterminated`}, true},
+		{"label", Segment{Kind: SegKey, Name: "aws", Quoted: true}, true},
+		{"empty label", Segment{Kind: SegKey, Name: "", Quoted: true}, true},
+		{"label with a quote and a backslash", Segment{Kind: SegKey, Name: `a"b\c`, Quoted: true}, true},
+		{"reserved match field, quoted", Segment{Kind: SegMatch, Name: "count>", Quoted: true, Value: Scalar{Kind: ScalarNumber, Text: "5"}}, true},
 
-		// --- non-key segments whose data v0 cannot spell ---------------------
+		// --- the residue: data no address can carry --------------------------
 		{"negative index reads back as a key", Segment{Kind: SegIndex, Index: -1}, false},
 		{"negative comment ordinal reads back as a key", Segment{Kind: SegComment, Index: -1}, false},
 		// An extension-claimed segment no linked extension claims: the token
@@ -215,7 +213,11 @@ func TestSegmentSpellability(t *testing.T) {
 		{"unclaimed extension token reads back as a key", Segment{Kind: SegExtension, Form: "heading", Raw: "# Setup"}, false},
 		{"non-JSON number reads back as a string", Segment{Kind: SegMatch, Name: "mask", Value: Scalar{Kind: ScalarNumber, Text: "0x1f"}}, false},
 		{"YAML-spelled boolean reads back as a string", Segment{Kind: SegMatch, Name: "on", Value: Scalar{Kind: ScalarBool, Text: "True"}}, false},
-		{"unquoted string 'true' reads back as a boolean", Segment{Kind: SegMatch, Name: "s", Value: Scalar{Kind: ScalarString, Text: "true"}}, false},
+		// The line-break residue is deliberately NOT here: it is the one place
+		// the predicate diverges from a literal reparse (a newline survives a
+		// reparse and destroys the line it was written on), so it is pinned in
+		// bijection_test.go where the divergence can be stated rather than
+		// silently contradicting this table's oracle.
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -246,13 +248,15 @@ func TestPathSpellability(t *testing.T) {
 		{"relative empty key", NewRelativePath(Segment{Kind: SegKey, Name: ""}), true},
 		{"optional on the last segment", NewPath(Segment{Kind: SegKey, Name: "server"}, Segment{Kind: SegKey, Name: "tls", Optional: true}), true},
 
-		// The lone empty key prints "/" and vanishes into the document root:
-		// unspellable although the segment alone round-trips fine.
-		{"lone empty key vanishes into the root", NewPath(Segment{Kind: SegKey, Name: ""}), false},
-		// "?" is legal only on the last segment (§4.4) — also invisible to any
-		// single segment.
+		// The lone empty key used to print "/" and vanish into the document
+		// root. It prints /"" now, which is RFC 6901's empty-key member and the
+		// hole §4.1 says the quoted form closes.
+		{"lone empty key", NewPath(Segment{Kind: SegKey, Name: ""}), true},
+		{"key that used to read back as an index", NewPath(Segment{Kind: SegKey, Name: "deps"}, Segment{Kind: SegKey, Name: "8080"}, Segment{Kind: SegKey, Name: "version"}), true},
+
+		// "?" is legal only on the last segment (§4.4) — invisible to any
+		// single segment, and the last positional failure left.
 		{"optional on a non-final segment", NewPath(Segment{Kind: SegKey, Name: "server", Optional: true}, Segment{Kind: SegKey, Name: "tls"}), false},
-		{"unspellable key in the middle", NewPath(Segment{Kind: SegKey, Name: "deps"}, Segment{Kind: SegKey, Name: "8080"}, Segment{Kind: SegKey, Name: "version"}), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -293,24 +297,19 @@ func TestAbsentPathIsSpellable(t *testing.T) {
 func TestFirstUnspellableNamesTheEarliestOffender(t *testing.T) {
 	p := NewPath(
 		Segment{Kind: SegKey, Name: "deps"},
-		Segment{Kind: SegKey, Name: "-"},
-		Segment{Kind: SegKey, Name: "8080"},
+		Segment{Kind: SegIndex, Index: -2},
+		Segment{Kind: SegIndex, Index: -1},
 	)
 	seg, bad := p.firstUnspellable()
 	if !bad {
-		t.Fatal("path with two unspellable keys must be refused")
+		t.Fatal("path with two unspellable segments must be refused")
 	}
-	if seg.Name != "-" {
-		t.Fatalf(`firstUnspellable() named %q, want the earliest offender "-"`, seg.Name)
+	if seg.Index != -2 {
+		t.Fatalf("firstUnspellable() named index %d, want the earliest offender -2", seg.Index)
 	}
 
 	// Positional failures have no locally-broken segment, so attribution falls
 	// to the shortest prefix that stopped round-tripping.
-	lone := NewPath(Segment{Kind: SegKey, Name: ""})
-	seg, bad = lone.firstUnspellable()
-	if !bad || seg.Kind != SegKey || seg.Name != "" {
-		t.Fatalf("lone empty key: got (%+v, %v), want the empty key and true", seg, bad)
-	}
 	mid := NewPath(
 		Segment{Kind: SegKey, Name: "server", Optional: true},
 		Segment{Kind: SegKey, Name: "tls"},
@@ -320,16 +319,15 @@ func TestFirstUnspellableNamesTheEarliestOffender(t *testing.T) {
 		t.Fatalf(`"?" before the last segment: got (%+v, %v), want the segment that could not follow it`, seg, bad)
 	}
 
-	// A segment that would not survive alone is fine if the path around it
-	// rescues it: a leading empty key prints "/" on its own but "//a" as part
-	// of a longer path, and "//a" round-trips.
-	rescued := NewPath(Segment{Kind: SegKey, Name: ""}, Segment{Kind: SegKey, Name: "a"})
+	// A key that would once have been blamed here is now spelled, not refused:
+	// the guard follows the grammar rather than a remembered list.
+	rescued := NewPath(Segment{Kind: SegKey, Name: ""}, Segment{Kind: SegKey, Name: "8080"})
 	if seg, bad := rescued.firstUnspellable(); bad {
 		t.Fatalf("%q round-trips; blaming %+v is a false refusal", rescued.String(), seg)
 	}
 }
 
-// TestSpellFailureNamesTheCorruption pins the four shapes of the explanation:
+// TestSpellFailureNamesTheCorruption pins the shapes of the explanation:
 // "this is refused" without "and here is what it would have meant" is not
 // enough for a reviewer to act on.
 func TestSpellFailureNamesTheCorruption(t *testing.T) {
@@ -338,10 +336,11 @@ func TestSpellFailureNamesTheCorruption(t *testing.T) {
 		seg  Segment
 		want string
 	}{
-		{"different kind", Segment{Kind: SegKey, Name: "#0"}, "re-reads as a comment segment, not a key"},
-		{"same kind, different segment", Segment{Kind: SegKey, Name: "opt?"}, "re-reads as a different key segment"},
-		{"not a legal segment", Segment{Kind: SegKey, Name: `"unterminated`}, "is not a legal segment"},
-		{"positional", Segment{Kind: SegKey, Name: ""}, "does not survive in this position"},
+		{"different kind", Segment{Kind: SegExtension, Form: "heading", Raw: "# Setup"}, "re-reads as a key segment, not a heading"},
+		{"same kind, different segment", Segment{Kind: SegMatch, Name: "on", Value: Scalar{Kind: ScalarBool, Text: "True"}}, "re-reads as a different match segment"},
+		{"not a legal segment", Segment{Kind: SegExtension, Form: "wildcard", Raw: "*"}, "is not a legal segment"},
+		{"line break", Segment{Kind: SegKey, Name: "a\nb"}, "line break"},
+		{"positional", Segment{Kind: SegKey, Name: "x", Optional: true}, "does not survive in this position"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -349,8 +348,12 @@ func TestSpellFailureNamesTheCorruption(t *testing.T) {
 			if !strings.Contains(got, tc.want) {
 				t.Errorf("spellFailure() = %q, want it to contain %q", got, tc.want)
 			}
-			if !strings.Contains(got, tc.seg.String()) {
-				t.Errorf("spellFailure() = %q, want it to show the spelling %q", got, tc.seg.String())
+			// The spelling is shown, so the reviewer sees the text that would
+			// have been written — except where the spelling is what is wrong
+			// with it: a line break cannot be printed into a diagnostic that is
+			// itself read line by line.
+			if spelling := tc.seg.String(); !strings.ContainsAny(spelling, "\r\n") && !strings.Contains(got, spelling) {
+				t.Errorf("spellFailure() = %q, want it to show the spelling %q", got, spelling)
 			}
 		})
 	}

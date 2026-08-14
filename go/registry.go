@@ -89,6 +89,15 @@ type Binding struct {
 	// that claims a token owns its meaning; the core only carries the bytes.
 	Segments []SegmentForm
 
+	// QuotedLabels declares that this extension resolves a quoted segment
+	// (§4.1) against a BLOCK SET, where it is a LABEL (§4.3), rather than
+	// against a mapping, where it is a key. It is the half of O48's SegLabel
+	// restructure the extension has to supply: the core lexes one literal form
+	// and does not know what a block set is, so a format that has one says so
+	// here. For every other format a quoted segment is a key, which is why this
+	// is a declaration and not a switch.
+	QuotedLabels bool
+
 	// Qualifiers are the transform qualifier keys this extension OWNS —
 	// "anchor" for YAML (§9.6), "surface" for TOML. O48's first recorded
 	// tension is why this is a declaration and not a relocation: the field's
@@ -233,23 +242,40 @@ func OwnsQualifier(f FormatID, q string) bool {
 	return false
 }
 
-// claimSegment offers a lexed token to the registered extensions' segment
-// forms and reports the name of the form that claimed it (§8.8).
+// quotedIsLabel reports whether f's extension resolves a quoted segment as an
+// HCL-style block label (§4.3) rather than as a mapping key. An unregistered
+// format has no block sets the core knows of, so the answer is no.
+func quotedIsLabel(f FormatID) bool {
+	b, ok := Lookup(f)
+	return ok && b.QuotedLabels
+}
+
+// claimSegment offers a lexed token to the segment forms in sc's scope and
+// reports the name of the form that claimed it (§8.8).
 //
-// It asks EVERY registered extension rather than the one format the patch
-// declares, and that boundary is the honest one to state. §8.8's design
-// direction says the core offers the token to the ACTIVE format's extension,
-// and the format is indeed known from the `--- ` line before any hunk is read —
-// but ParsePath and the emitting seams' spellability guard take no FormatID,
-// and giving them one is a change to the §4 parsing API that O41's
-// canonical-rendering work owns. Until then a claim is scoped to the BUILD:
-// a heading is a heading in any patch a markdown-linked program parses, which
-// is exactly the behaviour the hardcoded grammar had.
+// The scope is the answer to the question this function's earlier note left
+// open, and O41's work package settled: §8.8 says the core offers the token to
+// the ACTIVE format's extension, the format is known from the `--- ` line
+// (§2.2) and the `format:` key (§9.6) before any address is read, so the .hew
+// parser, the lowerer and the .hewt codec all parse format-scoped. A JSON key
+// spelled like a Markdown heading is therefore a JSON key, in every build.
+//
+// Build scope remains for a caller with no active format — ParsePath's
+// contract — because an address exists outside a patch too, and refusing to
+// parse one without a format would be a worse answer than reading it with
+// every linked grammar. Rendering never consults either scope (§4.1's
+// canonical-rendering rule is format-independent, and says why).
 //
 // Iteration is over sorted format ids so that two extensions claiming one
 // shape resolve the same way in every run rather than by map order.
-func claimSegment(raw string) (string, bool, error) {
-	for _, id := range Formats() {
+func claimSegment(raw string, sc scope) (string, bool, error) {
+	ids := []FormatID{sc.format}
+	if sc.all {
+		ids = Formats()
+	} else if sc.format == "" {
+		return "", false, nil
+	}
+	for _, id := range ids {
 		b, ok := Lookup(id)
 		if !ok {
 			continue

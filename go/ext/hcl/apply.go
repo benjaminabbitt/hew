@@ -274,6 +274,13 @@ func (r *run) step(cur *ref, segs []hew.Segment) (*ref, int, error) {
 		return nil, 1, &resolveErr{code: hewerr.CodeInexpressible, final: true,
 			detail: fmt.Sprintf("segment kind %v has no HCL representation (§8.5)", seg.Kind)}
 	}
+	if seg.IsQuoted() {
+		// A quoted segment is a LABEL against a block set (§4.3, O41), and a
+		// label qualifies the name step before it — it cannot open one.
+		return nil, 1, &resolveErr{code: hewerr.CodeInexpressible, final: true,
+			detail: fmt.Sprintf("%s is a block label and must follow the block type it qualifies (§4.3)",
+				quoteHCL(seg.Name))}
+	}
 	b := cur.body()
 	if b == nil {
 		return nil, 1, noMatch("%q: an attribute has no body to descend into", seg.Name)
@@ -283,7 +290,7 @@ func (r *run) step(cur *ref, segs []hew.Segment) (*ref, int, error) {
 	// the IR carries on whichever segment closed the tuple (§9.6, §11.10).
 	used := 1
 	var labels []string
-	for used < len(segs) && segs[used].Kind == hew.SegLabel {
+	for used < len(segs) && segs[used].IsQuoted() {
 		labels = append(labels, segs[used].Name)
 		used++
 	}

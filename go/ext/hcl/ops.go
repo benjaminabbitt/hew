@@ -262,7 +262,9 @@ func (r *run) container(t hew.Transform, p hew.Path) (*bodyNode, string, []strin
 	segs := p.Segments()
 	k := -1
 	for i, s := range segs {
-		if s.Kind == hew.SegKey {
+		// The NAME step is an unquoted key; a quoted one is a label
+		// qualifying the name before it (§4.3, O41's container-kind rule).
+		if s.Kind == hew.SegKey && !s.IsQuoted() {
 			k = i
 		}
 	}
@@ -272,7 +274,7 @@ func (r *run) container(t hew.Transform, p hew.Path) (*bodyNode, string, []strin
 	}
 	var labels []string
 	for _, s := range segs[k+1:] {
-		if s.Kind != hew.SegLabel {
+		if !s.IsQuoted() {
 			return nil, "", nil, r.err(hewerr.CodeInexpressible, p.String(), t.PatchLine,
 				"address mixes a label with a segment HCL cannot express (§8.5)")
 		}

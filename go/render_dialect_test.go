@@ -203,10 +203,24 @@ func TestRenderNativeHCLAlignmentRunsBreak(t *testing.T) {
 	}
 }
 
+// blockSetFormat registers a binding that declares what ext/hcl declares: this
+// format resolves a quoted segment against a BLOCK SET, so the quoted form is a
+// label there and not a key (§4.3, Binding.QuotedLabels). The core cannot know
+// that on its own — that is the whole of O48's SegLabel restructure — so a core
+// test that is about labels has to say which format has them.
+func blockSetFormat(t *testing.T, id FormatID) {
+	t.Helper()
+	isolate(t)
+	b := fakeBinding(id, []string{"." + string(id)}, nil)
+	b.QuotedLabels = true
+	Register(id, b)
+}
+
 // A label is half of a block's address, and the mirror grammar has no body
 // line that spells one. Appendix C's rule is to say so, not to write a line
 // that would read as something else (§9.4-R6).
 func TestRenderRefusesALabelBodyLine(t *testing.T) {
+	blockSetFormat(t, FormatHCL)
 	ts := []Transform{
 		{Op: OpTest, Path: MustParsePath(`/provider/"b"`), Value: mustYAML(t, "{k: 1}")},
 		{Op: OpRemove, Path: MustParsePath(`/provider/"b"`)},
@@ -218,6 +232,20 @@ func TestRenderRefusesALabelBodyLine(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `/provider/"b"`) {
 		t.Fatalf("diagnostic does not name the address: %v", err)
+	}
+}
+
+// TestRenderWritesAQuotedKeyAsABodyLine is the same lexical form against the
+// other container kind (§4.1, O41): in a format with no block sets a quoted
+// segment is a KEY, it has an ordinary body line, and refusing it here would
+// make a scoped npm dependency unpatchable. json/quoted-key-scoped's render
+// seam is the corpus half of this.
+func TestRenderWritesAQuotedKeyAsABodyLine(t *testing.T) {
+	got := renderNative(t, FormatJSON,
+		Transform{Op: OpTest, Path: MustParsePath(`/dependencies/"@scope/pkg"`), Value: mustYAML(t, "1.2.0")},
+	)
+	if !strings.Contains(got, `@@ /dependencies @@`) || !strings.Contains(got, `  "@scope/pkg": "1.2.0"`) {
+		t.Fatalf("got:\n%s", got)
 	}
 }
 
@@ -266,8 +294,15 @@ func TestDialectKeySpelling(t *testing.T) {
 	if got := dialectFor(FragmentNative, FormatYAML).key("needs: quoting"); got != `"needs: quoting"` {
 		t.Fatalf("yaml awkward key = %q", got)
 	}
-	if got := dialectFor(FragmentNeutral, FormatYAML).key("a/b"); got != "a~1b" {
+	// A body line is MIRROR text, not a path: the mirror parser decodes no
+	// tilde escape, so a key holding "/" is quoted here and read back whole.
+	// Tilde-escaping it — which is what this dialect used to do — produced a
+	// line that read back as a key literally called "a~1b".
+	if got := dialectFor(FragmentNeutral, FormatYAML).key("a/b"); got != `"a/b"` {
 		t.Fatalf("neutral key = %q", got)
+	}
+	if got := dialectFor(FragmentNeutral, FormatYAML).key("plain"); got != "plain" {
+		t.Fatalf("neutral plain key = %q", got)
 	}
 }
 

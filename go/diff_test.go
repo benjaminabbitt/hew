@@ -666,17 +666,13 @@ func TestMemberLookup(t *testing.T) {
 	}
 }
 
-// TestDiffRefusesUnspellableKey is the live defect, at the seam it enters
-// through: the differ is the one producer that builds paths out of RAW
-// DOCUMENT KEYS, and a port map is enough to hand it "8080". The bare spelling
-// of that key re-reads as a sequence INDEX, so the patch would have addressed
-// something else entirely. Refuse, do not misapply (§9.3).
-//
-// The sibling case — a scoped npm dependency, "@scope/pkg", re-reading as a
-// Markdown marker — is the same defect against an extension-claimed shape, and
-// lives in ext/markdown's suite because this package registers no segment
-// forms (§8.8).
-func TestDiffRefusesUnspellableKey(t *testing.T) {
+// TestDiffEmitsTheQuotedFormForACollidingKey is the live defect O41 closed, at
+// the seam it entered through: the differ is the one producer that builds paths
+// out of RAW DOCUMENT KEYS, and a port map is enough to hand it "8080". It used
+// to REFUSE the whole diff, because the bare spelling re-read as a sequence
+// index; it writes the literal form now, which is what a key deserves. The
+// corpus pins the end-to-end version of this as json/diff-scoped-key.
+func TestDiffEmitsTheQuotedFormForACollidingKey(t *testing.T) {
 	old := dmap("ports", dmap(
 		"http", dmap("target", dstr("web")),
 		"8080", dmap("target", dstr("api")),
@@ -687,30 +683,28 @@ func TestDiffRefusesUnspellableKey(t *testing.T) {
 	))
 
 	tl, err := DiffTrees(old, new, FormatJSON, DiffOptions{Target: "compose.json"})
-	if err == nil {
-		t.Fatalf("the differ produced a patch addressing an unspellable key:\n%s", summarize(tl))
+	if err != nil {
+		t.Fatalf("a port map is an ordinary document and must diff: %v", err)
 	}
-	if len(tl.Transform) != 0 {
-		t.Errorf("a refused diff must return no transforms, got %d", len(tl.Transform))
+	if len(tl.Transform) == 0 {
+		t.Fatal("the added member must produce transforms")
 	}
-	he, ok := hewerr.As(err)
-	if !ok {
-		t.Fatalf("want a *hewerr.Error, got %T: %v", err, err)
+	for _, tr := range tl.Transform {
+		s := tr.Path.String()
+		if !strings.Contains(s, `/ports/"8080"`) {
+			t.Fatalf("path %q does not spell the key literally; bare, it re-reads as an index", s)
+		}
+		back, perr := ParsePath(s)
+		if perr != nil || !back.Equal(tr.Path) {
+			t.Fatalf("path %q does not read back as itself: %v", s, perr)
+		}
 	}
-	if he.Code != hewerr.CodeInexpressible {
-		t.Errorf("code = %s, want HEW020 inexpressible", he.Code)
+	// And the patch survives the exits the old guard refused it at.
+	if _, err := MarshalTransforms(tl); err != nil {
+		t.Fatalf("marshalling the diff: %v", err)
 	}
-	if he.Component != hewerr.ComponentDiffer {
-		t.Errorf("component = %s, want differ: the key entered the IR here", he.Component)
-	}
-	if he.Target != "compose.json" {
-		t.Errorf("target = %q, want the file the key lives in", he.Target)
-	}
-	if !strings.Contains(he.Detail, "8080") {
-		t.Errorf("detail %q does not name the offending key", he.Detail)
-	}
-	if !strings.Contains(he.Detail, "PR #1") {
-		t.Errorf("detail %q does not point at the ratified-pending quoted-key form", he.Detail)
+	if _, err := Render(tl, RenderOptions{Fragment: FragmentNative}); err != nil {
+		t.Fatalf("rendering the diff: %v", err)
 	}
 }
 

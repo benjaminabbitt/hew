@@ -423,7 +423,7 @@ func TestCoreShapesOutrankAClaim(t *testing.T) {
 		body string
 		want SegmentKind
 	}{
-		{`"aws"`, SegLabel},
+		{`"aws"`, SegKey}, // the LITERAL form; what it means is the container's (§4.1, O41)
 		{"-", SegAppend},
 		{"#0", SegComment},
 		{"#t", SegComment},
@@ -440,6 +440,9 @@ func TestCoreShapesOutrankAClaim(t *testing.T) {
 		if got := p.Segment(0).Kind; got != c.want {
 			t.Errorf("/%s parsed as %s, want %s", c.body, got, c.want)
 		}
+	}
+	if p, _ := ParsePath(`/"aws"`); !p.Segment(0).IsQuoted() {
+		t.Error(`a greedy claim must not take the quoted form's literal spelling either`)
 	}
 }
 

@@ -102,16 +102,14 @@ func DiffTrees(old, new *DiffNode, format FormatID, opt DiffOptions) (TransformL
 	if err := d.root(old, new); err != nil {
 		return TransformList{}, err
 	}
-	tl := TransformList{Target: opt.Target, Format: format, Transform: d.out}
 	// The differ is the one producer that builds paths from RAW DOCUMENT KEYS,
-	// so it is where an unspellable key enters the IR: a package.json with a
-	// "@scope/pkg" dependency is enough. Checking here rather than leaving it
-	// to the emitting seam costs one walk and buys a diagnostic that names the
-	// file the key actually lives in (§9.4-R6's "never silently degrade").
-	if err := tl.checkSpellable(hewerr.ComponentDiffer); err != nil {
-		return TransformList{}, err
-	}
-	return tl, nil
+	// which is why it used to run the spellability guard here and refuse a
+	// package.json with a "@scope/pkg" dependency outright. O41 removed the
+	// reason: the canonical-rendering rule spells every key, so the differ
+	// emits `/dependencies/"@scope/pkg"` and the address means what it says.
+	// json/diff-scoped-key pins that from producer to consumer, and what is
+	// left of the guard lives at the emitting seams (transform.go).
+	return TransformList{Target: opt.Target, Format: format, Transform: d.out}, nil
 }
 
 type differ struct {
@@ -464,7 +462,7 @@ func (a addressing) childPath(path Path, c DiffChild, index, commentIndex int) P
 	case c.Comment:
 		return path.Append(Segment{Kind: SegComment, Index: commentIndex})
 	case c.Label:
-		return path.Append(Segment{Kind: SegLabel, Name: c.Key})
+		return path.Append(Segment{Kind: SegKey, Name: c.Key, Quoted: true})
 	case !a.seq:
 		return path.Append(Segment{Kind: SegKey, Name: c.Key})
 	case a.field != "":
