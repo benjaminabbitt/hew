@@ -12,6 +12,7 @@ import (
 
 	"github.com/hew-format/hew"
 	"github.com/hew-format/hew/hewjson"
+	"github.com/hew-format/hew/hewjsonc"
 	"github.com/hew-format/hew/internal/hewerr"
 )
 
@@ -244,6 +245,8 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 		switch format {
 		case hew.FormatJSON:
 			after, aerr = hewjson.Apply(before, tl)
+		case hew.FormatJSONC:
+			after, aerr = hewjsonc.Apply(before, tl)
 		case "":
 			aerr = &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: tl.Target,
 				Detail: "no format declared and none inferred from the target's extension (§8.0)"}

@@ -28,12 +28,6 @@ var skipRules = []harness.SkipRule{
 	{Case: "jsonc/roundtrip-basic", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
 	{Case: "yaml/roundtrip-basic", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
 
-	// jsonc/roundtrip-basic's apply-ir/e2e/cli still need a JSONC-specific
-	// (comment-aware, §8.2) applier this slice does not ship — only plain
-	// JSON is in scope for P2's "one applier" slice.
-	{Case: "jsonc/roundtrip-basic", Seam: "apply-ir", Reason: "P3: hewjsonc applier not yet implemented"},
-	{Case: "jsonc/roundtrip-basic", Seam: "e2e", Reason: "P3: hewjsonc applier not yet implemented"},
-
 	// --ops and --record's resolved transforms both need Resolve (§9.2,
 	// Appendix A.1's abstract -> RFC 6901 projection against a specific
 	// target), not implemented in P2.
@@ -51,14 +45,12 @@ var skipRules = []harness.SkipRule{
 	{Case: "cli/apply-transforms", Seam: "*", Reason: "P3: hewyaml applier not yet implemented"},
 	{Case: "cli/stale-exit-1", Seam: "cli", Reason: "P3: hewyaml applier not yet implemented"},
 
-	// Every other jsonc case: parse/render are format-agnostic and largely
-	// work (see jsonc/roundtrip-basic passing for real), but this slice has
-	// not verified them against jsonc's comment-anchoring corpus cases
-	// specifically (§8.2's leading/trailing/free comment rules interact
-	// with the parser's comment-node handling in ways P2 did not exercise
-	// case by case) and ships no jsonc applier for apply-ir/e2e/cli at all.
-	{Case: "jsonc/*", Seam: "apply-ir", Reason: "P3: hewjsonc applier not yet implemented"},
-	{Case: "jsonc/*", Seam: "e2e", Reason: "P3: hewjsonc applier not yet implemented"},
+	// jsonc's apply-ir/e2e run for real: hewjsonc (§8.2) ships. Its parse and
+	// render seams stay skipped — the notation side has not been verified
+	// against jsonc's comment-anchoring cases seam by seam (§8.2's
+	// leading/trailing/free rules interact with the parser's comment-node
+	// handling in ways P2 did not exercise case by case), even though the
+	// e2e seam necessarily exercises parsing end to end.
 	{Case: "jsonc/*", Seam: "parse", Reason: "P3: not verified beyond jsonc/roundtrip-basic against §8.2's comment-anchoring cases"},
 	{Case: "jsonc/*", Seam: "render", Reason: "P3: not verified beyond jsonc/roundtrip-basic"},
 

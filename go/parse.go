@@ -65,8 +65,8 @@ type parser struct {
 	i     int // 0-based index into lines; current line is lines[i]
 }
 
-func (p *parser) lineNo() int  { return p.i + 1 }
-func (p *parser) done() bool   { return p.i >= len(p.lines) }
+func (p *parser) lineNo() int { return p.i + 1 }
+func (p *parser) done() bool  { return p.i >= len(p.lines) }
 func (p *parser) peek() string {
 	if p.done() {
 		return ""
@@ -465,33 +465,44 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 
 	for _, r := range runs {
 		matched := make([]bool, r.end-r.start)
+		pairOf := make([]int, r.end-r.start)
+		for i := range pairOf {
+			pairOf[i] = -1
+		}
 		for i := r.start; i < r.end; i++ {
 			if members[i].bl.margin != '-' {
 				continue
 			}
 			rmKey := members[i].seg.String()
-			pair := -1
 			for j := r.start; j < r.end; j++ {
 				if members[j].bl.margin != '+' || matched[j-r.start] {
 					continue
 				}
 				if members[j].seg.String() == rmKey {
-					pair = j
+					matched[j-r.start] = true
+					pairOf[i-r.start] = j
 					break
 				}
 			}
-			if pair >= 0 {
-				matched[pair-r.start] = true
+		}
+		for i := r.start; i < r.end; i++ {
+			if members[i].bl.margin != '-' {
+				continue
+			}
+			if pair := pairOf[i-r.start]; pair >= 0 {
 				add := members[pair]
 				out = append(out, Transform{
 					Op: OpReplace, Path: anchor.Append(members[i].seg), Value: add.value,
 					PatchLine: add.bl.line, Idempotent: idempotent,
 				})
-			} else {
-				out = append(out, Transform{
-					Op: OpRemove, Path: anchor.Append(members[i].seg), PatchLine: members[i].bl.line,
-				})
+				continue
 			}
+			if leadsRemovedMember(members, i, r.end, pairOf, r.start) {
+				continue
+			}
+			out = append(out, Transform{
+				Op: OpRemove, Path: anchor.Append(members[i].seg), PatchLine: members[i].bl.line,
+			})
 		}
 		for j := r.start; j < r.end; j++ {
 			if members[j].bl.margin != '+' || matched[j-r.start] {
@@ -517,10 +528,38 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 	return out, nil
 }
 
+// leadsRemovedMember reports whether the "-" comment at members[idx] is the
+// LEADING comment of a member the same run removes (§8.2: "immediately
+// preceding, with no blank line"). It is, when the very next body line is an
+// unpaired "-" member — and then the comment needs no removal record of its
+// own, because §8.2 makes removing that member remove its leading comment
+// too. corpus/jsonc/delete-key-with-comment is this case; emitting a second
+// remove would instead address a comment ORDINAL that counts only the
+// comments the patch happened to list, not the container's.
+func leadsRemovedMember(members []member, idx, runEnd int, pairOf []int, runStart int) bool {
+	if members[idx].seg.Kind != SegComment {
+		return false
+	}
+	next := idx + 1
+	if next >= runEnd {
+		return false
+	}
+	return members[next].bl.margin == '-' &&
+		members[next].seg.Kind != SegComment &&
+		pairOf[next-runStart] < 0
+}
+
 // placement finds the sibling an unmatched add at members[idx] is placed
 // relative to (§6.2). after=true means "after"; after=false means "before".
 // ok=false means append at the end of the container.
 func placement(members []member, idx int) (sib Segment, after bool, ok bool) {
+	// A "+" comment line immediately above a "+" member is that member's
+	// leading comment (§8.2), so the member is placed after the comment the
+	// same hunk is adding rather than after the context line above them both.
+	// corpus/jsonc/add-with-leading-comment pins the resulting `after: /#0`.
+	if idx > 0 && members[idx-1].bl.margin == '+' && members[idx-1].seg.Kind == SegComment {
+		return members[idx-1].seg, true, true
+	}
 	for j := idx - 1; j >= 0; j-- {
 		if members[j].bl.margin == ' ' || members[j].bl.margin == '-' {
 			return members[j].seg, true, true
@@ -532,6 +571,56 @@ func placement(members []member, idx int) (sib Segment, after bool, ok bool) {
 		}
 	}
 	return Segment{}, false, false
+}
+
+// targetCommentText recognizes a body line that spells a comment IN THE
+// TARGET (§3: "target comments are ordinary body text") and returns its
+// content with the marker and one leading space stripped, which is the form
+// §6.1's comment-match row compares. All three v0 comment syntaxes are
+// accepted regardless of the section's format, because no format's value
+// grammar can produce a body line starting with "#", "//" or "/*" — so the
+// spelling is unambiguous without the parser knowing which backend will read
+// it.
+func targetCommentText(text string) (string, bool) {
+	switch {
+	case strings.HasPrefix(text, "//"):
+		return strings.TrimPrefix(strings.TrimPrefix(text, "//"), " "), true
+	case strings.HasPrefix(text, "/*") && strings.HasSuffix(text, "*/") && len(text) >= 4:
+		return strings.TrimSpace(text[2 : len(text)-2]), true
+	case strings.HasPrefix(text, "#"):
+		return strings.TrimPrefix(strings.TrimPrefix(text, "#"), " "), true
+	}
+	return "", false
+}
+
+// commentValue is a comment node's value in the IR: the one-key mapping
+// `{comment: <text>}` (§11.10 reduction 3), which is why an `add` at a comment
+// address needs no `comment:` qualifier of its own. corpus/yaml/set-scalar and
+// corpus/jsonc/add-with-leading-comment both pin this shape.
+func commentValue(text string) Value {
+	return NodeValue(&yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "comment"},
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: text},
+	}})
+}
+
+// commentTextOf reads a comment node's text back out of a value, reporting
+// false for a value that is not a comment node. A bare scalar is accepted as
+// the same thing, so a hand-authored .hewt fixture may spell a comment either
+// way.
+func commentTextOf(v Value) (string, bool) {
+	n := v.Node()
+	if n == nil {
+		return "", false
+	}
+	if n.Kind == yaml.ScalarNode {
+		return n.Value, true
+	}
+	if n.Kind == yaml.MappingNode && len(n.Content) == 2 &&
+		n.Content[0].Value == "comment" && n.Content[1].Kind == yaml.ScalarNode {
+		return n.Content[1].Value, true
+	}
+	return "", false
 }
 
 // classifyMember turns one context/"-"/"+" body line into a member: either a
@@ -554,15 +643,10 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 	if dashElement {
 		text = strings.TrimSpace(text[2:])
 	}
-	if strings.HasPrefix(text, "#") {
-		txt := strings.TrimPrefix(strings.TrimPrefix(text, "#"), " ")
+	if txt, ok := targetCommentText(text); ok {
 		seg := Segment{Kind: SegComment, Index: *commentOrdinal}
 		*commentOrdinal++
-		v, err := ValueOf(txt)
-		if err != nil {
-			return member{}, parseErr(bl.line, "", "comment value: %v", err)
-		}
-		return member{bl: bl, seg: seg, value: v, isField: true}, nil
+		return member{bl: bl, seg: seg, value: commentValue(txt), isField: true}, nil
 	}
 
 	var n yaml.Node
