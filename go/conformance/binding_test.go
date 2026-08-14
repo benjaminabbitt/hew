@@ -7,6 +7,7 @@ import (
 	"github.com/hew-format/hew/hewhcl"
 	"github.com/hew-format/hew/hewjson"
 	"github.com/hew-format/hew/hewjsonc"
+	"github.com/hew-format/hew/hewtoml"
 	"github.com/hew-format/hew/hewyaml"
 	"github.com/hew-format/hew/internal/harness"
 	"github.com/hew-format/hew/internal/hewcli"
@@ -14,9 +15,10 @@ import (
 )
 
 // applyByFormat dispatches to the format bindings this slice ships (§8.1's
-// JSON, §8.2's JSONC, §8.3's YAML, §8.5's HCL) and fails loud (HEW021) for anything else,
-// matching the spec's own registration model (Appendix A.6) without the
-// registry indirection a handful of bindings doesn't need yet.
+// JSON, §8.2's JSONC, §8.3's YAML, §8.4's TOML, §8.5's HCL) and fails loud
+// (HEW021) for anything else, matching the spec's own registration model
+// (Appendix A.6) without the registry indirection a handful of bindings
+// doesn't need yet.
 func applyByFormat(target []byte, tl hew.TransformList, format string) ([]byte, error) {
 	if format != "" {
 		tl.Format = hew.FormatID(format)
@@ -28,6 +30,8 @@ func applyByFormat(target []byte, tl hew.TransformList, format string) ([]byte, 
 		return hewjsonc.Apply(target, tl)
 	case hew.FormatYAML:
 		return hewyaml.Apply(target, tl)
+	case hew.FormatTOML:
+		return hewtoml.Apply(target, tl)
 	case hew.FormatHCL:
 		return hewhcl.Apply(target, tl)
 	default:
