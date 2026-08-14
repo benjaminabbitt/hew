@@ -318,7 +318,10 @@ func TestResolveAppendOnNonSequence(t *testing.T) {
 
 func TestResolveInexpressibleSegments(t *testing.T) {
 	doc := mustDoc(t, servers)
-	for _, p := range []string{`/"aws"`, "/## Install", "/code:0", "/@managed", "/#0"} {
+	// The extension-claimed forms (a Markdown heading, block or marker) are
+	// inexpressible for exactly the same reason and are covered in
+	// ext/markdown's suite, which is the build that has that grammar (§8.8).
+	for _, p := range []string{`/"aws"`, "/#0"} {
 		err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath(p)}), doc)
 		mustCode(t, err, hewerr.CodeInexpressible)
 		if !strings.Contains(err.Error(), "no RFC 6901 representation") {
@@ -424,7 +427,7 @@ func TestResolveAddWithNoPlacementAppends(t *testing.T) {
 }
 
 // A placement that resolves but is not a direct element of the container
-// leaves the insertion at the end, which is what hewjson's applier does; the
+// leaves the insertion at the end, which is what ext/json's applier does; the
 // resolved list must describe the edit that really happened.
 func TestResolveAddWithForeignPlacementAppends(t *testing.T) {
 	doc := mustDoc(t, servers)

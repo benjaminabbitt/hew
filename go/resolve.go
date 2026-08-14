@@ -169,7 +169,7 @@ func (r *resolver) pointer(p Path, line int) (string, error) {
 //
 // Disambiguating a sequence-style add (path IS the container) from a
 // map-style one (path is container + the new key) uses exactly the signal
-// hewjson's planInsert uses — whether path resolves to an existing SEQUENCE —
+// ext/json's planInsert uses — whether path resolves to an existing SEQUENCE —
 // so that the resolved list describes the insertion the applier would really
 // perform rather than a second, independent guess.
 func (r *resolver) insertPointer(path, before, after Path, line int) (string, error) {
@@ -199,7 +199,7 @@ func (r *resolver) insertPointer(path, before, after Path, line int) (string, er
 }
 
 // placementIndex turns a relative placement (§6.2) into a concrete index in
-// container. It mirrors hewjson.insertArrayElement, sibling lookup and
+// container. It mirrors ext/json's insertArrayElement, sibling lookup and
 // fallback included: a placement path that resolves but is not a direct child
 // of the container leaves the insertion at the end, because that is what the
 // applier does, and a resolved list that disagreed with the applier would be
@@ -284,7 +284,7 @@ func (r *resolver) createPointer(path Path, line int) (string, error) {
 			"resolve: %s matches no element, and RFC 6901 has no index for a node that does not exist (§9.2)", last.String())
 	default:
 		return "", r.err(hewerr.CodeInexpressible, path.String(), line,
-			"resolve: a %s segment has no RFC 6901 representation (§9.2)", last.Kind)
+			"resolve: a %s segment has no RFC 6901 representation (§9.2)", last.describe())
 	}
 }
 
@@ -347,7 +347,7 @@ type stepErr struct {
 func (r *resolver) step(n Node, seg Segment) (string, Node, *stepErr) {
 	if seg.Ordinal != nil && seg.Kind != SegMatch {
 		return "", nil, &stepErr{inexpressible: true,
-			detail: fmt.Sprintf("an ordinal selector on a %s segment has no RFC 6901 projection (§9.2)", seg.Kind)}
+			detail: fmt.Sprintf("an ordinal selector on a %s segment has no RFC 6901 projection (§9.2)", seg.describe())}
 	}
 	switch seg.Kind {
 	case SegKey:
@@ -382,7 +382,7 @@ func (r *resolver) step(n Node, seg Segment) (string, Node, *stepErr) {
 		// Labels, headings, blocks, markers and comment addresses: §9.2's
 		// "no RFC 6902 representation at all".
 		return "", nil, &stepErr{inexpressible: true,
-			detail: fmt.Sprintf("a %s segment has no RFC 6901 representation (§9.2)", seg.Kind)}
+			detail: fmt.Sprintf("a %s segment has no RFC 6901 representation (§9.2)", seg.describe())}
 	}
 }
 

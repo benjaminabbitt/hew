@@ -7,15 +7,14 @@
 // rule is that the differ's inputs are pure content: no repository, no
 // revision, no subprocess. Descriptor resolution (`HEAD:config.yaml`) lives in
 // the CLI layer (§9.5, Appendix A.7) and nothing here can reach it.
+//
+// It names no format package either: the binding arrives from the registry
+// (Appendix A.6), so which differs exist is decided by what the program imports
+// for effect — `_ ext/all`, or exactly the formats it edits.
 package hewdiff
 
 import (
 	"github.com/benjaminabbitt/hew/go"
-	"github.com/benjaminabbitt/hew/go/hewhcl"
-	"github.com/benjaminabbitt/hew/go/hewjson"
-	"github.com/benjaminabbitt/hew/go/hewjsonc"
-	"github.com/benjaminabbitt/hew/go/hewtoml"
-	"github.com/benjaminabbitt/hew/go/hewyaml"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
@@ -41,25 +40,21 @@ func Diff(old, new []byte, format hew.FormatID, opt hew.DiffOptions) (hew.Transf
 	return hew.DiffTrees(oldTree, newTree, format, opt)
 }
 
-func treeBuilder(format hew.FormatID, target string) (func([]byte) (*hew.DiffNode, error), error) {
-	switch format {
-	case hew.FormatJSON:
-		return hewjson.DiffTree, nil
-	case hew.FormatJSONC:
-		return hewjsonc.DiffTree, nil
-	case hew.FormatYAML:
-		return hewyaml.DiffTree, nil
-	case hew.FormatTOML:
-		return hewtoml.DiffTree, nil
-	case hew.FormatHCL:
-		return hewhcl.DiffTree, nil
-	case "":
+// treeBuilder asks the registry for the format's diff half (Appendix A.6). The
+// binding it returns is the same one the applier came from, which is what
+// §9.4's "the differ and the applier are format-side inverses" requires and
+// what a switch per call site could only promise.
+func treeBuilder(format hew.FormatID, target string) (hew.Differ, error) {
+	if format == "" {
 		return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentDiffer, Target: target,
 			Detail: "no format declared and none inferred from the source's extension (§8.0)"}
-	default:
+	}
+	b, ok := hew.Lookup(format)
+	if !ok || b.Differ == nil {
 		return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentDiffer, Target: target,
 			Detail: "no differ for format " + string(format) + " (P4)"}
 	}
+	return b.Differ, nil
 }
 
 func withTarget(err error, target string) error {

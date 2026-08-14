@@ -10,13 +10,20 @@ import (
 // The exits are the seams where a Path becomes TEXT: MarshalTransforms and
 // MarshalTransformStream for .hewt, Render for .hew. Before this guard, a key
 // the §4 grammar cannot spell went out as a spelling that reads back as
-// something else — "@scope/pkg" as a marker, "8080" as an index — and the
+// something else — "8080" as an index, "@scope/pkg" as a marker — and the
 // corruption was invisible until someone applied the patch. §9.3's rule is
 // refuse, never misapply.
 
-// unspellableKey is the live case: a scoped npm dependency in a package.json.
-// Its bare spelling, "@scope~1pkg", re-reads as a marker segment.
-const unspellableKey = "@scope/pkg"
+// unspellableKey is a live case: a port number used as a key, which any
+// port-map in a real config has. Its bare spelling, "8080", re-reads as a
+// sequence index.
+//
+// The other live case — "@scope/pkg", a scoped npm dependency, re-reading as a
+// Markdown marker — is exercised in ext/markdown's suite instead, because it is
+// a collision with an EXTENSION-claimed shape and this package registers none
+// (§8.8). Same guard, same refusal; the difference is only which grammar has to
+// be linked for the collision to exist at all.
+const unspellableKey = "8080"
 
 func badKeyPath() Path {
 	return NewPath(Segment{Kind: SegKey, Name: "dependencies"}, Segment{Kind: SegKey, Name: unspellableKey})
@@ -66,8 +73,8 @@ func assertUnspellableRefusal(t *testing.T, err error, field string, comp hewerr
 	if he.Component != comp {
 		t.Errorf("%s: component = %s, want %s", field, he.Component, comp)
 	}
-	if he.Path != "/dependencies/@scope~1pkg" {
-		t.Errorf("%s: path = %q, want the best-effort spelling /dependencies/@scope~1pkg", field, he.Path)
+	if he.Path != "/dependencies/8080" {
+		t.Errorf("%s: path = %q, want the best-effort spelling /dependencies/8080", field, he.Path)
 	}
 	for _, want := range []string{unspellableKey, field, "PR #1", "§9.3"} {
 		if !strings.Contains(he.Detail, want) {
@@ -142,15 +149,12 @@ func TestExitsRefuseTheOtherUnspellableClasses(t *testing.T) {
 		name string
 		seg  Segment
 	}{
-		{"digit-only key", Segment{Kind: SegKey, Name: "8080"}},
 		{"append token", Segment{Kind: SegKey, Name: "-"}},
 		{"comment address", Segment{Kind: SegKey, Name: "#0"}},
 		{"trailing comment", Segment{Kind: SegKey, Name: "#t"}},
-		{"block ordinal", Segment{Kind: SegKey, Name: "para:0"}},
 		{"trailing question mark", Segment{Kind: SegKey, Name: "opt?"}},
 		{"trailing ordinal", Segment{Kind: SegKey, Name: "a[1]"}},
 		{"leading double quote", Segment{Kind: SegKey, Name: `"quoted`}},
-		{"heading", Segment{Kind: SegKey, Name: "# Setup"}},
 		{"empty key", Segment{Kind: SegKey, Name: ""}},
 	}
 	for _, tc := range tests {
