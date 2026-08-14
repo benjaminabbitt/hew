@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/hew-format/hew"
+	"github.com/hew-format/hew/hewdiff"
 	"github.com/hew-format/hew/hewhcl"
 	"github.com/hew-format/hew/hewjson"
 	"github.com/hew-format/hew/hewjsonc"
@@ -78,7 +79,23 @@ func newBinding() harness.Binding {
 			}
 			return hew.Render(tl, hew.RenderOptions{Preamble: true, Context: 1})
 		},
+		// DiffToHew composes the two halves the diff seam pins: the differ
+		// produces the abstract list (§9.4) and the renderer writes it as
+		// notation (§9.2's one-way street from IR to text). The context
+		// radius is the spec's default of 1 and the fragments are spelled in
+		// the target format's own syntax, which is what §5's "parsed by the
+		// target format's fragment parser" licenses and what the corpus's
+		// expected.hew files show.
+		DiffToHew: func(old, new []byte, format, target string) ([]byte, error) {
+			tl, err := hewdiff.Diff(old, new, hew.FormatID(format), hew.DiffOptions{
+				Target:  target,
+				Context: hew.ContextDefault,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return hew.Render(tl, hew.RenderOptions{Preamble: true, Context: hew.ContextDefault, Fragment: hew.FragmentNative})
+		},
 		RunCLI: hewcli.Run,
-		// DiffToHew: P4, not implemented.
 	}
 }

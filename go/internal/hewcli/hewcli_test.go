@@ -196,17 +196,17 @@ func TestApplyNoPatchGivenExitsTwo(t *testing.T) {
 	}
 }
 
-func TestDiffNotImplemented(t *testing.T) {
+func TestDiffMissingSourceExitsTwo(t *testing.T) {
 	dir := t.TempDir()
 	exit, stdout, stderr := run(t, dir, "diff", "old.json", "new.json")
 	if exit != 2 {
 		t.Fatalf("want exit 2, got %d", exit)
 	}
 	if stdout != "" {
-		t.Fatalf("diff stub must never print a silent empty patch to stdout, got %q", stdout)
+		t.Fatalf("a failed diff must never print a silent empty patch to stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "not implemented") {
-		t.Fatalf("stderr should say not implemented: %q", stderr)
+	if !strings.Contains(stderr, "old.json") {
+		t.Fatalf("stderr should name the unresolvable descriptor: %q", stderr)
 	}
 }
 

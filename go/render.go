@@ -18,7 +18,8 @@ type RenderOptions struct {
 	// parity with Appendix A.3 though this implementation does not read it:
 	// the renderer never drops or synthesizes assertions the caller didn't
 	// hand it (that would silently change strictness, exactly what §9.4-R2's
-	// own note warns against).
+	// own note warns against). The radius is DiffOptions.Context's to choose,
+	// because choosing it needs both documents, which the renderer never has.
 	Context int
 	// Preamble controls whether "hew: 1" is emitted. Convergence is never
 	// written as the file-level `idempotent:` pragma (§2.1, ruling O3): the
@@ -28,7 +29,28 @@ type RenderOptions struct {
 	// Comment, if non-empty, is written as a leading "# " comment line before
 	// the preamble.
 	Comment string
+	// Fragment selects the syntax the hunk bodies' fragments are written in.
+	// §5 defines both images as parsed "by the target format's fragment
+	// parser", so a JSON patch may spell its keys `"port"` and a JSONC patch
+	// may spell a comment `// …`; the zero value keeps the format-neutral
+	// spelling this renderer has always emitted, which every format's fragment
+	// parser also accepts.
+	Fragment FragmentStyle
 }
+
+// FragmentStyle is RenderOptions.Fragment's vocabulary.
+type FragmentStyle string
+
+const (
+	// FragmentNeutral writes body lines in one format-neutral, YAML-shaped
+	// spelling. It round-trips through the parser for every format.
+	FragmentNeutral FragmentStyle = ""
+	// FragmentNative writes each body line in the list's own Format: JSON and
+	// JSONC keys and strings quoted, JSONC comments as `//`, YAML sequences
+	// with `- ` markers and block-style values. This is what the differ emits,
+	// so that a patch reads as a diff of the file it patches (§9.4-R5).
+	FragmentNative FragmentStyle = "native"
+)
 
 // ErrInexpressible reports a transform the mirror grammar cannot express
 // (Appendix C): op copy (C.2), or a remove with no accompanying test to
@@ -53,6 +75,7 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	dial := dialectFor(opt.Fragment, tl.Format)
 
 	var b strings.Builder
 	if opt.Comment != "" {
@@ -77,7 +100,7 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		lines, err := renderGroup(anchor, groups[anchor.String()])
+		lines, err := renderGroup(anchor, groups[anchor.String()], dial)
 		if err != nil {
 			return nil, err
 		}
@@ -129,8 +152,10 @@ func targetToken(s string) string {
 	return s
 }
 
-// anchorFor computes the hunk anchor a transform renders under.
-func anchorFor(t Transform) Path {
+// anchorFor computes the hunk anchor a transform renders under. owned is the
+// set of anchors some MUTATION in the same list already claims; it decides the
+// one ambiguous case, see testAnchor.
+func anchorFor(t Transform, owned map[string]bool) Path {
 	switch t.Op {
 	case OpAdd:
 		if !t.After.IsZero() {
@@ -155,7 +180,7 @@ func anchorFor(t Transform) Path {
 		if t.Exhaustive || freeAssert(t) {
 			return t.Path
 		}
-		return testAnchor(t.Path)
+		return testAnchor(t.Path, owned)
 	default: // remove, replace, copy(rejected before this is called on it)
 		if p, ok := t.Path.Parent(); ok {
 			return p
@@ -164,25 +189,33 @@ func anchorFor(t Transform) Path {
 	}
 }
 
-// testAnchor computes a plain test's hunk anchor. Normally that is the
-// test's own parent (a map field, or a scalar sequence element). But a
-// keyed-element field test (§9.1 step 2's "one test per listed field") is
-// TWO segments deeper than the sequence's own container — path
-// .../name=github/name — so its parent is the ELEMENT (.../name=github),
-// not the sequence; the anchor needs to go one level further up so every
-// field test for the same element lands in the same rendered hunk.
-func testAnchor(path Path) Path {
-	if n := path.Len(); n >= 2 && path.Segment(n-2).Kind == SegMatch {
-		if p, ok := path.Parent(); ok {
-			if gp, ok2 := p.Parent(); ok2 {
-				return gp
-			}
+// testAnchor computes a plain test's hunk anchor. Normally that is the test's
+// own parent (a map field, or a scalar sequence element).
+//
+// A path two segments below a sequence — .../name=github/command — is
+// genuinely ambiguous, and both readings are things the notation writes:
+//
+//	@@ /mcpServers @@                  a subset-matched context line for the
+//	  - name: github                   element, §9.1 step 2's "one test per
+//	                                   listed field"
+//	@@ /mcpServers/name=github @@      a body line of the element's OWN hunk,
+//	  command: npx                     which is where an inner edit anchors
+//
+// owned settles it: if some mutation in the same list already anchors at the
+// element, the element has a hunk and the test belongs in it; otherwise the
+// test is a subset line and hoists to the sequence, so that every field test
+// for one element lands in the same rendered hunk.
+func testAnchor(path Path, owned map[string]bool) Path {
+	parent, ok := path.Parent()
+	if !ok {
+		return path
+	}
+	if n := path.Len(); n >= 2 && path.Segment(n-2).Kind == SegMatch && !owned[parent.String()] {
+		if gp, ok2 := parent.Parent(); ok2 {
+			return gp
 		}
 	}
-	if p, ok := path.Parent(); ok {
-		return p
-	}
-	return path
+	return parent
 }
 
 // freeAssert reports a `?` assertion that carries its own path rather than
@@ -197,18 +230,32 @@ func freeAssert(t Transform) bool {
 // instead of being exiled to a hunk of its own (which would reorder the list
 // and break RT2). It falls back to its own path when the list is nothing but
 // assertions — an assert-only hunk (§7.4).
-func hostAnchor(ts []Transform, i int) Path {
+func hostAnchor(ts []Transform, i int, owned map[string]bool) Path {
 	for j := i - 1; j >= 0; j-- {
 		if !freeAssert(ts[j]) {
-			return anchorFor(ts[j])
+			return anchorFor(ts[j], owned)
 		}
 	}
 	for j := i + 1; j < len(ts); j++ {
 		if !freeAssert(ts[j]) {
-			return anchorFor(ts[j])
+			return anchorFor(ts[j], owned)
 		}
 	}
-	return anchorFor(ts[i])
+	return anchorFor(ts[i], owned)
+}
+
+// ownedAnchors collects the anchors some mutation — or a container-scoped
+// assertion — already claims, which is what testAnchor needs to settle a
+// keyed-element path's two readings.
+func ownedAnchors(ts []Transform) map[string]bool {
+	owned := map[string]bool{}
+	for i := range ts {
+		if ts[i].Op == OpTest && !ts[i].Exhaustive && !freeAssert(ts[i]) {
+			continue
+		}
+		owned[anchorFor(ts[i], nil).String()] = true
+	}
+	return owned
 }
 
 // groupByAnchor buckets transforms by their hunk anchor, preserving
@@ -217,13 +264,14 @@ func groupByAnchor(ts []Transform) (map[string][]Transform, []Path, error) {
 	groups := map[string][]Transform{}
 	var order []Path
 	seen := map[string]bool{}
+	owned := ownedAnchors(ts)
 	for i, t := range ts {
 		if t.Op == OpCopy {
 			return nil, nil, ErrInexpressible
 		}
-		a := anchorFor(t)
+		a := anchorFor(t, owned)
 		if freeAssert(t) {
-			a = hostAnchor(ts, i)
+			a = hostAnchor(ts, i, owned)
 		}
 		key := a.String()
 		if !seen[key] {
@@ -269,7 +317,7 @@ type contentEntry struct {
 
 // renderGroup renders one hunk's body lines for the transforms sharing one
 // anchor (§9.1's lowering, inverted).
-func renderGroup(anchor Path, ts []Transform) ([]string, error) {
+func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 	var order []string
 	bySeg := map[string]*contentEntry{}
 	// chainAfter/chainBefore let a second add that names the same sibling
@@ -331,44 +379,52 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			}
 			getEntry(rel[0]).replace = t
 		case OpAdd:
+			var key string
 			var seg Segment
 			if rel, ok := relSegs(anchor, t.Path); ok && len(rel) == 1 {
-				seg = rel[0]
+				seg, key = rel[0], rel[0].String()
 			} else {
 				seg = Segment{Kind: syntheticKind, Index: syntheticN}
+				key = fmt.Sprintf("+%d", syntheticN)
 				syntheticN++
 			}
-			var after, before *Segment
-			if !t.After.IsZero() {
-				if rel, ok := relSegs(anchor, t.After); ok && len(rel) == 1 {
-					after = &rel[0]
+			// A placement names a sibling by ADDRESS; the body knows it by slot
+			// key, and a sequence element added by this same hunk has no
+			// address of its own to be keyed by (its transform addresses the
+			// container). slotFor bridges the two.
+			slotFor := func(p Path) (string, bool) {
+				rel, ok := relSegs(anchor, p)
+				if !ok || len(rel) != 1 {
+					return "", false
 				}
+				return resolveSlot(order, bySeg, rel[0]), true
 			}
-			if !t.Before.IsZero() {
-				if rel, ok := relSegs(anchor, t.Before); ok && len(rel) == 1 {
-					before = &rel[0]
-				}
-			}
-			key := seg.String()
 			e := &contentEntry{seg: seg, add: t}
 			bySeg[key] = e
-			switch {
-			case after != nil:
-				target := after.String()
-				if chained, ok := chainAfter[target]; ok {
-					target = chained
+			switch target, ok := slotFor(t.After); {
+			case !t.After.IsZero() && ok:
+				dest := target
+				if chained, has := chainAfter[target]; has {
+					dest = chained
 				}
-				order = insertAfter(order, target, key)
-				chainAfter[after.String()] = key
-			case before != nil:
-				target := before.String()
-				if chained, ok := chainBefore[target]; ok {
-					target = chained
-				}
-				order = insertBefore(order, target, key)
-				chainBefore[before.String()] = key
+				order = insertAfter(order, dest, key)
+				chainAfter[target] = key
 			default:
-				order = append(order, key)
+				target, ok := slotFor(t.Before)
+				if t.Before.IsZero() || !ok {
+					order = append(order, key)
+					continue
+				}
+				// The second add sharing one `before:` sibling goes AFTER the
+				// first, not ahead of it: both land in front of the named
+				// sibling, in the order the list writes them, which is the
+				// order the applier will produce.
+				if chained, has := chainBefore[target]; has {
+					order = insertAfter(order, chained, key)
+				} else {
+					order = insertBefore(order, target, key)
+				}
+				chainBefore[target] = key
 			}
 		default:
 			return nil, ErrInexpressible
@@ -404,7 +460,7 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 				v = e.plainTest.Value
 			case len(e.fieldTests) > 0:
 				var err error
-				v, err = flowValueFromFields(e.seg, e.fieldTests)
+				v, err = subsetValueFromFields(e.fieldTests, dial)
 				if err != nil {
 					return nil, err
 				}
@@ -415,9 +471,9 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			// and the parser reads a `-`/`+` pair as two entries: the test
 			// carries the `-` line's qualifiers, the replace the `+` line's.
 			lines = append(lines, qualLines(e.test())...)
-			lines = append(lines, renderMemberLine('-', e.seg, v))
+			lines = append(lines, dial.memberLines('-', e.seg, v)...)
 			lines = append(lines, qualLines(e.replace)...)
-			lines = append(lines, renderMemberLine('+', e.seg, e.replace.Value))
+			lines = append(lines, dial.memberLines('+', e.seg, e.replace.Value)...)
 		case e.remove != nil:
 			var v Value
 			switch {
@@ -425,7 +481,7 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 				v = e.plainTest.Value
 			case len(e.fieldTests) > 0:
 				var err error
-				v, err = flowValueFromFields(e.seg, e.fieldTests)
+				v, err = subsetValueFromFields(e.fieldTests, dial)
 				if err != nil {
 					return nil, err
 				}
@@ -435,20 +491,20 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			// One `-` line carries both the test and the removal, so it takes
 			// the union of their qualifiers.
 			lines = append(lines, qualLines(e.test(), e.remove)...)
-			lines = append(lines, renderMemberLine('-', e.seg, v))
+			lines = append(lines, dial.memberLines('-', e.seg, v)...)
 		case e.add != nil:
 			lines = append(lines, qualLines(e.add)...)
-			lines = append(lines, renderMemberLine('+', e.seg, e.add.Value))
+			lines = append(lines, dial.memberLines('+', e.seg, e.add.Value)...)
 		case len(e.fieldTests) > 0:
-			v, err := flowValueFromFields(e.seg, e.fieldTests)
+			v, err := subsetValueFromFields(e.fieldTests, dial)
 			if err != nil {
 				return nil, err
 			}
 			lines = append(lines, qualLines(e.test())...)
-			lines = append(lines, renderMemberLine(' ', e.seg, v))
+			lines = append(lines, dial.memberLines(' ', e.seg, v)...)
 		case e.plainTest != nil:
 			lines = append(lines, qualLines(e.plainTest)...)
-			lines = append(lines, renderMemberLine(' ', e.seg, e.plainTest.Value))
+			lines = append(lines, dial.memberLines(' ', e.seg, e.plainTest.Value)...)
 		}
 	}
 	if len(lines) == 0 {
@@ -536,6 +592,49 @@ func qualLines(ts ...*Transform) []string {
 // in the rendered body order, and is never itself rendered as a key.
 const syntheticKind SegmentKind = 250
 
+// resolveSlot maps a placement's sibling segment to the body slot that holds
+// it. Ordinarily the segment IS the key. The exception is a sequence element
+// this same hunk adds: its slot is synthetic, because its transform addresses
+// the container rather than the element, so a later sibling naming it by
+// key-match is matched against the added VALUE — the same §4.2 comparison the
+// applier will make, and the same one the parser makes when it re-derives
+// placements from the rendered body.
+func resolveSlot(order []string, bySeg map[string]*contentEntry, seg Segment) string {
+	key := seg.String()
+	if _, ok := bySeg[key]; ok || seg.Kind != SegMatch {
+		return key
+	}
+	for _, k := range order {
+		e := bySeg[k]
+		if e != nil && e.add != nil && e.seg.Kind == syntheticKind && valueMatchesSegment(e.add.Value, seg) {
+			return k
+		}
+	}
+	return key
+}
+
+// valueMatchesSegment applies §4.2's key-match comparison to a value in hand,
+// as resolve.go's matchesSegment applies it to a parsed target node.
+func valueMatchesSegment(v Value, seg Segment) bool {
+	n := v.Node()
+	if n == nil {
+		return false
+	}
+	want := seg.Value.Value()
+	if seg.Name == "" {
+		return NodeValue(n).Equal(want)
+	}
+	if n.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == seg.Name {
+			return NodeValue(n.Content[i+1]).Equal(want)
+		}
+	}
+	return false
+}
+
 func insertAfter(order []string, target, key string) []string {
 	for i, k := range order {
 		if k == target {
@@ -562,11 +661,15 @@ func insertBefore(order []string, target, key string) []string {
 	return append(order, key)
 }
 
-// flowValueFromFields reconstructs a keyed element's whole value from its
-// individually-tested fields, for a "-" line's display or a member's context
-// rendering.
-func flowValueFromFields(elem Segment, fields []*Transform) (Value, error) {
+// subsetValueFromFields reconstructs a keyed element's subset-matched value
+// from its individually-tested fields, for a "-" line's display or a member's
+// context rendering. The style follows the dialect: a JSON body line spells the
+// subset as a flow object, a YAML one as a block mapping under its `- ` marker.
+func subsetValueFromFields(fields []*Transform, dial dialect) (Value, error) {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
+	if dial.block {
+		m.Style = 0
+	}
 	for _, f := range fields {
 		// The field's own name is its Path's last segment.
 		last := f.Path.Segment(f.Path.Len() - 1)
@@ -578,13 +681,49 @@ func flowValueFromFields(elem Segment, fields []*Transform) (Value, error) {
 	return NodeValue(m), nil
 }
 
-// renderMemberLine renders one context/"-"/"+" line for a direct-child
-// segment and its value.
-func renderMemberLine(margin byte, seg Segment, v Value) string {
-	var text string
+// dialect is the body-line spelling one rendered patch uses. §5 hands both
+// hunk images to the target format's own fragment parser, so the notation may
+// wear that format's syntax; the neutral dialect is the one spelling every
+// fragment parser accepts, and is what a caller who names no format gets.
+type dialect struct {
+	native bool
+	json   bool   // JSON/JSONC: quoted keys, quoted strings, flow collections
+	block  bool   // YAML: "- " sequence markers and block-style values
+	marker string // standalone comment marker, trailing space included
+}
+
+func dialectFor(style FragmentStyle, format FormatID) dialect {
+	if style != FragmentNative {
+		return dialect{marker: "# "}
+	}
+	switch format {
+	case FormatJSON, FormatJSONC:
+		return dialect{native: true, json: true, marker: "// "}
+	case FormatYAML:
+		return dialect{native: true, block: true, marker: "# "}
+	default:
+		return dialect{native: true, marker: "# "}
+	}
+}
+
+// memberLines renders one context/"-"/"+" body entry for a direct-child
+// segment and its value. It returns several lines when the value is a block
+// collection: an added node keeps the new document's own shape (§9.4-R5), and
+// every continuation line carries the same margin.
+func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
 	switch seg.Kind {
 	case SegKey:
-		text = escapeKey(seg.Name) + ": " + renderValueText(v)
+		body := d.valueLines(v)
+		if !d.isBlock(v) {
+			return d.marginate(margin, []string{d.key(seg.Name) + ": " + body[0]})
+		}
+		// A block collection lives under its key, not after it, even when it
+		// happens to be one line long — `env: GITHUB_TOKEN: x` is not YAML.
+		out := []string{d.key(seg.Name) + ":"}
+		for _, l := range body {
+			out = append(out, "  "+l)
+		}
+		return d.marginate(margin, out)
 	case SegComment:
 		// A comment node's value is `{comment: <text>}` (§4.5b, §11.10
 		// reduction 3); the body line shows the text, not the wrapper.
@@ -592,13 +731,137 @@ func renderMemberLine(margin byte, seg Segment, v Value) string {
 		if !ok {
 			body = valueText(v)
 		}
-		text = strings.TrimRight("# "+body, " ")
+		return d.marginate(margin, []string{strings.TrimRight(d.marker+body, " ")})
 	default:
-		// Sequence element (scalar or keyed flow object) and the synthetic
-		// container-add marker both render as a bare value line.
-		text = renderValueText(v)
+		// Sequence element, and the synthetic container-add marker.
+		body := d.valueLines(v)
+		if !d.block {
+			return d.marginate(margin, body)
+		}
+		out := make([]string, 0, len(body))
+		for i, l := range body {
+			if i == 0 {
+				out = append(out, "- "+l)
+				continue
+			}
+			out = append(out, "  "+l)
+		}
+		return d.marginate(margin, out)
 	}
-	return string(margin) + " " + text
+}
+
+func (d dialect) marginate(margin byte, lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = string(margin) + " " + l
+	}
+	return out
+}
+
+// key spells a member name on a body line. The neutral dialect keeps the
+// path-shaped spelling it has always emitted; a native one writes the name the
+// way the target format writes it.
+func (d dialect) key(name string) string {
+	switch {
+	case d.json:
+		return strconv.Quote(name)
+	case d.native && needsQuote(name):
+		return strconv.Quote(name)
+	}
+	return escapeKey(name)
+}
+
+// isBlock reports whether the value renders as YAML block lines rather than
+// inline. An empty collection has no block form — yaml writes it `{}` — so it
+// is inline whatever its style says.
+func (d dialect) isBlock(v Value) bool {
+	n := v.Node()
+	return d.block && n != nil && len(n.Content) > 0 &&
+		(n.Kind == yaml.MappingNode || n.Kind == yaml.SequenceNode) &&
+		n.Style&yaml.FlowStyle == 0
+}
+
+// valueLines renders a value as one or more body lines, never empty.
+func (d dialect) valueLines(v Value) []string {
+	n := v.Node()
+	switch {
+	case n == nil:
+		return []string{"null"}
+	case d.json:
+		return []string{jsonText(n)}
+	case d.isBlock(v):
+		return blockLines(n)
+	case d.block && n.Kind == yaml.ScalarNode:
+		return []string{yamlScalarText(n)}
+	}
+	return []string{renderValueText(v)}
+}
+
+// blockLines renders a collection in YAML block style, which is what makes an
+// added mapping come back out with the shape it had in the new document
+// (§9.4-R5) instead of collapsing into one flow line.
+func blockLines(n *yaml.Node) []string {
+	c := cloneNode(n)
+	stripComments(c)
+	var buf strings.Builder
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(c); err != nil {
+		return []string{renderValueText(NodeValue(n))}
+	}
+	_ = enc.Close()
+	return strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+}
+
+func stripComments(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	n.HeadComment, n.LineComment, n.FootComment = "", "", ""
+	for _, c := range n.Content {
+		stripComments(c)
+	}
+}
+
+// yamlScalarText keeps an explicitly double-quoted source scalar quoted, so a
+// string that would otherwise read back as a number or a boolean survives the
+// round trip as the string the author wrote.
+func yamlScalarText(n *yaml.Node) string {
+	if n.Style&yaml.DoubleQuotedStyle != 0 && n.ShortTag() == "!!str" {
+		return strconv.Quote(n.Value)
+	}
+	return scalarLiteral(n)
+}
+
+// jsonText renders a value as JSON. JSONC's own comments never reach here: a
+// comment is a body line of its own, not a value.
+func jsonText(n *yaml.Node) string {
+	switch n.Kind {
+	case yaml.MappingNode:
+		parts := make([]string, 0, len(n.Content)/2)
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			parts = append(parts, strconv.Quote(n.Content[i].Value)+": "+jsonText(n.Content[i+1]))
+		}
+		if len(parts) == 0 {
+			return "{}"
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	case yaml.SequenceNode:
+		parts := make([]string, 0, len(n.Content))
+		for _, c := range n.Content {
+			parts = append(parts, jsonText(c))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case yaml.AliasNode:
+		return jsonText(n.Alias)
+	}
+	switch n.ShortTag() {
+	case "!!bool", "!!int", "!!float":
+		return n.Value
+	case "!!null":
+		return "null"
+	}
+	return strconv.Quote(n.Value)
 }
 
 func renderFreeAssertion(t Transform) (string, error) {

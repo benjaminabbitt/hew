@@ -77,6 +77,9 @@ type run struct {
 	target    string
 	all       []hew.Transform
 	converged map[string]bool
+	// pending records the inserts planned so far, so a placement naming a
+	// sibling this same patch adds can still find it (§9.1 step 5's chain).
+	pending []pendingAdd
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot

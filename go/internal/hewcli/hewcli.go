@@ -32,12 +32,7 @@ func Run(argv []string, dir string, stdin io.Reader, stdout, stderr io.Writer) i
 	case "apply":
 		return runApply(argv[1:], dir, stdin, stdout, stderr)
 	case "diff":
-		// P4: the differ is not implemented in this slice. A silent
-		// success here would be exactly the failure mode the rest of hew
-		// exists to refuse, so this fails loud rather than printing an
-		// empty patch.
-		fmt.Fprintln(stderr, "hew: diff: not implemented (P4)")
-		return 2
+		return runDiff(argv[1:], dir, stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "hew: unknown command %q\n", argv[0])
 		return 2
