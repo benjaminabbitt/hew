@@ -47,6 +47,31 @@ func ValueOf(x any) (Value, error) {
 // NodeValue wraps an already-built YAML node.
 func NodeValue(n *yaml.Node) Value { return Value{node: n} }
 
+// CommentValue builds the value a transform at a comment address carries: the
+// `{comment: "…"}` mapping §11.10's reduction 3 leaves behind once the mirror
+// grammar's comment-attachment spelling is desugared into an op at a comment
+// address (§4.5b). The corpus pins the shape — see
+// jsonc/add-with-leading-comment's and yaml/set-scalar's transforms fixtures.
+func CommentValue(text string) Value {
+	return Value{node: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "comment"},
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: text},
+	}}}
+}
+
+// CommentText is CommentValue's inverse: the comment text a value carries, or
+// ok=false if the value is not a comment value.
+func CommentText(v Value) (string, bool) {
+	n := v.node
+	if n == nil || n.Kind != yaml.MappingNode || len(n.Content) != 2 {
+		return "", false
+	}
+	if n.Content[0].Value != "comment" || n.Content[1].Kind != yaml.ScalarNode {
+		return "", false
+	}
+	return n.Content[1].Value, true
+}
+
 // Equal compares two values structurally: node kind, resolved tag, scalar
 // text, and children in order. Presentation — flow vs block style, quoting
 // choice, comments, source position — is deliberately not compared, so that

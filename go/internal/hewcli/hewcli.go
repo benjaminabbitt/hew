@@ -14,6 +14,7 @@ import (
 	"github.com/hew-format/hew"
 	"github.com/hew-format/hew/hewjson"
 	"github.com/hew-format/hew/hewjsonc"
+	"github.com/hew-format/hew/hewyaml"
 	"github.com/hew-format/hew/internal/hewerr"
 )
 
@@ -186,6 +187,9 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 
 	var tls []hew.TransformList
 	var read []patchInput
+	// from[i] names the patch file section i was read from, so a diagnostic
+	// can cite "patch.hew:6" rather than a bare line number (§10.3).
+	var from []string
 	for _, in := range inputs {
 		src, rerr := readInput(dir, in, stdin)
 		if rerr != nil {
@@ -201,10 +205,13 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 			more, perr = hew.Parse(src)
 		}
 		if perr != nil {
-			printErr(stderr, perr)
+			printErr(stderr, withPatchFile(perr, in))
 			return exitFor(perr)
 		}
 		tls = append(tls, more...)
+		for range more {
+			from = append(from, in)
+		}
 	}
 
 	if f.target != "" {
@@ -237,7 +244,7 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 	}
 
 	var results []staged
-	for _, tl := range tls {
+	for i, tl := range tls {
 		before, format, rerr := readTarget(dir, tl)
 		if rerr != nil {
 			printErr(stderr, rerr)
@@ -250,6 +257,8 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 			after, aerr = hewjson.Apply(before, tl)
 		case hew.FormatJSONC:
 			after, aerr = hewjsonc.Apply(before, tl)
+		case hew.FormatYAML:
+			after, aerr = hewyaml.Apply(before, tl)
 		case "":
 			aerr = &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: tl.Target,
 				Detail: "no format declared and none inferred from the target's extension (§8.0)"}
@@ -257,7 +266,7 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 			aerr = noBinding(tl.Target, format)
 		}
 		if aerr != nil {
-			printErr(stderr, aerr)
+			printErr(stderr, withPatchFile(aerr, from[i]))
 			return exitFor(aerr)
 		}
 		results = append(results, staged{tl: tl, format: format, before: before, after: after})
@@ -425,6 +434,16 @@ func detectFormat(path string) hew.FormatID {
 	default:
 		return ""
 	}
+}
+
+// withPatchFile attributes an error to the patch file it came from, so the
+// provenance line reads "patch.hew:6" (§10.3). The library layer cannot fill
+// this in: it is handed bytes, not a path.
+func withPatchFile(err error, patchFile string) error {
+	if he, ok := hewerr.As(err); ok && he.PatchFile == "" {
+		he.PatchFile = patchFile
+	}
+	return err
 }
 
 // printErr writes a hew error to stderr in the §10.3 human diagnostic
