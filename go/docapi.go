@@ -467,7 +467,13 @@ func (d *Doc) Transforms() (TransformList, error) {
 	// empty transform list legal at the IR layer, because a patch with no hunks
 	// must apply as a no-op — but a Doc opened and never operated on is a caller
 	// bug, and returning an empty patch would hide it.
-	if len(out) == 0 {
+	//
+	// The test is on the STEPS RECORDED, not on the transforms produced. Today
+	// every step yields at least one transform, so the two agree; they stop
+	// agreeing the moment a step can legitimately lower to nothing, and then
+	// "your operations amounted to no change" is O38's no-op rather than an
+	// error. Only "you never asked for anything" is the caller bug.
+	if len(d.steps) == 0 {
 		return TransformList{}, irErr(d.name, "no operations (§A.0)")
 	}
 	tl := TransformList{Target: d.name, Format: d.format, Transform: out}
