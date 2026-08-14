@@ -5,41 +5,35 @@ import (
 	"io"
 
 	"github.com/benjaminabbitt/hew/go"
-	hewhcl "github.com/benjaminabbitt/hew/go/ext/hcl"
-	hewjson "github.com/benjaminabbitt/hew/go/ext/json"
-	hewjsonc "github.com/benjaminabbitt/hew/go/ext/jsonc"
-	hewtoml "github.com/benjaminabbitt/hew/go/ext/toml"
-	hewyaml "github.com/benjaminabbitt/hew/go/ext/yaml"
+	_ "github.com/benjaminabbitt/hew/go/ext/all"
 	"github.com/benjaminabbitt/hew/go/hewdiff"
 	"github.com/benjaminabbitt/hew/go/internal/harness"
 	"github.com/benjaminabbitt/hew/go/internal/hewcli"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
-// applyByFormat dispatches to the format bindings this slice ships (§8.1's
-// JSON, §8.2's JSONC, §8.3's YAML, §8.4's TOML, §8.5's HCL) and fails loud
-// (HEW021) for anything else, matching the spec's own registration model
-// (Appendix A.6) without the registry indirection a handful of bindings
-// doesn't need yet.
+// applyByFormat applies through whichever binding the registry holds for the
+// case's format (Appendix A.6), and fails loud (HEW021) when there is none.
+// "No extension claims this format" and "the extension that does ships no
+// applier" are one answer here because they are one fact for the caller —
+// nothing linked into this binary can apply it. Markdown is the second kind
+// while §8.7's evaluation is open.
+//
+// The blank ext/all import above is what makes any binding available at all:
+// the conformance runner is a program like any other, and what it can do is
+// what it linked (O35). This function was a switch over five packages before
+// the registry landed, and a sixth binding could have existed without the
+// corpus ever reaching it.
 func applyByFormat(target []byte, tl hew.TransformList, format string) ([]byte, error) {
 	if format != "" {
 		tl.Format = hew.FormatID(format)
 	}
-	switch tl.Format {
-	case hew.FormatJSON:
-		return hewjson.Apply(target, tl)
-	case hew.FormatJSONC:
-		return hewjsonc.Apply(target, tl)
-	case hew.FormatYAML:
-		return hewyaml.Apply(target, tl)
-	case hew.FormatTOML:
-		return hewtoml.Apply(target, tl)
-	case hew.FormatHCL:
-		return hewhcl.Apply(target, tl)
-	default:
+	b, ok := hew.Lookup(tl.Format)
+	if !ok || b.Applier == nil {
 		return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier,
 			Target: tl.Target, Detail: fmt.Sprintf("no binding for format %q (P3)", tl.Format)}
 	}
+	return b.Applier(target, tl)
 }
 
 // newBinding wires the implementation under test into the harness. Hooks

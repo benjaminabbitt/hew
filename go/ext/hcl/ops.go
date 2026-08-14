@@ -561,7 +561,7 @@ func (d *doc) nodeKind(rf *ref) (hew.NodeKind, error) {
 		return hew.KindMap, nil
 	}
 	if rf.item.kind == itemBlock {
-		return hew.KindBlock, nil
+		return KindBlock, nil
 	}
 	n, err := d.exprNode(rf.item.expr)
 	if err != nil {

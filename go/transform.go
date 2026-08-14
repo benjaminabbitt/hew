@@ -19,33 +19,50 @@ const (
 	FormatMarkdown FormatID = "markdown"
 )
 
-// Valid reports whether f is one of the six v0 formats.
+// Valid reports whether a binding for f is registered (Appendix A.6).
+//
+// It is a REGISTRY LOOKUP and not a switch over the six v0 formats, which is
+// O48's live defect: a hardcoded switch refuses a correctly-registered seventh
+// extension at the PARSER, before any binding is consulted, and makes §12's
+// documented-only families unaddable without touching the core. The six above
+// get no special standing: unregistered, they are as unknown as any other name,
+// which is what makes "linked" and "capable" the same fact (O35).
 func (f FormatID) Valid() bool {
-	switch f {
-	case FormatJSON, FormatJSONC, FormatYAML, FormatTOML, FormatHCL, FormatMarkdown:
-		return true
-	}
-	return false
+	_, ok := Lookup(f)
+	return ok
 }
 
 // NodeKind is the vocabulary of `? kind` / `test`+`kind` (§7.1, OP-28).
+//
+// Three kinds are universal and live here. The others — HCL's `block`,
+// Markdown's `section` — are EXTENSION-DECLARED (§8.8): an extension names them
+// in its Binding.Kinds and the registry is what makes them assertable. The
+// `.hewt` spelling is unchanged, and an unknown kind is HEW001 exactly as
+// before.
 type NodeKind string
 
 const (
-	KindMap     NodeKind = "map"
-	KindSeq     NodeKind = "seq"
-	KindScalar  NodeKind = "scalar"
-	KindBlock   NodeKind = "block"
-	KindSection NodeKind = "section"
+	KindMap    NodeKind = "map"
+	KindSeq    NodeKind = "seq"
+	KindScalar NodeKind = "scalar"
 )
 
-// Valid reports whether k is one of the five assertable node kinds.
+// Valid reports whether k is a universal kind or one a registered extension
+// declares.
+//
+// It cannot narrow to the ACTIVE extension, and that boundary is worth stating
+// rather than hiding: `? kind` is validated during lowering (§9.1), and the
+// lowerer holds a hunk, not a file section, so it has no format in hand. O48's
+// second recorded tension draws the line at the parser consulting an
+// extension's grammar; narrowing this check to one format would mean threading
+// the format through lowering, which is a change to §9's shape and not one this
+// ruling made.
 func (k NodeKind) Valid() bool {
 	switch k {
-	case KindMap, KindSeq, KindScalar, KindBlock, KindSection:
+	case KindMap, KindSeq, KindScalar:
 		return true
 	}
-	return false
+	return k != "" && declaresKind(k)
 }
 
 // OpKind is one of the reduced core's five operations (§9.6, §11.10).

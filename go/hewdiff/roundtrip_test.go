@@ -1,29 +1,22 @@
 package hewdiff
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/benjaminabbitt/hew/go"
-	hewhcl "github.com/benjaminabbitt/hew/go/ext/hcl"
-	hewjson "github.com/benjaminabbitt/hew/go/ext/json"
-	hewjsonc "github.com/benjaminabbitt/hew/go/ext/jsonc"
-	hewtoml "github.com/benjaminabbitt/hew/go/ext/toml"
-	hewyaml "github.com/benjaminabbitt/hew/go/ext/yaml"
+	_ "github.com/benjaminabbitt/hew/go/ext/all"
 )
 
+// apply closes RT1's loop through the same registry the differ under test uses
+// (Appendix A.6), so the round trip cannot accidentally be run against a
+// different binding than the one that produced the patch.
 func apply(target []byte, tl hew.TransformList) ([]byte, error) {
-	switch tl.Format {
-	case hew.FormatJSON:
-		return hewjson.Apply(target, tl)
-	case hew.FormatJSONC:
-		return hewjsonc.Apply(target, tl)
-	case hew.FormatTOML:
-		return hewtoml.Apply(target, tl)
-	case hew.FormatHCL:
-		return hewhcl.Apply(target, tl)
-	default:
-		return hewyaml.Apply(target, tl)
+	b, ok := hew.Lookup(tl.Format)
+	if !ok || b.Applier == nil {
+		return nil, fmt.Errorf("no applier registered for format %q", tl.Format)
 	}
+	return b.Applier(target, tl)
 }
 
 // RT1, the round-trip identity of §13.5: apply(parse(render(diff(old,new))), old)

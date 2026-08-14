@@ -12,13 +12,15 @@ import (
 	"strings"
 
 	"github.com/benjaminabbitt/hew/go"
-	hewhcl "github.com/benjaminabbitt/hew/go/ext/hcl"
-	hewjson "github.com/benjaminabbitt/hew/go/ext/json"
-	hewjsonc "github.com/benjaminabbitt/hew/go/ext/jsonc"
-	hewtoml "github.com/benjaminabbitt/hew/go/ext/toml"
-	hewyaml "github.com/benjaminabbitt/hew/go/ext/yaml"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
+
+// This package names no format package. Every format reaches it through the
+// registry (Appendix A.6), so which formats the CLI can handle is decided by
+// what cmd/hew imports for effect — today `_ ext/all` — and is answerable at
+// runtime with hew.Formats(). Before O35 this file held a switch over five
+// bindings and a second, JSON-only switch for documentFor; that the two could
+// disagree without anyone noticing is the gap a registry closes.
 
 // Run executes argv (without argv0) with relative paths resolved against
 // dir, and returns the process exit code (Appendix B.3): 0 applied, 1 did
@@ -249,21 +251,9 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 		}
 		var after []byte
 		var aerr error
-		switch format {
-		case hew.FormatJSON:
-			after, aerr = hewjson.Apply(before, tl)
-		case hew.FormatJSONC:
-			after, aerr = hewjsonc.Apply(before, tl)
-		case hew.FormatYAML:
-			after, aerr = hewyaml.Apply(before, tl)
-		case hew.FormatTOML:
-			after, aerr = hewtoml.Apply(before, tl)
-		case hew.FormatHCL:
-			after, aerr = hewhcl.Apply(before, tl)
-		case "":
-			aerr = &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier, Target: tl.Target,
-				Detail: "no format declared and none inferred from the target's extension (§8.0)"}
-		default:
+		if apply, ok := applierFor(format); ok {
+			after, aerr = apply(before, tl)
+		} else {
 			aerr = noBinding(tl.Target, format)
 		}
 		if aerr != nil {
@@ -375,23 +365,35 @@ func readTarget(dir string, tl hew.TransformList) ([]byte, hew.FormatID, error) 
 	return src, format, nil
 }
 
+// applierFor is the registry's answer to "can this build apply this format".
+// A format with no registered extension and a format whose extension ships no
+// applier are the same answer here — not found — because they are the same
+// fact for the caller: nothing linked into this binary can do it.
+func applierFor(format hew.FormatID) (hew.Applier, bool) {
+	b, ok := hew.Lookup(format)
+	if !ok || b.Applier == nil {
+		return nil, false
+	}
+	return b.Applier, true
+}
+
 // documentFor parses target bytes into the read-only view Resolve projects
-// against. It dispatches over exactly the formats that have a binding, so a
-// format hew cannot apply cannot silently produce an op list either.
+// against. It asks the registry for the same binding the applier came from, so
+// a format hew cannot apply cannot silently produce an op list either — which
+// is what the two hand-rolled switches could not guarantee.
 func documentFor(target string, format hew.FormatID, src []byte) (hew.Document, error) {
-	switch format {
-	case hew.FormatJSON:
-		doc, err := hewjson.Document(src)
-		if err != nil {
-			if he, ok := hewerr.As(err); ok {
-				he.Target = target
-			}
-			return nil, err
-		}
-		return doc, nil
-	default:
+	b, ok := hew.Lookup(format)
+	if !ok || b.Document == nil {
 		return nil, noBinding(target, format)
 	}
+	doc, err := b.Document(target, src)
+	if err != nil {
+		if he, ok := hewerr.As(err); ok {
+			he.Target = target
+		}
+		return nil, err
+	}
+	return doc, nil
 }
 
 func noBinding(target string, format hew.FormatID) error {
@@ -418,23 +420,13 @@ func writeOutput(dir, path string, data []byte, stdout io.Writer) error {
 	return os.WriteFile(filepath.Join(dir, path), data, 0o644)
 }
 
+// detectFormat is §8.0 over whatever extensions this build linked. The table
+// it used to hold moved to the extensions themselves (O48): a copy of it here
+// was a second place for a format's own filename claims to be stated, and the
+// two could drift.
 func detectFormat(path string) hew.FormatID {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".json":
-		return hew.FormatJSON
-	case ".jsonc":
-		return hew.FormatJSONC
-	case ".yaml", ".yml":
-		return hew.FormatYAML
-	case ".toml":
-		return hew.FormatTOML
-	case ".tf", ".hcl":
-		return hew.FormatHCL
-	case ".md", ".markdown":
-		return hew.FormatMarkdown
-	default:
-		return ""
-	}
+	f, _ := hew.DetectFormat(path)
+	return f
 }
 
 // withPatchFile attributes an error to the patch file it came from, so the

@@ -10,11 +10,16 @@ import (
 // resolves paths through, exposed read-only, so `--ops` and `--record` report
 // the addresses the applier would really have used rather than a second
 // parser's opinion of them.
-func Document(target []byte) (hew.Document, error) {
-	d, err := parseDoc(target)
+//
+// name is the target's LABEL and is used for diagnostics only — no I/O happens
+// here, and nothing about the name changes how the bytes are read. It is in the
+// signature because Appendix A.6 puts it there: an extension exported alongside
+// a registry entry has to have the registry's shape.
+func Document(name string, src []byte) (hew.Document, error) {
+	d, err := parseDoc(src)
 	if err != nil {
 		return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
-			Detail: "target does not parse as JSON: " + err.Error()}
+			Target: name, Detail: "target does not parse as JSON: " + err.Error()}
 	}
 	return jsonDocument{d: d}, nil
 }

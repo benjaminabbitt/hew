@@ -6,6 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	// hewcli names no format package: every binding reaches it through the
+	// registry (Appendix A.6). A test binary is a program too, so it has to
+	// link the extensions it expects to exercise — exactly as cmd/hew does.
+	_ "github.com/benjaminabbitt/hew/go/ext/all"
 )
 
 func writeFile(t *testing.T, dir, name, content string) {

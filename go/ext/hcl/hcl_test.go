@@ -724,7 +724,7 @@ func TestAssertKind(t *testing.T) {
 		path string
 		kind hew.NodeKind
 	}{
-		{`/provider/"aws"`, hew.KindBlock},
+		{`/provider/"aws"`, KindBlock},
 		{`/provider/"aws"/tags`, hew.KindSeq},
 		{`/provider/"aws"/meta`, hew.KindMap},
 		{`/provider/"aws"/region`, hew.KindScalar},

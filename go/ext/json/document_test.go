@@ -18,7 +18,7 @@ const docSrc = `{
 
 func mustDocument(t *testing.T, src string) hew.Document {
 	t.Helper()
-	d, err := Document([]byte(src))
+	d, err := Document("t.json", []byte(src))
 	if err != nil {
 		t.Fatalf("Document: %v", err)
 	}
@@ -26,10 +26,13 @@ func mustDocument(t *testing.T, src string) hew.Document {
 }
 
 func TestDocumentRejectsUnparseableTarget(t *testing.T) {
-	_, err := Document([]byte("{oops"))
+	_, err := Document("t.json", []byte("{oops"))
 	he, ok := hewerr.As(err)
 	if !ok {
 		t.Fatalf("want a *hewerr.Error, got %v", err)
+	}
+	if he.Target != "t.json" {
+		t.Fatalf("Target = %q, want the name the caller passed", he.Target)
 	}
 	if he.Code != hewerr.CodeTargetParse {
 		t.Fatalf("want HEW002, got %s", he.Code)
