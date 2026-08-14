@@ -256,6 +256,45 @@ func TestCommentTextStripsTheMarkerAndOneSpace(t *testing.T) {
 	}
 }
 
+func TestEndOfFileWithoutANewline(t *testing.T) {
+	src := "m:\n  a: 1 # tail"
+	d := mustDoc(t, src)
+	m := valueOf(t, d, "m")
+	if got := d.text(m.lookup("a").val); got != "1" {
+		t.Errorf("value span at EOF: %q", got)
+	}
+	if tc := d.trailingComment(m.lookup("a").val); tc == nil || tc.text != "tail" {
+		t.Errorf("trailing comment at EOF: %v", tc)
+	}
+	if e := m.lookup("a"); e.blockEnd != len(src) {
+		t.Errorf("block end at EOF: %d, want %d", e.blockEnd, len(src))
+	}
+	got, err := applyIR(t, src, "  - op: replace\n    path: /m/a\n    value: 2\n")
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if string(got) != "m:\n  a: 2 # tail" {
+		t.Errorf("apply at EOF: %q", got)
+	}
+}
+
+func TestTrailingBlankLine(t *testing.T) {
+	// A file whose last line is whitespace only: the scanners must stop at the
+	// end of the source rather than walking past it.
+	src := "a: 1\n   "
+	d := mustDoc(t, src)
+	if got := d.text(valueOf(t, d, "a")); got != "1" {
+		t.Errorf("span: %q", got)
+	}
+	got, err := applyIR(t, src, "  - op: add\n    path: /b\n    value: 2\n")
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if string(got) != "a: 1\nb: 2\n   " {
+		t.Errorf("apply: %q", got)
+	}
+}
+
 func TestScalarDocumentContinues(t *testing.T) {
 	// The root node is owned by no key, so a plain scalar document continues
 	// over any indented line at all.

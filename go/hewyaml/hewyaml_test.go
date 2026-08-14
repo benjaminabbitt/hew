@@ -401,6 +401,14 @@ func TestMergeInheritedKeyWithASingleSiteIsNoMatch(t *testing.T) {
 	he := mustFail(t, target, "  - op: test\n    path: /service_a/retries\n    value: 3\n",
 		hewerr.CodeNoMatch, "/service_a/retries")
 	mustContain(t, he, "no-match", "defaults", "merge key")
+	// The merge rule's own diagnostic survives ops that have a message of
+	// their own for a missing node.
+	he = mustFail(t, target, "  - op: replace\n    path: /service_a/retries\n    value: 4\n",
+		hewerr.CodeNoMatch, "/service_a/retries")
+	mustContain(t, he, "merge key")
+	if strings.Contains(he.Error(), "replace requires the node to exist") {
+		t.Errorf("an inherited key is not simply missing: %q", he.Error())
+	}
 }
 
 func TestNestedMergeChain(t *testing.T) {
@@ -840,6 +848,31 @@ func TestAfterImageDistinguishesRemovalFromWriting(t *testing.T) {
 	mustFail(t, "a: 2\n", records, hewerr.CodeStaleTarget, "/a")
 }
 
+func TestAfterImageOfAWholeMapping(t *testing.T) {
+	// The map is exactly what the replace would write, so the patch has
+	// already been applied — the container case of §10.6, where the
+	// after-image is a whole mapping rather than a scalar.
+	target := "m:\n  a: 1\n  b: 9\n"
+	records := "" +
+		"  - op: test\n    path: /m\n    value:\n      b: 2\n" +
+		"  - op: replace\n    path: /m\n    value:\n      a: 1\n      b: 9\n"
+	he := mustFail(t, target, records, hewerr.CodeAssertionFailed, "/m")
+	mustContain(t, he, "already applied")
+}
+
+func TestAfterImageOfAValuelessWrite(t *testing.T) {
+	// A write with no value at all has no after-image to hold, so the failing
+	// assert stays drift.
+	_, err := applyTL("a: 1\n",
+		hew.Transform{Op: hew.OpTest, Path: p("/a"), Value: val(t, 2)},
+		hew.Transform{Op: hew.OpAdd, Path: p("/a")},
+	)
+	he, ok := hewerr.As(err)
+	if !ok || he.Code != hewerr.CodeStaleTarget {
+		t.Fatalf("want HEW010, got %v", err)
+	}
+}
+
 func TestAfterImageNeedsTheWholeValue(t *testing.T) {
 	// The map has the written key AND another one, so the after-image does not
 	// hold: subset matching is for asserts, not for "already applied".
@@ -909,7 +942,7 @@ func TestQuotingRules(t *testing.T) {
 }
 
 func TestKeyMatchAgainstANonScalarField(t *testing.T) {
-	target := "s:\n  - name:\n      first: a\n  - name: b\n"
+	target := "s:\n  - other: 1\n  - name:\n      first: a\n  - name: b\n"
 	// name=b matches the scalar-valued element only; the map-valued one is not
 	// a candidate at all.
 	mustApply(t, target, "  - op: test\n    path: /s/name=b\n    value:\n      name: b\n", target)
