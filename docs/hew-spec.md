@@ -63,8 +63,8 @@ the later Rust port (P6) are conformant exactly insofar as they pass the same co
 11. [**Operations catalog** — every surveyed verb, in or out, and why](#11-operations-catalog)
 12. [Documented-only formats](#12-documented-only-formats)
 13. [The conformance corpus: three seams and two round-trip identities](#13-the-conformance-corpus)
-14. [Appendix A — proposed Go API surface](#appendix-a--proposed-go-api-surface)
-15. [Appendix B — proposed CLI surface](#appendix-b--proposed-cli-surface)
+14. [Appendix A — the Go API surface, including the document API](#appendix-a--the-go-api-surface)
+15. [Appendix B — the CLI surface](#appendix-b--the-cli-surface)
 16. [Appendix C — operations the mirror grammar cannot express](#appendix-c--operations-the-mirror-grammar-cannot-express-non-normative)
 17. [Decisions and residual open questions](#decisions-and-residual-open-questions)
 
@@ -1356,7 +1356,7 @@ transform list that a differ cannot produce is an IR that only half exists.
 
 **Inputs are pure content.** The core differ signature takes two byte sources of the same
 format. It has **zero git awareness** — no repository, no revision, no subprocess. Descriptor
-resolution (`HEAD:config.yaml`) is a CLI-boundary concern (§9.5, Appendix A.8), and keeping it
+resolution (`HEAD:config.yaml`) is a CLI-boundary concern (§9.5, Appendix A.7), and keeping it
 out of the core is load-bearing: it is what keeps the library embeddable and the Rust port's
 dependency list short.
 
@@ -1404,6 +1404,21 @@ author's formatting rather than re-emitting canonical form.
 a differ that emits delete-and-add for a detected move without saying so would make Appendix
 C.1's honest limitation into a silent data-shape change. (Note the asymmetry with the *apply*
 side, which does not detect moves at all: [O16](#decisions-and-residual-open-questions).)
+
+**R7 — The produced list's target is the OLD side** (ratified
+[O39](#p5--the-api-ratification-2026-08-14)). A differ performs no I/O and has no names of its
+own, so the label is the caller's to supply — but *which* label is not the caller's to choose:
+the patch applies to `old`, so `TransformList.Target` is old's label and the rendered `--- `
+line names old. Appendix B.2.1 states the two corollaries a CLI needs (a git anchor renders as
+its path component; a stdin side has no name). §13.3's `diff` seam is run with `old.<ext>` as
+the label for the same reason, which is also what makes a `diff` case's `expected.hew` directly
+usable as the `e2e` input of the same case — the round-trip identity RT1 asserts.
+
+**R8 — Two identical inputs produce a preamble-only patch, not an empty one** (ratified
+[O38](#p5--the-api-ratification-2026-08-14)). The differ returns a `TransformList` with a
+target and zero transforms; the renderer writes the preamble and the `--- ` line and stops.
+§10.2 is amended so that apply accepts it as a no-op, which is what makes `diff` and `apply`
+composable when the answer is "no change". See Appendix B.2.2.
 
 ### 9.5 Source descriptors (CLI layer only)
 
@@ -1465,7 +1480,7 @@ transforms:
 | `hew-transforms` | yes | Version integer. `1` here. Must be the first key. |
 | `target` | yes | Target path, same semantics as a `--- ` line (§2.2). |
 | `format` | no | Same resolution order as §2.2. |
-| `transforms` | yes | Ordered sequence. Empty is `HEW001` (an empty patch is refused, §10.2). |
+| `transforms` | yes | Ordered sequence. **May be empty**: a document with a target and no transforms is the IR of a no-op patch, and it applies as one (§10.2 as amended by [O38](#p5--the-api-ratification-2026-08-14)). The key itself is still required — omitting it is `HEW001`, because "no transforms" must be *said*, not inferred from a missing key. |
 
 A multi-target transform list is a multi-document YAML stream (`---`-separated), one document
 per target, applied in order under §10.5's per-file atomicity.
@@ -1611,12 +1626,34 @@ targets:
 | Key | Meaning |
 |---|---|
 | `hew-record` | Version integer. `1` here. Must be first. |
-| `applied_at` | RFC 3339 UTC. |
+| `applied_at` | RFC 3339 UTC. **Pinnable** — see below. |
 | `patch.source` | The patch's path or `-`. Informational. |
 | `patch.digest` | `sha256:` of the patch bytes **as read**, so a record can be tied to the exact patch that produced it. |
 | `targets[].before` / `.after` | `sha256:` of the target bytes as read and as written. **These are what make the record verifiable**: a later tool can tell whether the file still holds what hew left, or whether a human has edited it since. |
 | `targets[].committed` | `true` once the rename succeeded. Present and `false` only in the crash-prefix case (§10.5) if a record is written incrementally. |
 | `targets[].transforms` | The **resolved** transform list (§9.2) actually executed — indices concrete, key-matches resolved. Not the abstract form: the record states what happened to *this* file, not what the patch said in general. |
+
+**`applied_at` is pinnable, and a pinned record is reproducible** (ratified
+[O37](#p5--the-api-ratification-2026-08-14)). Every other field of a record is a function of
+its inputs: the digests are of bytes, the transforms are of the patch and the target. The
+timestamp was the one field that made an otherwise deterministic artifact differ on every run,
+which is a problem for exactly the callers most likely to keep records — a build that commits
+them gets a diff for free, and a test that pins one cannot.
+
+hew therefore honours the reproducible-build convention rather than inventing one, in this
+precedence:
+
+1. The library caller's explicit value (`WriteOptions.AppliedAt`, Appendix A.8).
+2. `HEW_APPLIED_AT` — an RFC 3339 timestamp.
+3. `SOURCE_DATE_EPOCH` — seconds since the Unix epoch, the cross-ecosystem spelling that
+   reproducible-builds tooling already sets.
+4. The system clock.
+
+The chosen instant is normalized to RFC 3339 **UTC** and written byte-exactly, so two applies
+of the same patch against the same target with the same pin produce byte-identical records. A
+malformed `HEW_APPLIED_AT` or `SOURCE_DATE_EPOCH` is a usage error (exit 2), never a silent
+fallback to the clock: a pin that quietly does not pin is worse than no pin, because the
+artifact still *looks* reproducible.
 
 **What the record is for, and what it is not.**
 
@@ -1635,7 +1672,12 @@ targets:
 - `hew revert <record.hewt>` — invert the resolved transforms, guarded by the `after` digests
   so a file edited since is refused rather than clobbered. The inversion rules (what is the
   inverse of an `add` with `on_conflict: keep`?) are a design task, not an implementation
-  detail, and they are not in v0.
+  detail, and they are not in v0. **The reversal patch (`hew apply --reversal`,
+  [O40](#p5--the-api-ratification-2026-08-14)) is the half of this that v0 does ship**, and it
+  is deliberately the half that needs no inversion rules at all: it diffs the after-image back
+  to the before-image, both of which existed, rather than reasoning backwards from an op. It
+  does not subsume `hew revert` — a reversal patch must be kept, while a record can be found
+  later — but it means "undo what hew just did" has an answer today.
 - **Ledger integration.** ctxloom's `ledger.Ledger` records *names* it owns per surface; a hew
   record records *transforms* it applied per target. The former is a set to reconcile, the
   latter a history to invert. Whether one subsumes the other is a P5 question, and answering
@@ -1676,10 +1718,33 @@ target, the patch file line number, and — where applicable — the expected an
 
 - Line-offset drift. There is no fuzz.
 - An already-applied patch (`HEW010`), absent `! idempotent`.
-- An empty patch file, or a file section with no hunks: `HEW001`. (`cli.runConfigWrite`'s
-  refuse-empty-patch rule, promoted to the format.)
+- **An empty patch file: `HEW001`.** (`cli.runConfigWrite`'s refuse-empty-patch rule, promoted
+  to the format.) See the amendment below for exactly where this line falls.
 - A hunk that matched nothing. SmPL's silent context-mode no-op is the single behavior this
   format was designed to not have.
+
+**Amended by [O38](#p5--the-api-ratification-2026-08-14): a file section with no hunks is a
+no-op, not an error.** The bullet above originally read "an empty patch file, *or a file
+section with no hunks*". The second clause is withdrawn, and the line now falls here:
+
+| Patch text | Result |
+|---|---|
+| Zero bytes, or whitespace only | `HEW001` — no `hew: 1`, so not a hew file at all |
+| Anything without a leading `hew: 1` (§2.1) | `HEW001` — same reason |
+| `hew: 1` and **no file section** | `HEW001` — a patch that names no target says nothing about any file |
+| `hew: 1` + a `--- ` target line + **no hunks** | **applies as a no-op. Exit 0, target byte-unchanged, no write.** |
+
+The distinction is *did the author say which file this is about*. A patch with a file section
+and no hunks is a complete, well-formed statement — "here is a target, and there is nothing to
+change about it" — and it is precisely the artifact `hew diff` produces for two identical
+inputs (Appendix B.2.2). A patch with no file section is an unfinished one, and refusing it
+keeps the rule this bullet was written for: a generating tool that emitted nothing must not be
+able to pass that off as a successful apply.
+
+Note what does *not* change. A no-op patch writes no file (there is nothing to write), takes
+no lock the applier would not otherwise take, and produces an application record with an empty
+`transforms` list if `--record` is given — a record that truthfully says nothing happened.
+`before` and `after` are equal digests, which is exactly what a verifier should see.
 
 ### 10.3 Message shape
 
@@ -2467,7 +2532,7 @@ the dialect is the removal of one directory.
 | `expected.<ext>` | success cases | The expected output, **compared byte for byte**. |
 | `expected-ops.json` | optional | The **resolved** RFC 6901 op list (§9.2), for interop pinning. |
 | `old.<ext>` / `new.<ext>` | `diff` seam | The two inputs. |
-| `expected.hew` | `diff` seam | The differ+renderer's expected output, byte-exact (§9.4-R1). |
+| `expected.hew` | `diff` seam | The differ+renderer's expected output, byte-exact (§9.4-R1). Its `--- ` line names **`old.<ext>`** (§9.4-R7): the patch applies to old, and the `apply-ir`/`e2e` seams of a round-trip case apply it to exactly that file. |
 | `stdout.txt` / `stderr.txt` | `cli` cases, optional | Expected streams. |
 
 ### 13.4 `case.yaml`
@@ -2513,6 +2578,42 @@ target_unchanged: true
 why: A failed apply leaves the target byte-identical and exits 1, patch(1)-style.
 spec: "§10.5, Appendix B"
 ```
+
+**`env:` — the pinned-environment block.** A `cli` case may declare an environment for the
+run. It exists for exactly one thing today, and the restriction is the point: **`env:` may
+only set inputs the spec names as environment-readable**, which is `HEW_APPLIED_AT` and
+`SOURCE_DATE_EPOCH` (§9.7, Appendix B.1) and nothing else. A corpus that could reach any
+environment variable would be a corpus that could pin behaviour the spec never promised.
+
+```yaml
+name: cli/record-pinned-time
+seams: [cli]
+kind: cli
+argv: ["apply", "-i", "--record", "out.hewt", "patch.hew"]
+env:
+  HEW_APPLIED_AT: "2026-08-14T09:31:07Z"
+exit: 0
+expected_record: expected-record.hewt   # which now MAY pin applied_at
+```
+
+A record fixture normally must *not* pin `applied_at` — a wall clock cannot be pinned, and a
+fixture that tries is itself the error. A case that pins the clock through `env:` inverts that
+rule for itself: `applied_at` becomes an ordinary compared field, and a byte-inexact match is a
+failure. That inversion is the whole assertion — "pinned" means pinned.
+
+**Reversal-patch fields.** A `cli` case exercising `--reversal`
+([O40](#p5--the-api-ratification-2026-08-14)) asserts the artifact the same way every other
+produced file is asserted, with `expected_targets` naming the reversal file and the fixture it
+must equal byte-for-byte. No new mechanism is needed and none is added: the reversal patch is
+just a file the run wrote.
+
+The *second* half of the claim — that applying the reversal restores the original — is
+**stated in the case's `why` and not asserted by the manifest**, because the manifest's `argv`
+is one invocation and this needs two. When the corpus grows a multi-invocation `cli` form, that
+assertion moves into the manifest; until then, RT1 already pins the identity it depends on
+(`apply(parse(render(diff(a, b))), a) == b`, §13.5) over every implement format, and the
+reversal patch is that same composition with the arguments exchanged. Saying so in prose is
+honest; asserting it with machinery that does not exist would not be.
 
 ### 13.5 The round-trip identities
 
@@ -2585,8 +2686,23 @@ the conventions below are the ones the human set directly in the standalone repo
 
 The Go implementation binds these as `just corpus-go` (registry honoured) and
 `just corpus-go-strict` (`HEW_CORPUS_NO_SKIPS=1`). The `markdown/*` rule is the one entry
-expected to outlive the milestones: it is gated on [O29](#residual--genuinely-open), not on
+expected to outlive the *milestones*: it is gated on [O29](#residual--genuinely-open), not on
 work in progress, and it will be deleted or the family removed when §8.7 is evaluated.
+
+**Ratified-but-unbuilt behaviour is carried the same way, and this is the mechanism that makes
+a spec-first ratification honest.** When a ruling lands before its implementation — O37's
+pinned `applied_at`, O38's no-op patch, O39's diff target, O40's reversal patch — the corpus
+grows the case *first*, and a skip rule records that the case is red because the ruling is
+newer than the code. The rule's reason must name the ruling, so the registry reads as a list
+of promises outstanding rather than a list of tests that happen to fail:
+
+```
+{Case: "cli/apply-reversal", Seam: "cli",
+ Reason: "P5: ratified, implementation pending — O40 (hew apply --reversal)"}
+```
+
+The two ratchets do the rest: the rule dies the moment the behaviour lands (a rule matching
+nothing is a build failure), and the strict gate reports the whole outstanding set at once.
 
 ### 13.8 Acceptance criteria and the quality bar
 
@@ -2614,27 +2730,219 @@ not in the implementation's own tests.
 
 ---
 
-## Appendix A — proposed Go API surface
+## Appendix A — the Go API surface
 
-**This appendix is checkpoint-1 material: signatures for human review, not code.** No file in
-this branch implements any of it. The surface is derived, in order: operations catalog (§11) →
-IR schema (§9.6) → these signatures. Nothing here introduces a concept the catalog does not.
+**Ratification status.** This appendix was checkpoint-1 material — signatures for human review,
+not code. **It is now ratified**, in two halves that must be read differently:
 
-**Package path:** `github.com/ctxloom/ctxloom/internal/hew`, with format bindings at
-`internal/hew/hewjson`, `hewjsonc`, `hewyaml`, `hewtoml`, `hewhcl`, `hewmarkdown`, and the CLI at
-`cmd/hew`. The core package imports nothing from ctxloom (architecture principle 6: it is
-extraction-ready for the standalone repo and the Rust port). Filesystem, git and ledger
-integration live in `internal/hew/hewfs` and `cmd/hew`, never in the core.
+- **Shipped and normative.** A.1–A.10 describe the surface the Go implementation actually
+  exports. Where the implementation deviated from the checkpoint-1 draft, the deviation is
+  ratified in place with an O-number and the draft text is corrected, not preserved: a spec
+  that describes signatures nobody wrote is worse than no spec.
+- **Ratified and pending.** A.0 (the document API), A.6's registry, A.8's `hewfs`, and the
+  `--reversal` / pinned-`applied_at` surfaces are decided but **not implemented**. The
+  conformance corpus carries their cases and the Go runner's skip registry (§13.7) records
+  each as pending with the ruling that decided it. A rule that stops matching is deleted;
+  that is how this half becomes the first half.
+
+**Package path:** `github.com/benjaminabbitt/hew/go`, with format bindings at `.../hewjson`,
+`hewjsonc`, `hewyaml`, `hewtoml`, `hewhcl`, `hewmarkdown`, the differ front end at `hewdiff`,
+and the CLI at `cmd/hew`. **The core package imports no host project** — not ctxloom, not
+anything else: it is a standard's reference implementation and a Rust port's peer. Filesystem
+and git integration live in `hewfs` and the CLI's `hewsource`, never in the core. (This
+supersedes the draft's `github.com/ctxloom/ctxloom/internal/hew` path, which named the
+extraction that has since happened.)
 
 **The four components map to four entry points**, and the type that connects them is
 `TransformList`:
 
 | Component | Entry point | Side |
 |---|---|---|
-| Parser | `hew.Parse([]byte) (*Patch, error)` + `(*Patch).Transforms()` | notation, format-agnostic |
+| Parser | `hew.Parse([]byte) ([]TransformList, error)` | notation, format-agnostic |
 | Renderer | `hew.Render(TransformList, RenderOptions) ([]byte, error)` | notation, format-agnostic |
-| Applier | `hew.Applier` interface, one impl per format | format |
-| Differ | `hew.Differ` interface, one impl per format | format |
+| Applier | one `Apply(target []byte, tl TransformList)` per format package | format |
+| Differ | one `DiffTree(src []byte)` per format package, driven by `hewdiff.Diff` | format |
+
+**And one entry point above all four**, for the caller who has a file rather than a patch:
+`hew.Open` (A.0). It is the surface a host program uses; the four components are what it is
+built out of.
+
+### A.0 The document API — editing a file without writing a patch
+
+**Ratified (human, 2026-08-14), [O34](#p5--the-api-ratification-2026-08-14).** A host program
+that wants to change a config file does not want to build a `[]Transform` by hand. Today it
+does exactly that — ctxloom's `config-write` hand-rolls a hundred lines of `hew.Transform{Op:
+hew.OpAdd, Path: prefix.Append(hew.Segment{Kind: hew.SegKey, Name: k}), …}`, plus its own
+record marshaller, plus its own atomic write — and every line of it is this appendix's
+absence, not the caller's invention. A.0 is the surface that replaces it.
+
+The API is one sentence of Go per edit, and it is built on three rules, each of which is a
+restatement of a rule the format already has.
+
+**Rule 1 — format appears at the open boundary and nowhere else.** §8.0 is normative here:
+detection is from the **name**, never from the content, and an explicit override is legal only
+where a patch would carry `format=`. The name is what `Open` takes; the override is what
+`As` supplies. After the document is open, no method mentions a format again, ever.
+
+```go
+// Open reads name from fsys and returns a Document bound to the format §8.0
+// detects FROM THE NAME. Content is never sniffed (§8.0). A name whose format
+// cannot be determined is HEW021 — fixable at this call site, and only here.
+func Open(fsys fs.FS, name string, opts ...OpenOption) (*Doc, error)
+
+// OpenBytes is the same for content already in hand. name is still required
+// and still the only thing detection reads: bytes have no name of their own,
+// and inventing one from their shape is the sniffing §8.0 forbids.
+func OpenBytes(name string, src []byte, opts ...OpenOption) (*Doc, error)
+
+// As overrides detection, and is the exact analogue of a target line's
+// `format=` attribute (§2.2) — the one place the spec already lets a human
+// out-vote the extension.
+func As(format FormatID) OpenOption
+```
+
+```go
+doc, err := hew.Open(os.DirFS(home), ".claude/settings.json")   // jsonc, by well-known name
+doc, err := hew.OpenBytes("config", src, hew.As(hew.FormatTOML)) // no extension: say so
+```
+
+**Rule 2 — addressing is the §4 path, and there is only the one language.** A document is
+addressed with the same string a hunk anchor is addressed with, so the thing a reviewer reads
+in a `.hew` file and the thing a programmer types in Go are the same artifact:
+
+```go
+func (d *Doc) At(path string) *Sel     // parses a §4 path; a bad path is HEW001, at this call
+func (d *Doc) AtPath(p Path) *Sel      // the pre-parsed form, for programmatic construction
+```
+
+```go
+doc.At("/mcpServers/name=github/command").Replace("npx")
+```
+
+Paths that are computed rather than written are built from typed segment constructors — thin
+named wrappers over the `Segment` literals A.1 already exports — and never by string
+concatenation, which would put escaping (`~0`, `~1`, `~2` — §4.1, [O5](#ratified-by-the-coordinator-2026-08-14))
+in the caller's hands:
+
+```go
+func Key(name string) Segment                    // §4.1
+func Index(i int) Segment                        // §4.1
+func Append() Segment                            // §4.1's "-"
+func MatchKey(field string, v any) Segment       // §4.2  name=value
+func MatchValue(v any) Segment                   // §4.2  =value
+func Label(s string) Segment                     // §4.3
+func Heading(level int, text string) Segment     // §4.5
+func Block(kind BlockKind, ord int) Segment      // §4.5
+func Marker(name string) Segment                 // §4.5
+func Optional(s Segment) Segment                 // §4.4's trailing `?`
+
+p := hew.NewPath(hew.Key("mcpServers"), hew.MatchKey("name", "github"), hew.Key("command"))
+doc.AtPath(p).Replace("npx")
+```
+
+**There is deliberately no navigation vocabulary** — no `doc.Key("mcpServers").Match("name",
+"github")` method chain. It would be a second address language, differing from the first in
+spelling but not in meaning, and a reviewer diffing the Go against the `.hew` would have to
+translate between them. One language, two encodings (text and typed), and `AtPath(ParsePath(s))`
+is the identity.
+
+**Rule 3 — reads become asserts.** This is the rule that makes the fluent API *the same thing*
+as a patch rather than a convenience wrapper over the IR.
+
+> **Because the document is open, an operation that names an existing node records the value
+> it found as a `test` transform beside the write it performs.** `Replace(v)` on a node
+> currently holding `u` compiles to `{test, p, u}` then `{replace, p, v}` — which is §9.1's
+> lowering, with the before-image taken from the document instead of from a `-` line.
+
+A patch derived this way therefore carries the same loud staleness a hand-written hunk carries:
+re-applying it against a file that has since drifted fails `HEW010`, and re-applying it against
+a file already holding `v` fails `HEW014`/`HEW011` per §10.6. The builder never produces a
+transform an author could not have written; **its output is ordinary IR and is indistinguishable
+from parsed-patch IR**, which is the property that keeps the corpus's `apply-ir` seam meaningful
+for both producers.
+
+The two documented *unasserted* forms are the catalog's own, and they are spelled as themselves
+so that "I did not assert the prior state" is visible in the code exactly as `! upsert` and
+`! default` make it visible in a patch (§7.7):
+
+| Method | Records | Catalog |
+|---|---|---|
+| `Replace(v)` | `test`(current) + `replace` | OP-01 |
+| `Set(v)` | `add` with `on_conflict: replace` — **no assert** | OP-03 (`! upsert`) |
+| `Default(v)` | `add` with `on_conflict: keep` — no assert, no write if present | OP-04 (`! default`) |
+| `Add(v)` | `add`, `on_conflict: fail` | OP-02 |
+| `Remove()` | `test`(current) + `remove` | OP-05 |
+
+`Set` is the one mapping write that asserts nothing about the prior state and therefore cannot
+detect drift — §7.7's warning applies verbatim, and a linter that warns on `! upsert` should
+warn on `Set` for the same reason.
+
+**The surface**
+
+```go
+type Doc struct{ /* unexported */ }
+
+func (d *Doc) Name() string
+func (d *Doc) Format() FormatID
+
+type Sel struct{ /* unexported */ }
+
+// Writes. Each returns the Sel so qualifiers chain.
+func (s *Sel) Replace(v any) *Sel   // OP-01: asserted
+func (s *Sel) Set(v any) *Sel       // OP-03: upsert, unasserted
+func (s *Sel) Default(v any) *Sel   // OP-04: defaulting, unasserted
+func (s *Sel) Add(v any) *Sel       // OP-02: must not exist
+func (s *Sel) Remove() *Sel         // OP-05
+
+// Placement for Add (OP-11 … OP-13). Abstract sibling addresses, never
+// indices — the same relative placement §9.1 step 5 emits.
+func (s *Sel) After(sibling string) *Sel
+func (s *Sel) Before(sibling string) *Sel
+
+// Assertions. Each is an assert-only transform (§7.4) and writes nothing.
+func (s *Sel) Assert(v any) *Sel        // OP-24 `? expect`
+func (s *Sel) AssertAbsent() *Sel       // OP-25 `? absent`
+func (s *Sel) AssertCount(n int) *Sel   // OP-27 `? count`
+func (s *Sel) AssertKind(k NodeKind) *Sel // OP-28 `? kind`
+func (s *Sel) AssertExhaustive() *Sel   // OP-26 `? exhaustive`
+
+// Qualifiers, in the vocabulary §7 already defines. They ride the transforms
+// this Sel has recorded, exactly as a `!` directive rides a hunk's.
+func (s *Sel) Optional() *Sel                 // §7.6
+func (s *Sel) Idempotent() *Sel               // §7.5
+func (s *Sel) Anchor(mode AnchorMode) *Sel    // §8.3, OP-40 / OP-41
+func (s *Sel) Surface(sf Surface) *Sel        // §8.4, OP-38
+```
+
+**Terminals.** A `Doc` is not an editor of bytes; it is a recorder of transforms with a target
+to resolve them against. Nothing has happened until a terminal is called, and each terminal
+names exactly which artifact it produces:
+
+```go
+// Transforms is the IR (§9.2 abstract form). Everything else is derived from it.
+func (d *Doc) Transforms() (TransformList, error)
+
+// RenderPatch writes a reviewable .hew file. Because the document is open,
+// the renderer has real siblings to draw context from, so the patch carries
+// genuine context lines at the §9.4-R2 radius — the same artifact `hew diff`
+// produces, from the same renderer.
+func (d *Doc) RenderPatch(opt RenderOptions) ([]byte, error)
+
+// Bytes applies the recorded transforms to the opened content and returns the
+// patched bytes. All-or-nothing (§10.5): on any error the result is nil.
+func (d *Doc) Bytes() ([]byte, error)
+
+// Write commits Bytes() back to the file the document was opened from,
+// through hewfs's atomic temp-and-rename (§10.5, A.8). Requires a writable
+// filesystem; a Doc opened from an fs.FS or from bytes returns an error
+// naming that rather than guessing a destination.
+func (d *Doc) Write(opt ...WriteOption) error
+```
+
+The terminal set is the honest statement of what this API is: **a patch producer that happens
+to be able to apply its own output.** `RenderPatch` is not a debugging aid — it is how a
+program that edits a user's file leaves behind a reviewable statement of what it did, in the
+same notation a human would have written by hand.
 
 ### A.1 The IR — `TransformList`
 
@@ -2678,21 +2986,26 @@ type Transform struct {
     Before Path
     After  Path
 
-    // Exactly one of these four selects the assertion mode on OpTest.
-    // Value (above) | Absent | Count | NodeKind
-    Absent   bool
-    Count    *int
-    NodeKind *NodeKind
+    // Exactly one of these five selects the assertion mode on OpTest.
+    // Value (above) | Absent | Count | NodeKind | Exhaustive
+    Absent     bool
+    Count      *int
+    NodeKind   *NodeKind
+    Exhaustive bool // OP-26; always paired with Count (§9.1 step 3)
 
     OnConflict OnConflict // OpAdd only: OP-02 / OP-03 / OP-04
     Anchor     AnchorMode // OP-40 / OP-41, YAML alias policy
     Surface    Surface    // OP-38, TOML placement
 
     // The two tolerance flags, and there are no others.
-    Optional   bool // OP-06
-    Idempotent bool // §7.5
+    Optional   bool // OP-06 — legal on remove and test
+    Idempotent bool // §7.5 — legal on test, add, remove and replace (O32)
 
-    PatchLine int // provenance into the .hew file; emitted, ignored on input
+    // Provenance. None of it is serialized, none of it is compared by Equal:
+    // it exists so a diagnostic can point at the line a reviewer must fix.
+    PatchLine  int  // the line this transform was lowered from
+    AnchorPath Path // the `@@ … @@` address of the hunk it came from (O31)
+    AnchorLine int  // the line that address is written on (O31)
 }
 
 type OpKind string
@@ -2724,49 +3037,69 @@ type Surface    string // "", "table", "dotted"
 func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error)
 
 type ResolvedOp struct {
-    Op         OpKind
-    Path       string // RFC 6901 pointer
-    From       string
-    Value      Value
+    Op    OpKind
+    Path  string // RFC 6901 pointer
+    From  string // OpCopy only
+    Value Value
+
+    // Every assertion mode OpTest can carry, carried through unchanged.
+    // NodeKind is here for the reason Exhaustive always was (O33): the
+    // resolved list is what `--record` embeds (§9.7), and a record that
+    // drops an assertion the applier really evaluated UNDER-REPORTS what
+    // happened to the file. A record must not under-report.
     Absent     bool
-    Exhaustive bool
     Count      *int
+    NodeKind   *NodeKind
+    Exhaustive bool
 }
 ```
+
+**Provenance, and why it is on the record rather than beside it** ([O31](#p5--the-api-ratification-2026-08-14)).
+`AnchorPath`/`AnchorLine` exist because a resolution failure *inside* an anchor is the
+**anchor's** failure: when `@@ /provider/"google" @@` matches two blocks, the reviewer must be
+sent to the `@@` line, not to the first context line that happened to ask a question. Two
+corpus cases pin exactly that reporting (`hcl/repeated-label-ambiguous`,
+`markdown/duplicate-heading`), and a transform that does not know which hunk it came from
+cannot produce it. The fields are provenance in the strict sense — not serialized to `.hewt`
+(§9.6 already rules `line` emitted-and-ignored), not compared by `Equal`, and therefore
+invisible to every corpus byte comparison.
+
+**`! idempotent` on a `test`** ([O32](#p5--the-api-ratification-2026-08-14)). §7.5's rule is
+stated over the *hunk*: "if the before-image does not match but the after-image does, the hunk
+is satisfied". A hunk lowers to a before-image `test` **and** a write, so the tolerance has to
+reach both records — an `Idempotent` flag that rode only the write would leave the `test` it
+was lowered beside failing loudly, and the hunk could never converge. Hence the two-grant
+form: `Idempotent` is legal on `test`, `add`, `remove` and `replace`. `copy` is the one
+exclusion, because a copy asserts nothing about its destination and so has nothing to tolerate.
 
 ### A.2 Parser — notation → IR
 
 ```go
-// Parse reads a hew patch document. It performs NO I/O, opens no target, and knows
-// no format mechanics. Its output is fully determined by the patch text.
-func Parse(src []byte) (*Patch, error)
-
-type Patch struct{ /* unexported */ }
-
-func (p *Patch) Version() int
-func (p *Patch) Files() []*FileSection
-
-type FileSection struct{ /* unexported */ }
-
-func (f *FileSection) Target() string
-func (f *FileSection) Format() FormatID
-func (f *FileSection) Line() int
-
-// Transforms is the parser's product: the abstract IR for this file section.
-// Context lines and "-" lines have already become OpTest records here — loud
-// staleness is established at parse time, not at apply time (spec §9.0).
-func (f *FileSection) Transforms() TransformList
-
-// Hunks is retained for diagnostics and linting only. The applier never sees it.
-func (f *FileSection) Hunks() []*Hunk
-
-type Hunk struct{ /* unexported */ }
-
-func (h *Hunk) Anchor() Path
-func (h *Hunk) Line() int
-func (h *Hunk) AssertOnly() bool // no +/- lines (§7.4)
-func (h *Hunk) Transforms() []Transform
+// Parse reads a hew patch document and returns one TransformList per file
+// section (§2.2), in file order. It performs NO I/O, opens no target, and
+// knows no format mechanics: its output is fully determined by the patch text.
+func Parse(src []byte) ([]TransformList, error)
 ```
+
+**Ratified deviation ([O30](#p5--the-api-ratification-2026-08-14)): the draft's `*Patch`,
+`*FileSection` and `*Hunk` types are dropped, and `Parse` returns the IR directly.** The draft
+placed three object types between the caller and the thing the caller wanted, and every one of
+their accessors was either a field of `TransformList` already (`Target`, `Format`) or a
+question no consumer asked. `Patch.Version()` reports a number the parser has already refused
+to proceed without (§2.1). `[]TransformList` is what the parser produces, what the applier
+takes, and what §13.1's `parse` seam pins — so it is what `Parse` returns.
+
+**The one capability this drops, named honestly: hunk introspection.** `FileSection.Hunks()`
+and `Hunk.AssertOnly()` were the surface a **linter** would use — the tool §7.6 asks for when
+it says "a conformant linter should warn on every use" of `! optional`, and the tool
+[O17](#ratified-by-the-coordinator-2026-08-14) promised. Lowering is lossy in exactly that
+direction: the IR knows a transform is `Optional`, but not which hunk it shared a body with,
+nor whether that hunk wrote anything. `Transform.AnchorPath`/`AnchorLine` recover the hunk
+*address* (A.1), which is enough for diagnostics and not enough for a linter.
+
+**This is recorded as deferred, not resolved.** A linter is not in v0, and when one is
+specified, the shape it needs — a hunk-level view retained alongside the IR — is an additive
+parser output, not a change to what `Parse` returns. Nothing here forecloses it.
 
 ### A.3 Renderer — IR → notation
 
@@ -2851,12 +3184,21 @@ type Differ interface {
 
 type DiffOptions struct {
     // KeyFields are the candidate identity fields for keyed-array addressing,
-    // tried in order (§9.4-R4). Default: {"name", "id", "key"}.
+    // tried in order (§9.4-R4). Empty means {"name", "id", "key"}.
     KeyFields []string
 
+    // Context is the sibling radius (§9.4-R2). Zero means the default of 1;
+    // ContextNone (-U0) and ContextAll (-U all) spell the two ends.
+    Context int
+
     // Target is stamped into the produced TransformList; it is a label, not a path
-    // the differ reads.
+    // the differ reads. It is the OLD side's label (O39): the patch applies to old.
     Target string
+
+    // Note receives the remarks §9.4-R4 requires when the differ falls back to
+    // index addressing. The CLI renders them as the patch's leading `#` comment;
+    // a nil Note discards them.
+    Note func(string)
 }
 ```
 
@@ -2874,23 +3216,65 @@ const (
     FormatMarkdown FormatID = "markdown"
 )
 
-// A Binding is a format's two halves plus its detection rule. A binding may ship an
-// Applier without a Differ (v0 ships exactly that: Differ is P4).
+// A Binding is a format's three halves plus its detection rule: the applier,
+// the differ, and the read-only Document view Resolve (§9.2) and the document
+// API (A.0) project against.
 type Binding struct {
-    Applier Applier
-    Differ  Differ // nil until P4
-    Detect  DetectRule
+    Applier  Applier
+    Differ   Differ
+    Document func(name string, src []byte) (Document, error)
+    Detect   DetectRule
 }
 
 type DetectRule struct {
     Extensions     []string
-    WellKnownNames []string
+    WellKnownNames []string // O4: binding DATA, not spec
 }
 
 func Register(id FormatID, b Binding)
 func Lookup(id FormatID) (Binding, bool)
+
+// DetectFormat implements §8.0 over the registered bindings' DetectRules. It
+// reads the NAME and never the content. Two bindings claiming one name, or no
+// binding claiming it, is HEW021 — the caller's cue to say `format=` (or
+// hew.As, A.0), which is the only override §8.0 allows.
 func DetectFormat(filename string) (FormatID, bool)
 ```
+
+**Ratified ([O35](#p5--the-api-ratification-2026-08-14)): A.6 becomes real, and bindings
+self-register from `init()` on import.** The draft specified a registry and the implementation
+grew a `switch` on `FormatID` in three places instead (the corpus binding, the CLI's applier
+dispatch, the CLI's document dispatch), which is how the JSON-only `documentFor` gap survived
+unnoticed. A registry with one entry point makes "which formats can this build actually do"
+answerable, and answerable is what a `--format` error message needs.
+
+```go
+package hewyaml   // and hewjson, hewjsonc, hewtoml, hewhcl, hewmarkdown
+
+func init() { hew.Register(hew.FormatYAML, hew.Binding{ /* … */ }) }
+
+// Document is the binding's read-only view, exported so a caller that already
+// knows the format can skip detection.
+func Document(name string, src []byte) (hew.Document, error)
+```
+
+```go
+import _ "github.com/benjaminabbitt/hew/go/hewall"   // every v0 binding
+import _ "github.com/benjaminabbitt/hew/go/hewjson"  // or exactly the ones you want
+```
+
+**Precedent, and the alternative that was rejected.** Import-for-effect registration is Go's
+own answer to this problem — `image/png`, `database/sql`, `net/http/pprof` — and it is the one
+that lets a program pay for the formats it uses: a tool that only edits `.json` should not link
+an HCL parser. `hewall` exists so the common case is still one import.
+
+The alternative — **explicit registration**, `hew.Register(hew.FormatYAML, hewyaml.Binding())`
+at program start — was considered and **rejected**. It reads better in isolation, and it fails
+in the only way that matters: a program that forgets one line gets `HEW021 unsupported-format`
+for a `.yaml` file it can plainly see, at runtime, from a library that was linked and ready.
+Import-for-effect makes the dependency and the capability the same fact. The cost is real and
+stated: an unused blank import is invisible to `goimports`, and a linker that could have
+dropped a binding cannot.
 
 ### A.7 Source resolution — CLI boundary only
 
@@ -2913,18 +3297,52 @@ type Resolver interface {
 func NewGitResolver(fsys afero.Fs, workdir string, stdin io.Reader) Resolver
 ```
 
-### A.8 The ctxloom adapter
+### A.8 `hewfs` — the filesystem boundary
+
+**Ratified ([O36](#p5--the-api-ratification-2026-08-14)): `hewfs` imports no host project.**
+The draft called this section "the ctxloom adapter" and spelled its contract in ctxloom's own
+vocabulary — `agent.WithFileLock`, `iox.WriteFileAtomicFs`. **That text is superseded.** hew is
+a standalone standard with a Rust port as a peer implementation; a package in its reference
+implementation that names one host project's locking helper is not a boundary, it is a
+dependency pointing the wrong way. What §10.5 actually requires is *atomic temp-and-rename and
+no backup file*, which is a property, not a helper — and a host that wants its own locking
+wraps `hewfs`, exactly as ctxloom's `config-write` already wraps its writes in
+`agent.WithFileLock` from the outside.
 
 ```go
-package hewfs // may import ctxloom
+package hewfs // imports: stdlib, afero, and hew. Nothing else.
 
-// ApplyFile applies every file section of p under agent.WithFileLock, writing through
-// iox.WriteFileAtomicFs, honoring §10.5 atomicity.
-func ApplyFile(fsys afero.Fs, root string, p *hew.Patch, opt hew.Options) ([]FileResult, error)
+// ApplyFile applies every file section of a parsed patch, honoring §10.5:
+// every section stages in memory, and the commit phase runs only if all
+// staged successfully. There is no .rej file, no partial output, and NO
+// BACKUP FILE — the write is an atomic temp-and-rename, and a failed apply
+// leaves every target byte-identical.
+func ApplyFile(fsys afero.Fs, root string, tls []hew.TransformList, opt WriteOptions) ([]FileResult, error)
+
+// ApplyTransforms is the same path for a hand-authored or generated .hewt
+// document — the `hew apply --transforms` entry point, and the seam the
+// corpus pins as `apply-ir`.
+func ApplyTransforms(fsys afero.Fs, root string, tls []hew.TransformList, opt WriteOptions) ([]FileResult, error)
+
+type WriteOptions struct {
+    DryRun bool
+    Format hew.FormatID // override detection for every target (§8.0)
+
+    // RecordPath, if set, writes the §9.7 application record there.
+    RecordPath string
+
+    // AppliedAt pins the record's applied_at (§9.7, O37). Zero means "read
+    // the environment, else now".
+    AppliedAt time.Time
+
+    // ReversalPath, if set, writes the reversal patch there after a
+    // successful mutation (O40). Opt-in always; empty writes nothing.
+    ReversalPath string
+}
 
 // Record is the application record (spec §9.7): what was executed, against which
 // bytes. It is the input a future `hew revert` inverts, and the shape of the
-// ownership record ctxloom's config-write lacks.
+// ownership record a host project's config writer otherwise lacks.
 type Record struct {
     Version   int
     AppliedAt time.Time
@@ -2946,25 +3364,51 @@ type RecordTarget struct {
 func MarshalRecord(r Record) ([]byte, error)
 func UnmarshalRecord(src []byte) (Record, error)
 
-// ApplyTransforms is the same path for a hand-authored or generated .hewt document —
-// the `hew apply --transforms` entry point, and the seam the corpus pins as `apply-ir`.
-func ApplyTransforms(fsys afero.Fs, root string, tls []hew.TransformList, opt hew.Options) ([]FileResult, error)
-
 type FileResult struct {
-    Target  string
-    Changed bool
-    Written bool
-    Ops     []hew.Transform
-}
-
-type Options struct {
-    DryRun   bool
-    Format   FormatID
-    MaxHunks int
+    Target   string
+    Changed  bool
+    Written  bool
+    Reversal string // path of the reversal patch written, or "" (O40)
+    Ops      []hew.Transform
 }
 ```
 
-### A.9 Errors — attached to the layer that raises them
+**The reversal patch** ([O40](#p5--the-api-ratification-2026-08-14)). With `ReversalPath` set,
+a successful mutation also writes `diff(after → before)` — a real `.hew` file, with real
+context lines at the §9.4-R2 radius, produced by the same differ and renderer `hew diff` uses.
+It is not a backup and it does not weaken §10.5's no-backup rule: a backup is a copy of a file,
+opaque and whole; a reversal patch is a **statement of what to undo**, reviewable in a pull
+request, and refusing to apply if the file has drifted since. Applying it *is* the undo:
+
+```
+hew apply --reversal config.yaml.undo.hew migrate.hew   # forward, keeping the way back
+hew apply config.yaml.undo.hew                          # back
+```
+
+This is the concrete half of [O14](#ruled-by-the-human-2026-08-14)'s deferred `hew revert`,
+and it is deliberately the *cheap* half: it needs no inversion rules (what is the inverse of an
+`add` with `on_conflict: keep`?), because it inverts nothing — it diffs two byte images that
+both existed. `hew revert <record.hewt>`, which must answer the inversion question, stays
+future work.
+
+**Pinned `applied_at`** ([O37](#p5--the-api-ratification-2026-08-14)). §9.7's record carries a
+wall clock, which makes an otherwise deterministic artifact unreproducible: two identical
+applies produce two different records, and a build that commits its records has a diff on every
+run. hew therefore honors the reproducible-build convention rather than inventing one:
+
+| Source | Precedence |
+|---|---|
+| `WriteOptions.AppliedAt` (library) / no CLI flag | 1 — an explicit caller wins |
+| `HEW_APPLIED_AT`, an RFC 3339 timestamp | 2 |
+| `SOURCE_DATE_EPOCH`, seconds since the Unix epoch | 3 — the cross-ecosystem convention |
+| the system clock | 4 — the default |
+
+The value is normalized to RFC 3339 UTC and written **byte-exactly** as `applied_at`, so a
+record built twice from the same inputs and the same pin is the same file. A malformed
+`HEW_APPLIED_AT` or `SOURCE_DATE_EPOCH` is a usage error (exit 2), never a silent fallback to
+the clock — a pin that quietly does not pin is worse than no pin.
+
+### A.9 Errors — attached to the component that raises them
 
 ```go
 type Code string
@@ -2990,25 +3434,30 @@ const (
     CodeSurfaceAmbiguity Code = "HEW041"
 )
 
-// Layer is asserted by the corpus (`error_seam`): a code surfacing from the wrong
-// layer means a component is deferring work it should have refused.
-type Layer int
+// Component is asserted by the corpus (`error_seam`): a code surfacing from the
+// wrong component means that component is deferring work it should have refused.
+// Spelled "Component" rather than the draft's "Layer" because it names one of the
+// four components of §9 plus the two boundaries around them, and the corpus's own
+// error_seam vocabulary already says "parser", "applier", "differ".
+type Component int
 
 const (
-    LayerParser Layer = iota
-    LayerResolver
-    LayerApplier
-    LayerDiffer
-    LayerRenderer
+    ComponentParser Component = iota
+    ComponentResolver
+    ComponentApplier
+    ComponentDiffer
+    ComponentRenderer
+    ComponentCLI
 )
 
 // Error is the one error type Hew returns. Every field is part of the contract the
 // corpus asserts on.
 type Error struct {
     Code       Code
-    Layer      Layer
+    Component  Component
     Target     string
-    Path       Path
+    PatchFile  string // the .hew file, filled in at the CLI boundary (§10.3)
+    Path       string
     PatchLine  int
     TargetLine int
     Want, Got  string
@@ -3016,48 +3465,71 @@ type Error struct {
 }
 
 func (e *Error) Error() string
-func AsError(err error) (*Error, bool)
+func As(err error) (*Error, bool)
 ```
 
 ### A.10 Corpus runner (test-only)
 
+The corpus is data; this is the Go runner. It is a **library** — nothing in it touches
+`*testing.T` — so the `go test` frontend and the godog acceptance suite (§13.8) are two thin
+frontends over one engine, and the two cannot disagree about what a seam means.
+
 ```go
-package hewcorpus // corpus is data; this is the Go runner
+package harness
 
 type Seam string
 
 const (
-    SeamParse   Seam = "parse"    // patch.hew        -> transforms.hewt
+    SeamParse   Seam = "parse"    // patch.hew                -> transforms.hewt
     SeamApplyIR Seam = "apply-ir" // transforms.hewt + target -> expected
     SeamE2E     Seam = "e2e"      // patch.hew + target       -> expected
-    SeamRender  Seam = "render"   // transforms.hewt -> .hew -> transforms.hewt  (RT2)
-    SeamDiff    Seam = "diff"     // old + new      -> expected.hew
-    SeamCLI     Seam = "cli"
+    SeamRender  Seam = "render"   // transforms.hewt -> .hew -> transforms.hewt (RT2)
+    SeamDiff    Seam = "diff"     // old + new                -> expected.hew
+    SeamCLI     Seam = "cli"      // argv                     -> exit code + streams
 )
 
-type Case struct {
-    Name, Kind, Format string
-    Seams              []Seam
-    Ops                []string // catalog IDs, e.g. "OP-16"
-    Dir                string
-    // ...remaining manifest fields per §13.4
+// Binding wires the implementation under test in. Every hook speaks canonical
+// .hewt bytes at the IR boundary, pinning the IR exactly where the corpus does.
+// A nil hook behind a DECLARED seam is a failure unless a skip rule covers it —
+// that is the milestone mechanism, and it is why wiring a hook and deleting its
+// skip rule must happen in the same change.
+type Binding struct {
+    ParseToHewt func(patch []byte) ([]byte, error)
+    CanonHewt   func(hewt []byte) ([]byte, error)
+    ApplyHewt   func(hewt, target []byte, format string) ([]byte, error)
+    ApplyPatch  func(patch, target []byte, format string) ([]byte, error)
+    RenderHew   func(hewt []byte) ([]byte, error)
+
+    // DiffToHew's `target` is the OLD side's file name (O39): the produced
+    // patch applies to old, so that is the label its `--- ` line carries.
+    DiffToHew func(old, new []byte, format, target string) ([]byte, error)
+
+    // RunCLI runs the CLI in-process. env carries the case manifest's `env:`
+    // block (§13.4) — the seam through which a case pins HEW_APPLIED_AT (O37).
+    RunCLI func(argv []string, dir string, env map[string]string,
+        stdin io.Reader, stdout, stderr io.Writer) int
 }
 
-func Load(root string) ([]Case, error)
-func (c Case) RunSeam(t *testing.T, s Seam)
+func Discover(corpusDir string) ([]*Case, []error)
+func (e *Engine) RunSeam(c *Case, seam Seam) Outcome
 
-// CoverageReport names every v0 catalog operation with no case (§13.6 rule 7).
-func CoverageReport(cases []Case) (uncovered []string)
+// The skip registry of §13.7, with both ratchets: Unused() names rules that
+// matched nothing (dead rules must be deleted), and NoSkips turns every match
+// into a failure (HEW_CORPUS_NO_SKIPS=1, the end-state gate).
+func NewSkipRegistry(rules []SkipRule, noSkips bool) *SkipRegistry
+func (r *SkipRegistry) Unused() []SkipRule
+
+// ComputeCoverage names every v0 catalog operation with no case (§13.6 rule 7).
+func ComputeCoverage(catalog Catalog, cases []*Case) Coverage
 ```
 
 ---
 
-## Appendix B — proposed CLI surface
+## Appendix B — the CLI surface
 
-**Shape ruling still open** (P0 left it so): standalone companion binary `hew` (family
-precedent: `ltk`, `taskloom`, `harp`; the natural shape for a general-purpose tool and for the
-Rust port) versus a `ctxloom patch` subcommand. This appendix specifies the standalone shape;
-a subcommand would carry the same verbs and codes. [O1](#decisions-and-residual-open-questions).
+**Shape: standalone binary `hew`**, ratified as [O1](#ratified-by-the-coordinator-2026-08-14)
+and settled by construction — hew is its own repository with `go/` and `rust/` trees. (Family
+precedent: `ltk`, `taskloom`, `harp`.)
 
 ### B.1 `hew apply`
 
@@ -3075,12 +3547,20 @@ hew apply --transforms <file.hewt>...           apply a transform list directly
 | `-R, --root DIR` | Resolve target paths under DIR. Default: cwd. |
 | `--transforms FILE` | Read a canonical transform list (§9.6) instead of `.hew` notation. **This is the authoring path for moves and copies** (Appendix C) and the only way to reach OP-21/OP-22/OP-07/OP-36. Mutually exclusive with positional `.hew` arguments. Flag name at [O21](#decisions-and-residual-open-questions). |
 | `--record FILE` | Write an application record (§9.7) after a successful apply: the resolved transforms actually executed, plus before/after digests per target. Not written by default. |
+| `--reversal [FILE]` | After a successful mutation, **also** write the reversal patch — `diff(after → before)` as a real `.hew` file with real context lines. Opt-in always; no flag, no file. With no value the name is derived from the target as `<target>.undo.hew`; with several targets, one file per target. Applying it is the undo ([O40](#p5--the-api-ratification-2026-08-14)). |
 | `--dry-run` | Do everything including matching; write nothing; exit as if written. |
 | `--ops` | Print the **resolved** RFC 6901 op list (§9.2) to stdout and write nothing. |
 | `--transforms-out FILE` | Write the **abstract** transform list (§9.6) and write no target. The parser seam, exposed. |
 | `--format FMT` | Override format detection for every target. |
 | `--format-out json` | Machine-readable diagnostics and results on stdout. |
 | `-q, --quiet` | Suppress the per-file success lines. |
+
+**Environment.** `hew apply` reads exactly two environment variables, both governing the
+record's `applied_at` (§9.7, [O37](#p5--the-api-ratification-2026-08-14)): `HEW_APPLIED_AT`
+(RFC 3339) and, if that is unset, `SOURCE_DATE_EPOCH` (Unix seconds). Either one malformed is
+exit 2. Nothing else about hew's behaviour is reachable through the environment — a patch tool
+whose *effect* depends on invisible input is the thing this format exists to refuse; a
+timestamp is metadata about the run, not part of it.
 
 ### B.2 `hew diff` (P4)
 
@@ -3095,6 +3575,46 @@ Both arguments are **source descriptors** (§9.5), not file paths: a working-tre
 for stdin, or a `REV:path` git anchor following git's own `<tree-ish>:<path>` convention. Git
 anchors are resolved by invoking git plumbing as a subprocess; the library core has no git
 awareness at all.
+
+#### B.2.1 Which side the `--- ` line names
+
+**Ratified ([O39](#p5--the-api-ratification-2026-08-14)): `hew diff old new` stamps the OLD
+side's label.** The `--- ` line names the file the patch **applies to**, and a patch applies to
+`old` — this is `patch(1)`'s own convention (`--- old`, `+++ new`), and it is what RT1 already
+says in symbols: `apply(parse(render(diff(old, new))), old) == new`. The patch is a function
+*from* old; naming its result would name a file the applier will never open.
+
+Two corollaries, both stated so no implementation has to guess:
+
+- **A git anchor renders as its path component.** `hew diff HEAD:config.yaml config.yaml`
+  stamps `--- config.yaml`, not `--- HEAD:config.yaml`. A `--- ` line is a *target path* (§2.2,
+  one literal path per section, [O13](#ratified-by-the-coordinator-2026-08-14)); a revision is
+  not a path an applier can open, and writing one there would produce a patch that cannot
+  apply anywhere. The revision is provenance, and provenance belongs in the patch's leading
+  `#` comment if it belongs anywhere.
+- **A stdin old side has no name to give**, so the new side's label is used, and if that is
+  also stdin the invocation is a usage error — a patch with no target is not a patch (§2.2).
+
+#### B.2.2 Two identical inputs
+
+**Ratified ([O38](#p5--the-api-ratification-2026-08-14)): `hew diff` of identical inputs emits
+a preamble-only patch and exits 0.** The output is exactly:
+
+```
+hew: 1
+
+--- config.yaml format=yaml
+```
+
+— a well-formed `.hew` file with a preamble, one file section, and zero hunks. Not an empty
+file, and not nothing at all.
+
+The reason is composition. `hew diff a b > p.hew && hew apply p.hew` must not be a shell
+pipeline that breaks when the answer is "no change": emitting zero bytes produces a file that
+`hew apply` then refuses as `HEW001` (§10.2), turning "nothing changed" into an error one
+command later — the exact silent-mode-flip that a tool with an honest exit contract must not
+have. §10.2 is amended in the same ruling so that the artifact `diff` produces is one `apply`
+accepts, which is the only relationship between the two verbs that can be called a round trip.
 
 | Flag | Meaning |
 |---|---|
@@ -3201,9 +3721,10 @@ prerequisites.
 ## Decisions and residual open questions
 
 Every fork resolved by judgment while drafting was listed here for ratification. **The
-coordinator ratified 26 of them on 2026-08-14**, and the human ruled the three headline
-questions directly. What remains open is four items, listed last — each genuinely needs
-evidence that does not exist yet.
+coordinator ratified 26 of them on 2026-08-14**, and the human ruled the headline questions
+directly — four at drafting time, and eleven more (O30–O40) when Appendix A's proposed API was
+ratified against the shipped implementation. What remains open is four items, listed last —
+each genuinely needs evidence that does not exist yet.
 
 ### Ruled by the human, 2026-08-14
 
@@ -3245,6 +3766,30 @@ reason that decided it.
 | **O28** | Comment addresses (`/x/#0`, `/x/timeout/#t`). | **Kept.** They had to exist for OP-32/OP-33 regardless, and their existence is what let the comment-attachment qualifier reduce away entirely (§11.10). The positional-drift hazard is real and bounded: a comment address is only used by a patch that is editing that comment, and such a patch asserts the comment's text, so a shifted ordinal fails loudly rather than editing the wrong comment. |
 | **O22, O24, O29** | *(residual — see below)* | |
 
+### P5 — the API ratification, 2026-08-14
+
+Appendix A was checkpoint-1 material: signatures for review. The implementation of P1–P4
+answered some of its questions by construction and contradicted it in four places, and the
+adoption slice (ctxloom's `config-write`, which builds `[]Transform` by hand because nothing
+better exists) named the surface that was missing. **The human ruled all eleven on 2026-08-14.**
+
+O30–O33 ratify deviations the implementation already made; O34–O37 and O40 decide surfaces
+that are specified here and **not yet built**; O38 and O39 amend behaviour that is built.
+
+| # | Question | Ruling |
+|---|---|---|
+| **O30** | `Parse` returns `*Patch` with a `FileSection`/`Hunk` object graph, or the IR directly? | **The IR directly: `Parse([]byte) ([]TransformList, error)`** (A.2). The three object types stood between the caller and the only thing every caller wanted, and their accessors were either fields of `TransformList` already or questions nobody asked. The one capability this drops is **hunk introspection**, which a linter ([O17](#ratified-by-the-coordinator-2026-08-14), §7.6) would need — recorded as deferred, and reachable later as an additive parser output rather than a change to `Parse`. |
+| **O31** | May a `Transform` carry provenance the IR does not serialize? | **Yes — `PatchLine`, `AnchorPath`, `AnchorLine`** (A.1). A resolution failure inside an anchor is the *anchor's* failure and must be reported at the `@@` line, which a transform that does not know its hunk cannot do. Non-serialized, not compared by `Equal`, therefore invisible to every corpus byte comparison — provenance in the strict sense, not content. |
+| **O32** | Is `! idempotent` legal on a `test`? | **Yes** (A.1, §7.5). §7.5's rule is stated over the *hunk*, and a hunk lowers to a before-image `test` **and** a write; a tolerance riding only the write would leave the paired `test` failing loudly and convergence unreachable. `copy` is the one exclusion — it asserts nothing about its destination. |
+| **O33** | Does `ResolvedOp` carry every assertion mode, or only the ones RFC 6902 has? | **Every one — `Exhaustive` and `NodeKind` included** (A.1). The resolved list is what `--record` embeds (§9.7), and a record that drops an assertion the applier really evaluated under-reports what happened to the file. A record must not under-report. |
+| **O34** | What does a program that wants to edit a config file call? | **A fluent document API — `hew.Open` → `.At(path)` → operation → terminal** (A.0). Three rules, each a restatement of one the format already has: format appears only at the open boundary and is detected from the **name** (§8.0, never sniffed, overridable by `hew.As` exactly where a patch would say `format=`); addressing is the **§4 path**, one language in two encodings, with typed segment constructors for computed paths and deliberately no navigation method-chain; and **reads become asserts** — `Replace` records `test`(current) + `replace`, which is §9.1's lowering with the before-image taken from the open document. `Set`/`Default` are the documented unasserted forms (OP-03/OP-04). The builder's output is ordinary IR, indistinguishable from parsed-patch IR, and `RenderPatch` turns any edit into a reviewable `.hew`. |
+| **O35** | Registry, or a `switch` per call site? | **Registry, with bindings self-registering from `init()` on import** (A.6). Import-for-effect is Go's own answer (`image/png`, `database/sql`) and makes "linked" and "capable" the same fact, so a JSON-only tool links no HCL parser; `hewall` keeps the common case to one import. **Explicit registration was considered and rejected**: it reads better in isolation and fails by giving `HEW021` for a plainly-visible `.yaml`, at runtime, from a library that was linked and ready. Cost stated: an unused blank import is invisible to `goimports`. |
+| **O36** | What may `hewfs` import? | **Nothing from any host project** (A.8). The draft spelled §10.5 in ctxloom's vocabulary (`agent.WithFileLock`, `iox.WriteFileAtomicFs`); that text is superseded. §10.5 requires a *property* — atomic temp-and-rename, no backup file — and a host that wants its own locking wraps `hewfs` from outside, as `config-write` already does. |
+| **O37** | Is `applied_at` a wall clock, or pinnable? | **Pinnable: `HEW_APPLIED_AT`, then `SOURCE_DATE_EPOCH`, then the clock** (§9.7, A.8). Every other field of a record is a function of its inputs; the timestamp was the one thing making a deterministic artifact differ per run, which breaks the callers most likely to keep records. A malformed pin is exit 2, never a silent fallback — a pin that quietly does not pin is worse than none, because the artifact still looks reproducible. |
+| **O38** | What does `hew diff` emit for identical inputs, and what does `hew apply` do with it? | **A preamble-only patch, which applies as a no-op** (B.2.2, §9.4-R8, §10.2 amended). Emitting zero bytes produces a file `apply` then refuses as `HEW001`, turning "nothing changed" into an error one command later. §10.2's line moves to *did the author say which file this is about*: `hew: 1` + a `--- ` line + no hunks is a complete statement and exits 0; zero bytes, or a preamble with no file section, stays `HEW001`. |
+| **O39** | Which side does `hew diff old new` stamp on the `--- ` line? | **The OLD side** (B.2.1, §9.4-R7). `patch(1)`'s convention, and what RT1 already says in symbols — the patch is a function *from* old, so naming its result would name a file the applier never opens. Corollaries ruled here so nothing guesses: a git anchor renders as its **path component** (`HEAD:config.yaml` → `--- config.yaml`), because a `--- ` line is a target path ([O13](#ratified-by-the-coordinator-2026-08-14)) and a revision is not one; a stdin old side falls back to the new side's label, and both-stdin is a usage error. |
+| **O40** | How does a caller undo an apply, given `hew revert` is deferred? | **`hew apply --reversal [FILE]`** (A.8, B.1). On successful mutation, also write `diff(after → before)` as a real `.hew` with real context lines — default `<target>.undo.hew`, opt-in always. The reversal artifact **is** the revert story: applying it is the undo. It is deliberately the cheap half of [O14](#ruled-by-the-human-2026-08-14) — it needs no inversion rules because it inverts nothing, it diffs two byte images that both existed. It is not a backup and does not weaken §10.5: a backup is an opaque copy, a reversal patch is a reviewable statement that refuses to apply to a file that has drifted. |
+
 ### Residual — genuinely open
 
 Four. Each needs evidence that does not exist yet; none blocks implementation of the rest.
@@ -3270,4 +3815,7 @@ Four. Each needs evidence that does not exist yet; none blocks implementation of
 - **A second human-authoring notation.** The v0 ruling is one grammar. The transform list
   (§9.6) is an accepted *input*, but it is machine-first by design and a `.hewt` file where a
   `.hew` file would do is a review-quality regression.
-- **Reverting an applied patch** (`hew revert`). Sketched only in [O14](#decisions-and-residual-open-questions).
+- **Reverting an applied patch *from a record*** (`hew revert <record.hewt>`), which needs
+  inversion rules per op. Sketched only in [O14](#ruled-by-the-human-2026-08-14). Undoing an
+  apply *as it happens* is specified and ratified — see
+  [O40](#p5--the-api-ratification-2026-08-14)'s reversal patch, which needs no inversion rules.
