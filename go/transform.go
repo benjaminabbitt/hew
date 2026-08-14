@@ -359,8 +359,14 @@ func (t Transform) Validate() error {
 	if t.Optional && t.Op != OpRemove && t.Op != OpTest {
 		return irErr(p, "op %s: optional is valid only on remove and test", t.Op)
 	}
-	if t.Idempotent && t.Op != OpAdd && t.Op != OpRemove && t.Op != OpReplace {
-		return irErr(p, "op %s: idempotent is valid only on add, remove and replace", t.Op)
+	// Idempotent rides the WRITE (§7.5's convergence) and also the
+	// before-image ASSERT the same hunk emitted: §7.5's rule is stated over
+	// the hunk ("if the before-image does not match but the after-image
+	// does"), so the test that would otherwise fail loudly has to carry the
+	// tolerance too. Copy is the one op it cannot qualify — a copy asserts
+	// nothing about its destination.
+	if t.Idempotent && t.Op == OpCopy {
+		return irErr(p, "op %s: idempotent is valid only on test, add, remove and replace", t.Op)
 	}
 	return nil
 }

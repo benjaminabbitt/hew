@@ -43,14 +43,6 @@ var skipRules = []harness.SkipRule{
 	// git-anchor source resolution (Appendix A.7) and the differ are both P4.
 	{Case: "cli/diff-git-anchor", Seam: "cli", Reason: "M11: differ / git source resolution not yet implemented (P4)"},
 
-	// Every other cli case names a non-JSON target format, so it needs that
-	// format's applier — not shipped in P2. apply-transforms also declares
-	// a bare apply-ir seam alongside cli, for the same yaml target.
-	{Case: "cli/apply-in-place", Seam: "cli", Reason: "P3: hewyaml applier not yet implemented"},
-	{Case: "cli/apply-stdout", Seam: "cli", Reason: "P3: hewyaml applier not yet implemented"},
-	{Case: "cli/apply-transforms", Seam: "*", Reason: "P3: hewyaml applier not yet implemented"},
-	{Case: "cli/stale-exit-1", Seam: "cli", Reason: "P3: hewyaml applier not yet implemented"},
-
 	// Every other jsonc case: parse/render are format-agnostic and largely
 	// work (see jsonc/roundtrip-basic passing for real), but this slice has
 	// not verified them against jsonc's comment-anchoring corpus cases
@@ -62,23 +54,10 @@ var skipRules = []harness.SkipRule{
 	{Case: "jsonc/*", Seam: "parse", Reason: "P3: not verified beyond jsonc/roundtrip-basic against §8.2's comment-anchoring cases"},
 	{Case: "jsonc/*", Seam: "render", Reason: "P3: not verified beyond jsonc/roundtrip-basic"},
 
-	// yaml/roundtrip-basic's parse/render/apply-ir/e2e are verified and run
-	// for real above (only its diff seam is skipped); every other yaml case
-	// needs either the hewyaml applier (not shipped) or exercises YAML
-	// grammar this parser has not been verified against case by case
-	// (aliases/anchors §8.3, multi-line block-style nested elements — see
-	// the parser's classifyMember doc comment).
-	{Case: "yaml/*", Seam: "apply-ir", Reason: "P3: hewyaml applier not yet implemented"},
-	{Case: "yaml/*", Seam: "e2e", Reason: "P3: hewyaml applier not yet implemented"},
-	// Only three yaml cases besides roundtrip-basic declare a parse or
-	// render seam at all; both are pinning something beyond the plain
-	// mirror grammar this parser targets (the idempotent PRAGMA's
-	// file-wide effect, and a bare scalar replace whose fixture this
-	// implementation has not been checked against) — named individually
-	// rather than a family-wide glob, so roundtrip-basic's parse/render
-	// (verified, run for real above) is never accidentally caught by it.
-	{Case: "yaml/pragma-idempotent-file", Seam: "parse", Reason: "P3: not verified against the idempotent-pragma parse fixture"},
-	{Case: "yaml/set-scalar", Seam: "parse", Reason: "P3: not verified against this fixture"},
+	// The yaml family runs for real: P3 ships hewyaml (§8.3), and every
+	// yaml/* apply-ir and e2e seam — plus the four yaml-target cli cases —
+	// is bound. Only yaml/roundtrip-basic's diff seam is still skipped,
+	// above, with the rest of the differ.
 
 	// TOML and HCL bodies use native "key = value" / block syntax the
 	// parser's fragment reader (YAML/JSON-shaped, colon syntax) does not

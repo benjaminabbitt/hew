@@ -65,8 +65,8 @@ type parser struct {
 	i     int // 0-based index into lines; current line is lines[i]
 }
 
-func (p *parser) lineNo() int  { return p.i + 1 }
-func (p *parser) done() bool   { return p.i >= len(p.lines) }
+func (p *parser) lineNo() int { return p.i + 1 }
+func (p *parser) done() bool  { return p.i >= len(p.lines) }
 func (p *parser) peek() string {
 	if p.done() {
 		return ""
@@ -334,6 +334,60 @@ type member struct {
 	fields  []fieldTest // non-nil: a keyed/subset-matched element's listed fields
 	value   Value       // the member's own value (scalar/opaque; ADD's Value)
 	isField bool        // true when seg addresses a map field or comment node directly (ADD path = anchor+seg, not anchor)
+	dir     directives  // the `!` qualifiers in force for this line (§9.1 step 6)
+}
+
+// directives is the annotation state that rides a transform as a qualifier
+// (§9.1 step 6: "`!` directives emit no transform of their own"). It is
+// carried per member so a line-scoped `!` line affects exactly the body line
+// it precedes, and a hunk-scoped one (the first body line, §7) affects them
+// all.
+type directives struct {
+	// testIdempotent tolerates a failed before-image assert when the
+	// after-image holds; opIdempotent makes the WRITE converge instead of
+	// refusing. They are two flags rather than one because `! strict` opts a
+	// hunk's writes back out of a file-level `idempotent:` pragma without
+	// retracting the tolerance the pragma already granted the asserts — which
+	// is what separates the line the corpus expects in
+	// yaml/pragma-strict-override (patch_line 9, the strict WRITE) from the
+	// one in yaml/reapply-not-idempotent (patch_line 6, the strict ASSERT).
+	testIdempotent bool
+	opIdempotent   bool
+	optional       bool       // §7.6
+	onConflict     OnConflict // §7.7
+	anchor         AnchorMode // §8.3
+}
+
+// set applies one parsed `!` line to a directive set.
+func (d *directives) set(b bangDirective) error {
+	switch b.kind {
+	case "idempotent":
+		d.testIdempotent, d.opIdempotent = true, true
+	case "strict":
+		d.opIdempotent = false
+	case "optional":
+		d.optional = true
+	case "default":
+		d.onConflict = ConflictKeep
+	case "upsert":
+		d.onConflict = ConflictReplace
+	case "anchor":
+		m := AnchorMode(b.arg)
+		if m != AnchorRewrite && m != AnchorFork {
+			return fmt.Errorf("! anchor takes \"rewrite\" or \"fork\" (§8.3), got %q", b.arg)
+		}
+		d.anchor = m
+	case "match":
+		// Ordinal selection (§7.2): accepted syntactically. Applying it
+		// against a target is the HCL binding's business and is not lowered
+		// here.
+	case "surface":
+		// TOML placement (§8.4): accepted syntactically, lowered by the TOML
+		// binding's own slice.
+	default:
+		return fmt.Errorf("unknown directive %q (§7)", b.kind)
+	}
+	return nil
 }
 
 type fieldTest struct {
@@ -344,48 +398,45 @@ type fieldTest struct {
 // lowerHunk implements §9.1's lowering algorithm for one hunk, plus the
 // free-standing `?` assertions (§7.1) and `? exhaustive` (§9.1 step 3).
 //
-// Scope, flagged in the P2 report: the algorithm addresses ONE level of the
-// anchor's direct children per hunk (map fields, or sequence elements,
-// classified per line per §6.1/§6.4.2). Every JSON-family corpus case, and
-// the spec's own worked examples, write deeper edits via a deeper anchor
-// rather than nested body indentation, so recursive multi-level fragment
-// parsing within a single hunk body is not implemented; a body line whose
-// value is itself a nested object (e.g. `tls: {enabled: true}`) is asserted
-// by exact value equality rather than recursive subset matching.
+// Scope: the algorithm addresses one level of the anchor's DIRECT children
+// (map fields, or sequence elements, classified per §6.1/§6.4.2). A member
+// whose value runs across several body lines — a nested block mapping, or a
+// keyed sequence element spelled over two lines — is grouped by indentation
+// into one member with a nested value (groupBody), not one member per line.
+// The value it carries is matched by the format binding under §6.1's subset
+// and subsequence rules, so a listed nested field constrains only itself.
 func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempotent bool) ([]Transform, error) {
-	idempotent := filePragmaIdempotent
-	commentOrdinal := 0
+	hunk := directives{testIdempotent: filePragmaIdempotent, opIdempotent: filePragmaIdempotent}
+	var pending *directives
+	// Comment addresses are kind-scoped ordinals within the container (§4.5b),
+	// and the before-image and the after-image are two different documents
+	// (§5): a removed comment is #0 of the before-image while the comment
+	// replacing it is #0 of the after-image, which is what makes the pair
+	// lower to one `replace` rather than a remove plus an add.
+	beforeComments, afterComments := 0, 0
 	var members []member
 	var freeAsserts []Transform
 	exhaustive := false
 	exhaustiveLine := headerLine
 
-	for idx, bl := range body {
+	for _, u := range groupBody(body) {
+		bl := u.bl
 		switch bl.margin {
 		case '!':
-			d, err := parseBangDirective(bl.text)
+			b, err := parseBangDirective(bl.text)
 			if err != nil {
 				return nil, parseErr(bl.line, "", "%s", err.Error())
 			}
-			switch d.kind {
-			case "idempotent":
-				if idx == 0 {
-					idempotent = true
+			target := &hunk
+			if len(members) > 0 {
+				if pending == nil {
+					line := hunk
+					pending = &line
 				}
-				// A line-scoped "! idempotent" (not the hunk's first line) is
-				// accepted syntactically; per-line override is not exercised
-				// by any case in P2's scope and is not implemented further.
-			case "strict":
-				idempotent = false
-			case "match":
-				// Ordinal selection (§7.2): accepted syntactically. Applying
-				// it against a target is out of scope for the JSON binding
-				// this slice ships — no JSON corpus case needs it.
-			case "optional", "upsert", "default", "anchor", "surface":
-				// Accepted syntactically; per-line semantics beyond the JSON
-				// backend's needs are not implemented in P2.
-			default:
-				return nil, parseErr(bl.line, "", "unknown directive %q (§7)", d.kind)
+				target = pending
+			}
+			if err := target.set(b); err != nil {
+				return nil, parseErr(bl.line, "", "%s", err.Error())
 			}
 			continue
 		case '?':
@@ -402,15 +453,25 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 			if err != nil {
 				return nil, err
 			}
+			tr.Anchor = hunk.anchor
 			freeAsserts = append(freeAsserts, tr)
 			continue
 		}
 
-		m, err := classifyMember(bl, &commentOrdinal)
+		m, err := classifyMember(bl, u.text, &beforeComments, &afterComments)
 		if err != nil {
 			return nil, err
 		}
+		m.dir = hunk
+		if pending != nil {
+			m.dir = *pending
+			pending = nil
+		}
 		members = append(members, m)
+	}
+	if pending != nil {
+		return nil, parseErr(headerLine, anchor.String(),
+			"a line-scoped directive must be followed by a body line (§7)")
 	}
 
 	var out []Transform
@@ -426,16 +487,17 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 		listedCount++
 		if len(m.fields) > 0 {
 			for _, f := range m.fields {
-				out = append(out, Transform{Op: OpTest, Path: anchor.Append(m.seg, f.seg), Value: f.value, PatchLine: m.bl.line})
+				out = append(out, m.test(anchor.Append(m.seg, f.seg), f.value))
 			}
 		} else {
-			out = append(out, Transform{Op: OpTest, Path: anchor.Append(m.seg), Value: m.value, PatchLine: m.bl.line})
+			out = append(out, m.test(anchor.Append(m.seg), m.value))
 		}
 	}
 	out = append(out, freeAsserts...)
 	if exhaustive {
 		n := listedCount
-		out = append(out, Transform{Op: OpTest, Path: anchor, Exhaustive: true, Count: &n, PatchLine: exhaustiveLine})
+		out = append(out, Transform{Op: OpTest, Path: anchor, Exhaustive: true, Count: &n,
+			PatchLine: exhaustiveLine, Anchor: hunk.anchor})
 	}
 
 	// Steps 4-5. Group members into runs bounded by context lines: within a
@@ -485,11 +547,13 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 				add := members[pair]
 				out = append(out, Transform{
 					Op: OpReplace, Path: anchor.Append(members[i].seg), Value: add.value,
-					PatchLine: add.bl.line, Idempotent: idempotent,
+					PatchLine: add.bl.line, Idempotent: add.dir.opIdempotent, Anchor: add.dir.anchor,
 				})
 			} else {
 				out = append(out, Transform{
 					Op: OpRemove, Path: anchor.Append(members[i].seg), PatchLine: members[i].bl.line,
+					Optional: members[i].dir.optional, Idempotent: members[i].dir.opIdempotent,
+					Anchor: members[i].dir.anchor,
 				})
 			}
 		}
@@ -502,7 +566,8 @@ func lowerHunk(anchor Path, headerLine int, body []bodyLine, filePragmaIdempoten
 			if add.isField {
 				path = anchor.Append(add.seg)
 			}
-			tr := Transform{Op: OpAdd, Path: path, Value: add.value, PatchLine: add.bl.line, Idempotent: idempotent}
+			tr := Transform{Op: OpAdd, Path: path, Value: add.value, PatchLine: add.bl.line,
+				Idempotent: add.dir.opIdempotent, OnConflict: add.dir.onConflict, Anchor: add.dir.anchor}
 			if before, after, ok := placement(members, j); ok {
 				if after {
 					tr.After = anchor.Append(before)
@@ -534,37 +599,81 @@ func placement(members []member, idx int) (sib Segment, after bool, ok bool) {
 	return Segment{}, false, false
 }
 
-// classifyMember turns one context/"-"/"+" body line into a member: either a
-// map-anchor field ("key: value"), a comment node ("# text"), or a
-// sequence-anchor element (a bare scalar or a flow-style value, addressed by
-// content per §4.2's empty-field and named-field forms).
-func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
-	text := strings.TrimSpace(bl.text)
-	if text == "" {
-		return member{}, parseErr(bl.line, "", "empty body line")
+// test builds the before-image assertion a context or "-" line compiles into
+// (§9.0), carrying the line's own qualifiers.
+func (m member) test(path Path, v Value) Transform {
+	return Transform{Op: OpTest, Path: path, Value: v, PatchLine: m.bl.line,
+		Optional: m.dir.optional, Idempotent: m.dir.testIdempotent, Anchor: m.dir.anchor}
+}
+
+// unit is one body member's lines: the margin line that opens it plus the
+// continuation lines indented under it. A block-style value written across
+// several body lines is ONE member of the anchor, not one per line — the
+// shape yaml/canonical-four-ops (a keyed element spelled over two lines) and
+// yaml/keyed-element-inner-add (a nested mapping) both need.
+type unit struct {
+	bl   bodyLine
+	text string // the member's lines, dedented to the opening line's column
+}
+
+func groupBody(body []bodyLine) []unit {
+	var out []unit
+	for i := 0; i < len(body); {
+		bl := body[i]
+		if bl.margin == '!' || bl.margin == '?' {
+			out = append(out, unit{bl: bl, text: bl.text})
+			i++
+			continue
+		}
+		base := leadingSpaces(bl.text)
+		lines := []string{bl.text[base:]}
+		j := i + 1
+		for j < len(body) && body[j].margin == bl.margin && leadingSpaces(body[j].text) > base {
+			lines = append(lines, body[j].text[base:])
+			j++
+		}
+		out = append(out, unit{bl: bl, text: strings.Join(lines, "\n")})
+		i = j
 	}
-	// A sequence element may be spelled in YAML's own block-sequence style
-	// ("- beta", per the spec's own §5 worked example for /tags) rather than
-	// as a bare value; strip the marker before classifying the element
-	// itself. A multi-line block-style element (its fields continued on
-	// FOLLOWING body lines rather than one flow-style line) is out of scope:
-	// every JSON-family fixture, and the single-line YAML cases this
-	// implementation targets, write nested element content in flow style.
-	dashElement := strings.HasPrefix(text, "- ")
-	if dashElement {
-		text = strings.TrimSpace(text[2:])
+	return out
+}
+
+func leadingSpaces(s string) int {
+	n := 0
+	for n < len(s) && s[n] == ' ' {
+		n++
+	}
+	return n
+}
+
+// classifyMember turns one body member (its opening line plus any
+// continuation lines, already dedented) into a member: a map-anchor field
+// ("key: value", whose value may be a nested block), a comment node
+// ("# text"), or a sequence-anchor element (a bare scalar, a flow object, or
+// a "- " block element, addressed by content per §4.2's empty-field and
+// named-field forms).
+func classifyMember(bl bodyLine, text string, beforeComments, afterComments *int) (member, error) {
+	if strings.TrimSpace(text) == "" {
+		return member{}, parseErr(bl.line, "", "empty body line")
 	}
 	if strings.HasPrefix(text, "#") {
 		txt := strings.TrimPrefix(strings.TrimPrefix(text, "#"), " ")
-		seg := Segment{Kind: SegComment, Index: *commentOrdinal}
-		*commentOrdinal++
-		v, err := ValueOf(txt)
-		if err != nil {
-			return member{}, parseErr(bl.line, "", "comment value: %v", err)
+		ord := beforeComments
+		switch bl.margin {
+		case '+':
+			ord = afterComments
+		case ' ':
+			*afterComments++ // a context comment is in both images
 		}
-		return member{bl: bl, seg: seg, value: v, isField: true}, nil
+		seg := Segment{Kind: SegComment, Index: *ord}
+		*ord++
+		return member{bl: bl, seg: seg, value: CommentValue(txt), isField: true}, nil
 	}
 
+	// A "- " line is always a sequence element, even when its remaining text
+	// parses as a single "key: value" pair — that shape means a keyed element
+	// subset-matched by its one listed field, not a map field of the anchor.
+	dashElement := strings.HasPrefix(text, "- ")
 	var n yaml.Node
 	if err := yaml.Unmarshal([]byte(text), &n); err != nil {
 		return member{}, parseErr(bl.line, "", "malformed body value %q: %v", text, err)
@@ -573,21 +682,24 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 		return member{}, parseErr(bl.line, "", "empty body value %q", text)
 	}
 	val := n.Content[0]
-
-	// A dash-prefixed line is always a sequence element, even when its
-	// remaining text happens to parse as a single "key: value" pair — that
-	// shape means a keyed element subset-matched by its one listed field
-	// (routed below), not a map field of the anchor itself.
-	isMapEntry := !dashElement && val.Kind == yaml.MappingNode && len(val.Content) == 2 && !strings.HasPrefix(text, "{")
-	if isMapEntry {
-		key := val.Content[0].Value
-		v := canonicalValue(val.Content[1])
-		return member{bl: bl, seg: Segment{Kind: SegKey, Name: key}, value: v, isField: true}, nil
+	if dashElement {
+		if val.Kind != yaml.SequenceNode || len(val.Content) != 1 {
+			return member{}, parseErr(bl.line, "", "body member %q does not denote a single sequence element", text)
+		}
+		return elementMember(bl, val.Content[0])
 	}
+	if val.Kind == yaml.MappingNode && len(val.Content) == 2 && !strings.HasPrefix(text, "{") {
+		key := val.Content[0].Value
+		return member{bl: bl, seg: Segment{Kind: SegKey, Name: key},
+			value: canonicalValue(val.Content[1]), isField: true}, nil
+	}
+	return elementMember(bl, val)
+}
 
+// elementMember classifies a sequence element: a keyed/subset-matched object
+// (§5.1, §6.4.2) or a bare scalar addressed by content (§4.2).
+func elementMember(bl bodyLine, val *yaml.Node) (member, error) {
 	if val.Kind == yaml.MappingNode && len(val.Content) >= 2 {
-		// A flow-style object: one sequence element, subset-matched by its
-		// listed fields (§5.1, §6.4.2).
 		var fields []fieldTest
 		var names []string
 		for i := 0; i+1 < len(val.Content); i += 2 {
@@ -606,15 +718,11 @@ func classifyMember(bl bodyLine, commentOrdinal *int) (member, error) {
 		seg := Segment{Kind: SegMatch, Name: idName, Value: idScalar}
 		return member{bl: bl, seg: seg, fields: fields, value: canonicalValue(val), isField: false}, nil
 	}
-
-	// A bare scalar (or other opaque value) sequence element, addressed by
-	// content — the "=value" empty-field form (§4.2).
 	sc, err := scalarOfNode(val)
 	if err != nil {
 		return member{}, parseErr(bl.line, "", "%v", err)
 	}
-	seg := Segment{Kind: SegMatch, Value: sc}
-	return member{bl: bl, seg: seg, value: canonicalValue(val), isField: false}, nil
+	return member{bl: bl, seg: Segment{Kind: SegMatch, Value: sc}, value: canonicalValue(val), isField: false}, nil
 }
 
 // identityField picks the sequence-element identity field among a keyed
@@ -699,16 +807,20 @@ func (v Value) pathScalar() Scalar {
 	return sc
 }
 
-// bangDirective is a parsed "!" line.
-type bangDirective struct{ kind string }
+// bangDirective is a parsed "!" line: its keyword and, for the directives
+// that take one (`! anchor rewrite`, `! surface table`), its argument.
+type bangDirective struct{ kind, arg string }
 
 func parseBangDirective(text string) (bangDirective, error) {
-	text = strings.TrimSpace(text)
-	fields := strings.Fields(text)
+	fields := strings.Fields(strings.TrimSpace(text))
 	if len(fields) == 0 {
 		return bangDirective{}, fmt.Errorf("empty directive")
 	}
-	return bangDirective{kind: fields[0]}, nil
+	b := bangDirective{kind: fields[0]}
+	if len(fields) > 1 {
+		b.arg = fields[1]
+	}
+	return b, nil
 }
 
 // questionAssertion is a parsed "?" line (§7.1).

@@ -432,7 +432,13 @@ func renderMemberLine(margin byte, seg Segment, v Value) string {
 	case SegKey:
 		text = escapeKey(seg.Name) + ": " + renderValueText(v)
 	case SegComment:
-		text = "# " + valueText(v)
+		// A comment address carries a {comment: "…"} value (§4.5b); the
+		// mirror spelling is the comment line itself.
+		if s, ok := CommentText(v); ok {
+			text = "# " + s
+		} else {
+			text = "# " + valueText(v)
+		}
 	default:
 		// Sequence element (scalar or keyed flow object) and the synthetic
 		// container-add marker both render as a bare value line.

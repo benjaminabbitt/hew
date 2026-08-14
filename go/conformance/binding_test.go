@@ -5,15 +5,16 @@ import (
 
 	"github.com/hew-format/hew"
 	"github.com/hew-format/hew/hewjson"
+	"github.com/hew-format/hew/hewyaml"
 	"github.com/hew-format/hew/internal/harness"
 	"github.com/hew-format/hew/internal/hewcli"
 	"github.com/hew-format/hew/internal/hewerr"
 )
 
-// applyByFormat dispatches to the one format binding this slice ships
-// (§8.1's JSON) and fails loud (HEW021) for anything else, matching the
-// spec's own registration model (Appendix A.6) without the registry
-// indirection a single binding doesn't need yet.
+// applyByFormat dispatches to the format bindings this slice ships (§8.1's
+// JSON and §8.3's YAML) and fails loud (HEW021) for anything else, matching
+// the spec's own registration model (Appendix A.6) without the registry
+// indirection two bindings don't need yet.
 func applyByFormat(target []byte, tl hew.TransformList, format string) ([]byte, error) {
 	if format != "" {
 		tl.Format = hew.FormatID(format)
@@ -21,6 +22,8 @@ func applyByFormat(target []byte, tl hew.TransformList, format string) ([]byte, 
 	switch tl.Format {
 	case hew.FormatJSON:
 		return hewjson.Apply(target, tl)
+	case hew.FormatYAML:
+		return hewyaml.Apply(target, tl)
 	default:
 		return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentApplier,
 			Target: tl.Target, Detail: fmt.Sprintf("no binding for format %q (P3)", tl.Format)}
