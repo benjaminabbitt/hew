@@ -260,7 +260,7 @@ func (w *corpusWorld) runRT1(c *harness.Case) harness.Outcome {
 	if err != nil {
 		return fail(err.Error())
 	}
-	hewText, err := b.DiffToHew(old, new_, c.Format)
+	hewText, err := b.DiffToHew(old, new_, c.Format, c.NewFile)
 	if err != nil {
 		return fail("diff: " + err.Error())
 	}

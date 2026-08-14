@@ -29,8 +29,11 @@ type Binding struct {
 	ApplyPatch func(patch, target []byte, format string) ([]byte, error)
 	// RenderHew renders .hewt bytes to .hew notation (render seam, RT2).
 	RenderHew func(hewt []byte) ([]byte, error)
-	// DiffToHew diffs two documents to .hew notation (diff seam).
-	DiffToHew func(old, new []byte, format string) ([]byte, error)
+	// DiffToHew diffs two documents to .hew notation (diff seam). target is
+	// the new side's file name, which the produced patch carries in its
+	// "--- <target>" header — a diff says "apply this to get here", and the
+	// file it names is the new one.
+	DiffToHew func(old, new []byte, format, target string) ([]byte, error)
 	// RunCLI runs the hew CLI in-process: argv (without argv0), a working
 	// directory all relative paths resolve against, and explicit streams.
 	RunCLI func(argv []string, dir string, stdin io.Reader, stdout, stderr io.Writer) int
@@ -340,7 +343,7 @@ func (e *Engine) runDiff(c *Case, seam Seam, mustRead func(string) ([]byte, erro
 	if err != nil {
 		return e.outcome(c, seam, StatusCorpusError, err.Error())
 	}
-	got, derr := e.Bind.DiffToHew(old, new_, c.Format)
+	got, derr := e.Bind.DiffToHew(old, new_, c.Format, c.NewFile)
 	if derr != nil {
 		return e.outcome(c, seam, StatusFail, "diff failed: "+derr.Error())
 	}

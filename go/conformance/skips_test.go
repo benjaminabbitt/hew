@@ -11,32 +11,24 @@ import "github.com/hew-format/hew/internal/harness"
 // end-state gate (`just corpus-go-strict`, HEW_CORPUS_NO_SKIPS=1) turns
 // every match into a failure.
 //
-// P3 state: the notation parser and renderer cover every non-markdown
-// fragment syntax (§8.1-§8.5), and the JSON (§8.1), JSONC (§8.2), and YAML
-// (§8.3) appliers are bound, as are Resolve (§9.2) and --ops/--record
-// (§9.7). Remaining: the TOML and HCL appliers, the differ (P4), and git
-// source resolution.
+// P4 state: the notation parser and renderer cover every non-markdown
+// fragment syntax (§8.1-§8.5); the JSON (§8.1), JSONC (§8.2) and YAML (§8.3)
+// appliers are bound, as are Resolve (§9.2), --ops/--record (§9.7), the
+// differ (§9.4) over those same three formats, and git source resolution
+// (§9.5, Appendix A.7). Remaining: the TOML and HCL appliers, and with them
+// those two formats' diff trees.
 var skipRules = []harness.SkipRule{
 	{Case: "markdown/*", Seam: "*", Reason: "deferred: Markdown backend gated on spec §8.7/O29 evaluation (severable family)"},
 
-	// The round-trip cases exercise parse -> render -> re-parse -> apply
-	// without touching the differ at all (engine.runApply derives the IR
-	// from expected.hew via ParseToHewt for a Roundtrip case, never via
-	// DiffToHew); only their diff seam needs the differ.
-	{Case: "json/roundtrip-basic", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
-	{Case: "jsonc/roundtrip-basic", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
-	{Case: "yaml/roundtrip-basic", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
-
-	// git-anchor source resolution (Appendix A.7) and the differ are both P4.
-	{Case: "cli/diff-git-anchor", Seam: "cli", Reason: "M11: differ / git source resolution not yet implemented (P4)"},
-
 	// TOML and HCL parse and render for real (§8.4 table headers and dotted
 	// keys, §8.5 attributes/blocks/labels, §7.2 ordinals); what neither
-	// format has yet is an applier, a differ, or a CLI backend.
+	// format has yet is a document model, and without one it has neither an
+	// applier nor a differ — hew.DiffTrees is format-agnostic, but it has to
+	// be handed a tree, and only a binding can build one.
 	{Case: "toml/*", Seam: "apply-ir", Reason: "P3: hewtoml applier not yet implemented"},
 	{Case: "toml/*", Seam: "e2e", Reason: "P3: hewtoml applier not yet implemented"},
-	{Case: "toml/*", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
+	{Case: "toml/*", Seam: "diff", Reason: "P3: hewtoml has no document model yet, so no diff tree to hand the differ"},
 	{Case: "hcl/*", Seam: "apply-ir", Reason: "P3: hewhcl applier not yet implemented"},
 	{Case: "hcl/*", Seam: "e2e", Reason: "P3: hewhcl applier not yet implemented"},
-	{Case: "hcl/*", Seam: "diff", Reason: "M11: differ not yet implemented (P4)"},
+	{Case: "hcl/*", Seam: "diff", Reason: "P3: hewhcl has no document model yet, so no diff tree to hand the differ"},
 }

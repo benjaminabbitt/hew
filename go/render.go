@@ -18,7 +18,8 @@ type RenderOptions struct {
 	// parity with Appendix A.3 though this implementation does not read it:
 	// the renderer never drops or synthesizes assertions the caller didn't
 	// hand it (that would silently change strictness, exactly what §9.4-R2's
-	// own note warns against).
+	// own note warns against). The radius is DiffOptions.Context's to choose,
+	// because choosing it needs both documents, which the renderer never has.
 	Context int
 	// Preamble controls whether "hew: 1" is emitted. Convergence is never
 	// written as the file-level `idempotent:` pragma (§2.1, ruling O3): the
@@ -28,7 +29,28 @@ type RenderOptions struct {
 	// Comment, if non-empty, is written as a leading "# " comment line before
 	// the preamble.
 	Comment string
+	// Fragment selects the syntax the hunk bodies' fragments are written in.
+	// §5 defines both images as parsed "by the target format's fragment
+	// parser", so a JSON patch may spell its keys `"port"` and a JSONC patch
+	// may spell a comment `// …`; the zero value keeps the format-neutral
+	// spelling this renderer has always emitted, which every format's fragment
+	// parser also accepts.
+	Fragment FragmentStyle
 }
+
+// FragmentStyle is RenderOptions.Fragment's vocabulary.
+type FragmentStyle string
+
+const (
+	// FragmentNeutral writes body lines in one format-neutral, YAML-shaped
+	// spelling. It round-trips through the parser for every format.
+	FragmentNeutral FragmentStyle = ""
+	// FragmentNative writes each body line in the list's own Format: JSON and
+	// JSONC keys and strings quoted, JSONC comments as `//`, YAML sequences
+	// with `- ` markers and block-style values. This is what the differ emits,
+	// so that a patch reads as a diff of the file it patches (§9.4-R5).
+	FragmentNative FragmentStyle = "native"
+)
 
 // ErrInexpressible reports a transform the mirror grammar cannot express
 // (Appendix C): op copy (C.2), or a remove with no accompanying test to
@@ -53,6 +75,7 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	dial := dialectFor(opt.Fragment, tl.Format)
 
 	var b strings.Builder
 	if opt.Comment != "" {
@@ -77,7 +100,7 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		lines, err := renderGroup(anchor, groups[anchor.String()])
+		lines, err := renderGroup(anchor, groups[anchor.String()], dial)
 		if err != nil {
 			return nil, err
 		}
@@ -269,7 +292,7 @@ type contentEntry struct {
 
 // renderGroup renders one hunk's body lines for the transforms sharing one
 // anchor (§9.1's lowering, inverted).
-func renderGroup(anchor Path, ts []Transform) ([]string, error) {
+func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 	var order []string
 	bySeg := map[string]*contentEntry{}
 	// chainAfter/chainBefore let a second add that names the same sibling
@@ -404,7 +427,7 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 				v = e.plainTest.Value
 			case len(e.fieldTests) > 0:
 				var err error
-				v, err = flowValueFromFields(e.seg, e.fieldTests)
+				v, err = subsetValueFromFields(e.fieldTests, dial)
 				if err != nil {
 					return nil, err
 				}
@@ -415,9 +438,9 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			// and the parser reads a `-`/`+` pair as two entries: the test
 			// carries the `-` line's qualifiers, the replace the `+` line's.
 			lines = append(lines, qualLines(e.test())...)
-			lines = append(lines, renderMemberLine('-', e.seg, v))
+			lines = append(lines, dial.memberLines('-', e.seg, v)...)
 			lines = append(lines, qualLines(e.replace)...)
-			lines = append(lines, renderMemberLine('+', e.seg, e.replace.Value))
+			lines = append(lines, dial.memberLines('+', e.seg, e.replace.Value)...)
 		case e.remove != nil:
 			var v Value
 			switch {
@@ -425,7 +448,7 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 				v = e.plainTest.Value
 			case len(e.fieldTests) > 0:
 				var err error
-				v, err = flowValueFromFields(e.seg, e.fieldTests)
+				v, err = subsetValueFromFields(e.fieldTests, dial)
 				if err != nil {
 					return nil, err
 				}
@@ -435,20 +458,20 @@ func renderGroup(anchor Path, ts []Transform) ([]string, error) {
 			// One `-` line carries both the test and the removal, so it takes
 			// the union of their qualifiers.
 			lines = append(lines, qualLines(e.test(), e.remove)...)
-			lines = append(lines, renderMemberLine('-', e.seg, v))
+			lines = append(lines, dial.memberLines('-', e.seg, v)...)
 		case e.add != nil:
 			lines = append(lines, qualLines(e.add)...)
-			lines = append(lines, renderMemberLine('+', e.seg, e.add.Value))
+			lines = append(lines, dial.memberLines('+', e.seg, e.add.Value)...)
 		case len(e.fieldTests) > 0:
-			v, err := flowValueFromFields(e.seg, e.fieldTests)
+			v, err := subsetValueFromFields(e.fieldTests, dial)
 			if err != nil {
 				return nil, err
 			}
 			lines = append(lines, qualLines(e.test())...)
-			lines = append(lines, renderMemberLine(' ', e.seg, v))
+			lines = append(lines, dial.memberLines(' ', e.seg, v)...)
 		case e.plainTest != nil:
 			lines = append(lines, qualLines(e.plainTest)...)
-			lines = append(lines, renderMemberLine(' ', e.seg, e.plainTest.Value))
+			lines = append(lines, dial.memberLines(' ', e.seg, e.plainTest.Value)...)
 		}
 	}
 	if len(lines) == 0 {
@@ -562,11 +585,15 @@ func insertBefore(order []string, target, key string) []string {
 	return append(order, key)
 }
 
-// flowValueFromFields reconstructs a keyed element's whole value from its
-// individually-tested fields, for a "-" line's display or a member's context
-// rendering.
-func flowValueFromFields(elem Segment, fields []*Transform) (Value, error) {
+// subsetValueFromFields reconstructs a keyed element's subset-matched value
+// from its individually-tested fields, for a "-" line's display or a member's
+// context rendering. The style follows the dialect: a JSON body line spells the
+// subset as a flow object, a YAML one as a block mapping under its `- ` marker.
+func subsetValueFromFields(fields []*Transform, dial dialect) (Value, error) {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
+	if dial.block {
+		m.Style = 0
+	}
 	for _, f := range fields {
 		// The field's own name is its Path's last segment.
 		last := f.Path.Segment(f.Path.Len() - 1)
@@ -578,13 +605,49 @@ func flowValueFromFields(elem Segment, fields []*Transform) (Value, error) {
 	return NodeValue(m), nil
 }
 
-// renderMemberLine renders one context/"-"/"+" line for a direct-child
-// segment and its value.
-func renderMemberLine(margin byte, seg Segment, v Value) string {
-	var text string
+// dialect is the body-line spelling one rendered patch uses. §5 hands both
+// hunk images to the target format's own fragment parser, so the notation may
+// wear that format's syntax; the neutral dialect is the one spelling every
+// fragment parser accepts, and is what a caller who names no format gets.
+type dialect struct {
+	native bool
+	json   bool   // JSON/JSONC: quoted keys, quoted strings, flow collections
+	block  bool   // YAML: "- " sequence markers and block-style values
+	marker string // standalone comment marker, trailing space included
+}
+
+func dialectFor(style FragmentStyle, format FormatID) dialect {
+	if style != FragmentNative {
+		return dialect{marker: "# "}
+	}
+	switch format {
+	case FormatJSON, FormatJSONC:
+		return dialect{native: true, json: true, marker: "// "}
+	case FormatYAML:
+		return dialect{native: true, block: true, marker: "# "}
+	default:
+		return dialect{native: true, marker: "# "}
+	}
+}
+
+// memberLines renders one context/"-"/"+" body entry for a direct-child
+// segment and its value. It returns several lines when the value is a block
+// collection: an added node keeps the new document's own shape (§9.4-R5), and
+// every continuation line carries the same margin.
+func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
 	switch seg.Kind {
 	case SegKey:
-		text = escapeKey(seg.Name) + ": " + renderValueText(v)
+		body := d.valueLines(v)
+		if !d.isBlock(v) {
+			return d.marginate(margin, []string{d.key(seg.Name) + ": " + body[0]})
+		}
+		// A block collection lives under its key, not after it, even when it
+		// happens to be one line long — `env: GITHUB_TOKEN: x` is not YAML.
+		out := []string{d.key(seg.Name) + ":"}
+		for _, l := range body {
+			out = append(out, "  "+l)
+		}
+		return d.marginate(margin, out)
 	case SegComment:
 		// A comment node's value is `{comment: <text>}` (§4.5b, §11.10
 		// reduction 3); the body line shows the text, not the wrapper.
@@ -592,13 +655,137 @@ func renderMemberLine(margin byte, seg Segment, v Value) string {
 		if !ok {
 			body = valueText(v)
 		}
-		text = strings.TrimRight("# "+body, " ")
+		return d.marginate(margin, []string{strings.TrimRight(d.marker+body, " ")})
 	default:
-		// Sequence element (scalar or keyed flow object) and the synthetic
-		// container-add marker both render as a bare value line.
-		text = renderValueText(v)
+		// Sequence element, and the synthetic container-add marker.
+		body := d.valueLines(v)
+		if !d.block {
+			return d.marginate(margin, body)
+		}
+		out := make([]string, 0, len(body))
+		for i, l := range body {
+			if i == 0 {
+				out = append(out, "- "+l)
+				continue
+			}
+			out = append(out, "  "+l)
+		}
+		return d.marginate(margin, out)
 	}
-	return string(margin) + " " + text
+}
+
+func (d dialect) marginate(margin byte, lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = string(margin) + " " + l
+	}
+	return out
+}
+
+// key spells a member name on a body line. The neutral dialect keeps the
+// path-shaped spelling it has always emitted; a native one writes the name the
+// way the target format writes it.
+func (d dialect) key(name string) string {
+	switch {
+	case d.json:
+		return strconv.Quote(name)
+	case d.native && needsQuote(name):
+		return strconv.Quote(name)
+	}
+	return escapeKey(name)
+}
+
+// isBlock reports whether the value renders as YAML block lines rather than
+// inline. An empty collection has no block form — yaml writes it `{}` — so it
+// is inline whatever its style says.
+func (d dialect) isBlock(v Value) bool {
+	n := v.Node()
+	return d.block && n != nil && len(n.Content) > 0 &&
+		(n.Kind == yaml.MappingNode || n.Kind == yaml.SequenceNode) &&
+		n.Style&yaml.FlowStyle == 0
+}
+
+// valueLines renders a value as one or more body lines, never empty.
+func (d dialect) valueLines(v Value) []string {
+	n := v.Node()
+	switch {
+	case n == nil:
+		return []string{"null"}
+	case d.json:
+		return []string{jsonText(n)}
+	case d.isBlock(v):
+		return blockLines(n)
+	case d.block && n.Kind == yaml.ScalarNode:
+		return []string{yamlScalarText(n)}
+	}
+	return []string{renderValueText(v)}
+}
+
+// blockLines renders a collection in YAML block style, which is what makes an
+// added mapping come back out with the shape it had in the new document
+// (§9.4-R5) instead of collapsing into one flow line.
+func blockLines(n *yaml.Node) []string {
+	c := cloneNode(n)
+	stripComments(c)
+	var buf strings.Builder
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(c); err != nil {
+		return []string{renderValueText(NodeValue(n))}
+	}
+	_ = enc.Close()
+	return strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+}
+
+func stripComments(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	n.HeadComment, n.LineComment, n.FootComment = "", "", ""
+	for _, c := range n.Content {
+		stripComments(c)
+	}
+}
+
+// yamlScalarText keeps an explicitly double-quoted source scalar quoted, so a
+// string that would otherwise read back as a number or a boolean survives the
+// round trip as the string the author wrote.
+func yamlScalarText(n *yaml.Node) string {
+	if n.Style&yaml.DoubleQuotedStyle != 0 && n.ShortTag() == "!!str" {
+		return strconv.Quote(n.Value)
+	}
+	return scalarLiteral(n)
+}
+
+// jsonText renders a value as JSON. JSONC's own comments never reach here: a
+// comment is a body line of its own, not a value.
+func jsonText(n *yaml.Node) string {
+	switch n.Kind {
+	case yaml.MappingNode:
+		parts := make([]string, 0, len(n.Content)/2)
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			parts = append(parts, strconv.Quote(n.Content[i].Value)+": "+jsonText(n.Content[i+1]))
+		}
+		if len(parts) == 0 {
+			return "{}"
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	case yaml.SequenceNode:
+		parts := make([]string, 0, len(n.Content))
+		for _, c := range n.Content {
+			parts = append(parts, jsonText(c))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case yaml.AliasNode:
+		return jsonText(n.Alias)
+	}
+	switch n.ShortTag() {
+	case "!!bool", "!!int", "!!float":
+		return n.Value
+	case "!!null":
+		return "null"
+	}
+	return strconv.Quote(n.Value)
 }
 
 func renderFreeAssertion(t Transform) (string, error) {
