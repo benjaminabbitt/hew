@@ -34,9 +34,17 @@ func TestShippedHalves(t *testing.T) {
 		applier, differ, document bool
 	}{
 		{"json", true, true, true},
-		{"jsonc", true, true, false},
-		{"yaml", true, true, false},
-		{"toml", true, true, false},
+		{"jsonc", true, true, true},
+		{"yaml", true, true, true},
+		{"toml", true, true, true},
+		// HCL is the one appliable format with no reader, and the reason is a
+		// CONTRACT limit rather than missing work: Node resolves one segment to
+		// one child, while an HCL step consumes a tuple (block type, its label
+		// segments, an optional key-match and ordinal) and refuses a bare
+		// quoted segment. /provider names a set, not a node. Widening Node to
+		// let an extension consume several segments is the open interface
+		// question; until it is settled a reader here could only report
+		// addresses the applier rejects.
 		{"hcl", true, true, false},
 		// Markdown ships neither half while §8.7's dialect evaluation is open
 		// (O29). It is registered anyway, because detection and parsing a

@@ -23,6 +23,10 @@ import (
 
 const targetYAML = "server:\n  host: localhost\n  port: 8080\n  timeout: 30\n"
 
+const targetHCL = "terraform {\n  required_version = \">= 1.6\"\n}\n"
+
+const patchHCL = "hew: 1\n\n--- target.tf format=hcl\n\n@@ /terraform @@\n  required_version = \">= 1.6\"\n- required_version = \">= 1.6\"\n+ required_version = \">= 1.7\"\n"
+
 const patchYAML = "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n  port: 8080\n- timeout: 30\n+ timeout: 60\n"
 
 const patchedYAML = "server:\n  host: localhost\n  port: 8080\n  timeout: 60\n"
@@ -561,13 +565,29 @@ func TestApplyFileNoOpRecordSaysNothingHappened(t *testing.T) {
 // extension ships an applier but no document view — YAML, in this build — can
 // apply a patch it cannot record. The applier succeeds, the record build does
 // not, and the target must still hold its original bytes.
+// The forced failure is an HCL target, the one appliable format that ships no
+// Binding.Document (its addressing consumes a segment TUPLE, which the one
+// segment / one child Node contract cannot express). Resolve therefore cannot
+// project the executed list, and a record cannot be built — which is exactly
+// the ordering this test is about, not a property of HCL.
+//
+// When HCL gains a reader this test FAILS rather than silently passing, and
+// whoever lands that reader picks the next mechanism: the permanent case is an
+// `? absent` assertion on a key-match that matches nothing, which is satisfied
+// by the applier and has no RFC 6901 pointer at all.
 func TestApplyFileRecordFailureLeavesTargetUntouched(t *testing.T) {
-	fsys := memfs(t, map[string]string{"/w/config.yaml": targetYAML})
-	_, err := ApplyFile(fsys, "/w", parse(t, patchYAML), WriteOptions{RecordPath: "out.hewt"})
+	fsys := memfs(t, map[string]string{"/w/target.tf": targetHCL})
+	_, err := ApplyFile(fsys, "/w", parse(t, patchHCL), WriteOptions{RecordPath: "out.hewt"})
 	if err == nil {
 		t.Fatal("a record that cannot be built must fail the run")
 	}
-	if got := read(t, fsys, "/w/config.yaml"); got != targetYAML {
+	// Pin the REASON. Without this the test would keep passing on any error at
+	// all — a stale target (HEW011), a bad patch — and stop testing the
+	// ordering it is named for.
+	if he, ok := hewerr.As(err); !ok || he.Code != hewerr.CodeUnsupportedFormat {
+		t.Fatalf("want the record build to fail for want of a reader (HEW021), got %v", err)
+	}
+	if got := read(t, fsys, "/w/target.tf"); got != targetHCL {
 		t.Errorf("target = %q, want the pre-apply bytes: the record is built before the commit", got)
 	}
 	if _, statErr := fsys.Stat("/w/out.hewt"); statErr == nil {
