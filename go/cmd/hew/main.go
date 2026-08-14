@@ -21,5 +21,21 @@ func main() {
 	if err != nil {
 		os.Exit(2)
 	}
-	os.Exit(hewcli.Run(os.Args[1:], dir, os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(hewcli.Run(os.Args[1:], dir, hewEnv(), os.Stdin, os.Stdout, os.Stderr))
+}
+
+// hewEnv is the whole of hew's environment surface: the two variables
+// Appendix B.1 declares, both governing the record's applied_at (§9.7, ruling
+// O37). It is built HERE, in main, rather than read inside hewcli, so that the
+// set is enumerable by reading one function — and so that the corpus harness,
+// which drives hewcli in-process with a pinned map, exercises the same code
+// path this binary does.
+func hewEnv() map[string]string {
+	env := map[string]string{}
+	for _, name := range []string{"HEW_APPLIED_AT", "SOURCE_DATE_EPOCH"} {
+		if v, ok := os.LookupEnv(name); ok {
+			env[name] = v
+		}
+	}
+	return env
 }

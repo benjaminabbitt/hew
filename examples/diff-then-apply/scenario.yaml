@@ -45,12 +45,17 @@ steps:
       radius is a **strictness dial, not a verbosity dial** — context lines compile to
       assertions, so `-U 0` would not make this patch tidier, it would make it weaker.
 
+      Note which file the `--- ` line names: `original.json`, the **old** side. That is
+      `patch(1)`'s convention (`--- old`, `+++ new`) and it is the only one that composes
+      — a patch is a function *from* old, so naming its result would name a file the
+      applier will never open.
+
   - title: Apply it to the original
     note: |
-      The patch names `app.json` as its target, because that is the document it
-      describes. `-t` overrides that, which is how a patch produced from one pair of
-      files gets applied to another copy.
-    run: [apply, -i, -t, original.json, change.hew]
+      No `-t` is needed: the patch already names `original.json`, because that is the file
+      it applies to. (`-t` overrides the target, which is how a patch produced from one
+      pair of files gets applied to a third copy.)
+    run: [apply, -i, change.hew]
     expect_exit: 0
     watch: [original.json]
     identical:

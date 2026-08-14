@@ -28,30 +28,14 @@ import "github.com/benjaminabbitt/hew/go/internal/harness"
 var skipRules = []harness.SkipRule{
 	{Case: "markdown/*", Seam: "*", Reason: "deferred: Markdown backend gated on spec §8.7/O29 evaluation (severable family)"},
 
-	// O38 — `hew diff` of identical inputs emits a preamble-only patch, and a
-	// patch whose file section has no hunks applies as a no-op. Today the
-	// differ writes zero bytes for an empty result (hewcli/diff.go) and the
-	// parser refuses a hunkless file section (parse.go finishSection), which
-	// is the pair of behaviours §10.2's amendment replaces.
-	{Case: "cli/diff-empty-output", Seam: "cli", Reason: "P5: ratified, implementation pending — O38 (diff of identical inputs emits a preamble-only patch, not zero bytes)"},
-	{Case: "cli/apply-no-hunks-noop", Seam: "cli", Reason: "P5: ratified, implementation pending — O38 (a file section with no hunks applies as a no-op, exit 0; the parser still refuses it as HEW001)"},
-
-	// O39 — the `--- ` line names the OLD side. The corpus's own diff seam
-	// already passes the old label (harness engine, §9.4-R7), so the six
-	// roundtrip cases need no rule; the CLI still labels with the new side
-	// (hewcli/diff.go's `target := newLabel`), which only a case with two
-	// differently-named descriptors can see.
-	{Case: "cli/diff-old-target", Seam: "cli", Reason: "P5: ratified, implementation pending — O39 (hew diff stamps the OLD side's label; the CLI still stamps the new side)"},
-
-	// O40 — `hew apply --reversal`. The flag does not exist yet, so the run
-	// fails as a usage error before it reaches the reversal artifact at all.
-	{Case: "cli/apply-reversal", Seam: "cli", Reason: "P5: ratified, implementation pending — O40 (hew apply --reversal writes diff(after→before) as a real .hew)"},
-
-	// O37 — a pinned applied_at. The harness carries the case's env: block to
-	// the RunCLI seam; the CLI reads no environment yet, so the record still
-	// carries the wall clock. See newBinding's RunCLI hook, which drops env
-	// on the floor and says so.
-	{Case: "cli/record-pinned-time", Seam: "cli", Reason: "P5: ratified, implementation pending — O37 (HEW_APPLIED_AT pins the record's applied_at; the CLI reads no environment)"},
+	// O37, O38, O39 and O40 stood here and are now LIVE: the five cli cases
+	// they named — cli/diff-empty-output, cli/apply-no-hunks-noop,
+	// cli/diff-old-target, cli/apply-reversal, cli/record-pinned-time — run
+	// unskipped against hewfs (Appendix A.8) and the CLI's `--reversal` and
+	// environment plumbing. Their rules were deleted BEFORE the code was
+	// written, which is O50(a): a work package that implements first and
+	// deletes its rules afterwards wrote its acceptance test knowing the
+	// answer.
 
 	// O41 — the quoted-key segment, and the canonical-rendering rule that makes
 	// String()/ParsePath a bijection. Unlike every other rule in this table,

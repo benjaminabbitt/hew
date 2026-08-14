@@ -93,14 +93,15 @@ func newBinding() harness.Binding {
 			}
 			return hew.Render(tl, hew.RenderOptions{Preamble: true, Context: hew.ContextDefault, Fragment: hew.FragmentNative})
 		},
-		// env is accepted at the seam and DROPPED here, deliberately and
-		// visibly: O37's HEW_APPLIED_AT is ratified and unimplemented, so
-		// there is nothing in hewcli to hand it to yet. cli/record-pinned-time
-		// is skipped for exactly that reason, and wiring the CLI to read the
-		// environment is what deletes both this comment and that skip rule.
+		// The case's env: block goes straight through to the CLI, which takes
+		// its environment as data rather than reading the process's (O37,
+		// Appendix B.1). That is what lets cli/record-pinned-time pin
+		// applied_at without the runner mutating global state — and the reason
+		// the two variables the manifest may name are the two the spec
+		// declares environment-readable, checked at manifest validation.
 		RunCLI: func(argv []string, dir string, env map[string]string,
 			stdin io.Reader, stdout, stderr io.Writer) int {
-			return hewcli.Run(argv, dir, stdin, stdout, stderr)
+			return hewcli.Run(argv, dir, env, stdin, stdout, stderr)
 		},
 	}
 }

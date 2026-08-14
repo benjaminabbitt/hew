@@ -157,7 +157,11 @@ func (p *parser) document() ([]TransformList, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, parseErr(0, "", "the patch has no hunks; an empty patch is refused (§10.2)")
+		// §10.2 as amended by O38: the line falls at "did the author say which
+		// file this is about". A preamble with no `--- ` line says nothing
+		// about any file, so it is still HEW001 — a generating tool that
+		// emitted nothing must not be able to pass that off as an apply.
+		return nil, parseErr(0, "", "the patch names no file section; an empty patch is refused (§10.2)")
 	}
 	return out, nil
 }
@@ -278,13 +282,15 @@ func (p *parser) fileSection() (TransformList, error) {
 	return finishSection(tl, ln.num)
 }
 
-// finishSection refuses a section that contributed nothing and validates the
-// records it did contribute, so an invalid combination of fields is HEW001 at
-// the parser rather than a surprise inside a backend (§9.6, §10.2).
+// finishSection validates the records a section contributed, so an invalid
+// combination of fields is HEW001 at the parser rather than a surprise inside a
+// backend (§9.6, §10.2).
+//
+// A section that contributed NO hunks is legal (§10.2 as amended by O38): it is
+// the preamble-only patch `hew diff` emits for two identical inputs (Appendix
+// B.2.2), and it applies as a no-op. This function used to refuse it, which is
+// the half of the amendment that lived in the parser.
 func finishSection(tl TransformList, line int) (TransformList, error) {
-	if len(tl.Transform) == 0 {
-		return TransformList{}, parseErr(line, tl.Target, "file section for %s has no hunks; an empty patch is refused (§10.2)", tl.Target)
-	}
 	if err := tl.Validate(); err != nil {
 		if he, ok := hewerr.As(err); ok && he.PatchLine == 0 {
 			he.PatchLine = line

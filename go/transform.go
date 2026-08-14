@@ -238,9 +238,15 @@ func irErr(path, format string, args ...any) error {
 	}
 }
 
-// Validate checks the whole list: a target, a non-empty transform sequence
-// (§9.6: "Empty is HEW001"), a known format, and every record's field/op
-// compatibility.
+// Validate checks the whole list: a target, a known format, and every record's
+// field/op compatibility.
+//
+// An EMPTY transform sequence is valid (§9.6 as amended by O38): a document
+// with a target and no transforms is the IR of a no-op patch, and it applies as
+// one. What is still refused is a list with no target — "no transforms" is a
+// complete statement about a named file, while "no file" is not a statement at
+// all (§10.2's amended table). The `transforms` key's own presence is the
+// codec's business, not Validate's: a list built in memory has no key to omit.
 func (tl TransformList) Validate() error {
 	if tl.Target == "" {
 		return irErr("", "transform list has no target")
@@ -252,9 +258,6 @@ func (tl TransformList) Validate() error {
 			Target:    tl.Target,
 			Detail:    fmt.Sprintf("unknown format %q", string(tl.Format)),
 		}
-	}
-	if len(tl.Transform) == 0 {
-		return irErr("", "transform list is empty; an empty patch is refused (§10.2)")
 	}
 	for i := range tl.Transform {
 		if err := tl.Transform[i].Validate(); err != nil {

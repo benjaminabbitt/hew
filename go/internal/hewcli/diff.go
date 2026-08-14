@@ -137,7 +137,7 @@ func runDiff(args []string, dir string, stdin io.Reader, stdout, stderr io.Write
 	}
 
 	resolver := hewsource.NewResolver(dir, stdin)
-	oldBytes, _, err := resolver.Resolve(f.sources[0])
+	oldBytes, oldLabel, err := resolver.Resolve(f.sources[0])
 	if err != nil {
 		return diffSourceErr(stderr, f.sources[0], err)
 	}
@@ -146,19 +146,27 @@ func runDiff(args []string, dir string, stdin io.Reader, stdout, stderr io.Write
 		return diffSourceErr(stderr, f.sources[1], err)
 	}
 
-	// The target a diff produces is the NEW side's own name — the patch says
-	// "apply this to get here", and the file it names is the one the reader
-	// will open. A stdin new side has no name to give.
-	target := newLabel
+	// §9.4-R7 / Appendix B.2.1, ruling O39: the `--- ` line names the OLD
+	// side. The patch is a function FROM old — RT1 says so in symbols,
+	// apply(parse(render(diff(old, new))), old) == new — so naming the new side
+	// would stamp a file the applier never opens. The labels arrive from the
+	// resolver, which is also where B.2.1's git-anchor corollary is already
+	// satisfied: `HEAD:config.yaml` resolves with the label `config.yaml`,
+	// because a `--- ` line is a target path and a revision is not one.
+	//
+	// A stdin old side has no name to give, so the new side's label stands in.
+	// Both sides stdin never reaches here: the resolver refuses the second "-"
+	// as a usage error (§9.5).
+	target := oldLabel
 	if target == "-" {
-		target = f.sources[0]
+		target = newLabel
 	}
 	format := hew.FormatID(f.format)
 	if format == "" {
-		format = detectFormat(newLabel)
+		format = detectFormat(target)
 	}
 	if format == "" {
-		format = detectFormat(f.sources[0])
+		format = detectFormat(newLabel)
 	}
 
 	var notes []string
@@ -173,14 +181,13 @@ func runDiff(args []string, dir string, stdin io.Reader, stdout, stderr io.Write
 		return 2
 	}
 
-	// An empty patch is written as no bytes at all. Emitting a lone header
-	// would produce a .hew file that `hew apply` then refuses as HEW001
-	// (§10.2's "an empty patch is refused"), which would turn "nothing
-	// changed" into an error one command later.
-	if len(tl.Transform) == 0 {
-		return 0
-	}
-
+	// Two identical inputs produce a PREAMBLE-ONLY patch, not zero bytes
+	// (§9.4-R8, Appendix B.2.2, ruling O38): `hew: 1`, the `--- ` line, and no
+	// hunks. This code used to return here without writing anything, which made
+	// `hew diff a b > p.hew && hew apply p.hew` an error the day the answer was
+	// "no change" — zero bytes is a file apply refuses as HEW001. Nothing
+	// special happens below: the renderer writes a hunkless list as its
+	// preamble and target line, which is exactly the artifact wanted.
 	var out []byte
 	dest := f.output
 	if f.transformsOut != "" {
