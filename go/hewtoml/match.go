@@ -123,6 +123,35 @@ func matchesSeg(n *tnode, seg hew.Segment) bool {
 	return e != nil && e.val.kind == nScalar && scalarEq(e.val, want)
 }
 
+// segNamesValue applies §4.2's key-match comparison to a value in hand, for a
+// node this run is adding and which therefore has no *tnode to compare — the
+// same question matchesSeg asks of a parsed element.
+func segNamesValue(seg hew.Segment, v hew.Value) bool {
+	n := v.Node()
+	if n == nil || seg.Kind != hew.SegMatch {
+		return false
+	}
+	want := scalarNode(seg.Value)
+	if seg.Name == "" {
+		return n.Kind == yaml.ScalarNode && yamlScalarEq(n, want)
+	}
+	if n.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == seg.Name {
+			return n.Content[i+1].Kind == yaml.ScalarNode && yamlScalarEq(n.Content[i+1], want)
+		}
+	}
+	return false
+}
+
+// yamlScalarEq is scalarEq between two YAML scalars: the same rule, with the
+// reader's decoding already done on both sides.
+func yamlScalarEq(got, want *yaml.Node) bool {
+	return scalarEq(&tnode{kind: nScalar, tag: got.ShortTag(), text: got.Value}, want)
+}
+
 // scalarNode converts a path segment's identity Scalar into a YAML scalar
 // node, so `port=8080` compares as the number and `port="8080"` as the string.
 func scalarNode(s hew.Scalar) *yaml.Node {

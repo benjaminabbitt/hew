@@ -505,6 +505,43 @@ func TestDiffNilTreeIsAnError(t *testing.T) {
 	}
 }
 
+// --- label addressing (§4.3) -------------------------------------------------
+
+// dlabel is a container whose children are addressed by LABEL, the shape an
+// HCL block's `(type, labels)` tuple takes in a diff tree.
+func dlabel(kv ...any) *DiffNode {
+	n := dmap(kv...)
+	for i := range n.Children {
+		n.Children[i].Label = true
+	}
+	return n
+}
+
+// A label child is addressed as /provider/"google", not /provider/google: the
+// second step of a block's address is not a member name.
+func TestDiffAddressesLabelChildrenAsLabels(t *testing.T) {
+	old := dmap("provider", dlabel("google", dmap("project", dstr("old"))))
+	new := dmap("provider", dlabel("google", dmap("project", dstr("new"))))
+	got := summarize(diffOK(t, old, new, DiffOptions{}))
+	want := "test /provider/\"google\"/project =old\nreplace /provider/\"google\"/project =new\n"
+	if got != want {
+		t.Fatalf("got\n%swant\n%s", got, want)
+	}
+}
+
+// A label and a member name that read the same are different addresses, so
+// they must be different nodes — otherwise a diff between the two shapes would
+// come out empty.
+func TestLabelAndKeyChildrenAreDifferentNodes(t *testing.T) {
+	if dlabel("a", dnum("1")).canonical() == dmap("a", dnum("1")).canonical() {
+		t.Fatal("a label child and a key child share a canonical token")
+	}
+	tl := diffOK(t, dmap("p", dmap("a", dnum("1"))), dmap("p", dlabel("a", dnum("1"))), DiffOptions{})
+	if len(tl.Transform) == 0 {
+		t.Fatal("the two shapes differ, so the patch must not be empty")
+	}
+}
+
 // --- determinism (§9.4-R1) ---------------------------------------------------
 
 func TestDiffIsDeterministic(t *testing.T) {

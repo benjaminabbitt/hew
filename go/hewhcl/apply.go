@@ -92,6 +92,11 @@ type run struct {
 	all       []hew.Transform
 	converged map[string]bool
 	touched   []int
+
+	// pending is the insertions this run has already planned, which is what
+	// lets a `+` line be placed after another `+` line of the same hunk (§9.1
+	// step 5) even though that sibling is in no parse of the target.
+	pending []pendingAdd
 }
 
 // touch records that a body was modified, by the byte offset of its opening

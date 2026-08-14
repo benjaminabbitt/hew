@@ -11,8 +11,10 @@ package hewdiff
 
 import (
 	"github.com/hew-format/hew"
+	"github.com/hew-format/hew/hewhcl"
 	"github.com/hew-format/hew/hewjson"
 	"github.com/hew-format/hew/hewjsonc"
+	"github.com/hew-format/hew/hewtoml"
 	"github.com/hew-format/hew/hewyaml"
 	"github.com/hew-format/hew/internal/hewerr"
 )
@@ -47,6 +49,10 @@ func treeBuilder(format hew.FormatID, target string) (func([]byte) (*hew.DiffNod
 		return hewjsonc.DiffTree, nil
 	case hew.FormatYAML:
 		return hewyaml.DiffTree, nil
+	case hew.FormatTOML:
+		return hewtoml.DiffTree, nil
+	case hew.FormatHCL:
+		return hewhcl.DiffTree, nil
 	case "":
 		return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentDiffer, Target: target,
 			Detail: "no format declared and none inferred from the source's extension (§8.0)"}

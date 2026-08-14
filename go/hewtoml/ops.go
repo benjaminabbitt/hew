@@ -234,7 +234,7 @@ func (r *run) planCreate(t hew.Transform) ([]edit, error) {
 			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 				"add: "+t.Value.String()+" has no TOML spelling (§8.4)")
 		}
-		return r.insertBlock("["+dottedKey(full)+"]", body, t, len(r.d.src))
+		return r.insertBlock(anc.node, "["+dottedKey(full)+"]", body, t, len(r.d.src))
 	case anc.node.inline:
 		if len(rest) != 1 {
 			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
@@ -258,7 +258,7 @@ func (r *run) planCreate(t hew.Transform) ([]edit, error) {
 	if verr != nil {
 		return nil, verr
 	}
-	return r.insertBlock("["+dottedKey(full[:len(full)-1])+"]", []string{line}, t, len(r.d.src))
+	return r.insertBlock(anc.node, "["+dottedKey(full[:len(full)-1])+"]", []string{line}, t, len(r.d.src))
 }
 
 // assignLine renders one `key = value` assignment for a creation.
@@ -332,7 +332,7 @@ func (r *run) insertElement(seq *tnode, t hew.Transform) ([]edit, error) {
 	if n := len(seq.elems); n > 0 {
 		pos = seq.elems[n-1].blockEnd
 	}
-	return r.insertBlock("[["+dottedKey(seq.path)+"]]", body, t, pos)
+	return r.insertBlock(seq, "[["+dottedKey(seq.path)+"]]", body, t, pos)
 }
 
 // insertItem adds one item to an inline array, adopting the separator its
@@ -349,14 +349,62 @@ func (r *run) insertItem(seq *tnode, t hew.Transform) ([]edit, error) {
 	}
 	i, err2 := r.placeAmong(elemSpans(seq), t)
 	if err2 != nil {
-		return nil, err2
+		pos, ok := r.pendingAt(seq, t)
+		if !ok {
+			return nil, err2
+		}
+		r.remember(seq, t, pos)
+		return []edit{{start: pos, end: pos, text: ", " + text}}, nil
 	}
 	if i < 0 {
 		pos := seq.elems[0].blockStart
+		r.remember(seq, t, pos)
 		return []edit{{start: pos, end: pos, text: text + ", "}}, nil
 	}
 	pos := seq.elems[i].blockEnd
+	r.remember(seq, t, pos)
 	return []edit{{start: pos, end: pos, text: ", " + text}}, nil
+}
+
+// pendingAdd is one insertion this run has already planned: the container it
+// lands in, what it creates, and where. §9.1 step 5 chains a run of `+` lines,
+// each placed after the one above it, so a placement may name a sibling that is
+// not in the parsed document at all but IS in this run's pending inserts.
+type pendingAdd struct {
+	holder *tnode
+	path   hew.Path // the add's own address, or the container for an array item
+	value  hew.Value
+	pos    int
+}
+
+func (r *run) remember(holder *tnode, t hew.Transform, pos int) {
+	r.pending = append(r.pending, pendingAdd{holder: holder, path: t.Path, value: t.Value, pos: pos})
+}
+
+// pendingAt reports the offset of an add this run has already planned that the
+// transform's `after:` placement names. Landing at the SAME offset puts this
+// add immediately behind it, because equal-offset edits keep their list order.
+// Only `after:` is consulted: a forward placement never names an added
+// sibling, because the sibling would not be there yet (§9.1 step 5).
+func (r *run) pendingAt(holder *tnode, t hew.Transform) (int, bool) {
+	// A zero path and the root both have no last segment to match on.
+	p := t.After
+	if p.Len() == 0 {
+		return 0, false
+	}
+	seg := p.Segment(p.Len() - 1)
+	// The most recent match wins, so a chain of three `+` lines walks forward
+	// rather than collapsing onto the first.
+	for i := len(r.pending) - 1; i >= 0; i-- {
+		pa := r.pending[i]
+		if pa.holder != holder {
+			continue
+		}
+		if pa.path.Equal(p) || segNamesValue(seg, pa.value) {
+			return pa.pos, true
+		}
+	}
+	return 0, false
 }
 
 // placeAmong turns a before:/after: placement into the index of the sibling to
@@ -418,34 +466,47 @@ func lineSpans(holder *tnode) []span {
 // insertLines splices whole lines into a physical table's body at the position
 // §6.2 derives from the surrounding context.
 func (r *run) insertLines(holder *tnode, lines []string, t hew.Transform) ([]edit, error) {
-	spans := lineSpans(holder)
-	i, err := r.placeAmong(spans, t)
+	pos, err := r.linePos(holder, t)
 	if err != nil {
 		return nil, err
-	}
-	pos := holder.regionStart
-	switch {
-	case i >= 0:
-		pos = spans[i].end
-	case len(spans) > 0:
-		pos = spans[0].start
 	}
 	text := strings.Join(lines, "\n") + "\n"
 	if pos > 0 && r.d.src[pos-1] != '\n' {
 		text = "\n" + text
 	}
+	r.remember(holder, t, pos)
 	return []edit{{start: pos, end: pos, text: text}}, nil
+}
+
+// linePos is the offset a new line lands at in a table's body.
+func (r *run) linePos(holder *tnode, t hew.Transform) (int, *hewerr.Error) {
+	spans := lineSpans(holder)
+	i, err := r.placeAmong(spans, t)
+	if err != nil {
+		if pos, ok := r.pendingAt(holder, t); ok {
+			return pos, nil
+		}
+		return 0, err
+	}
+	switch {
+	case i >= 0:
+		return spans[i].end, nil
+	case len(spans) > 0:
+		return spans[0].start, nil
+	}
+	return holder.regionStart, nil
 }
 
 // insertBlock splices a `[a.b]` or `[[a.b]]` block, header line included. A
 // table block is separated from its neighbours by a blank line, which is what
 // toml/array-of-tables-add and toml/surface-directive-table both pin; the
 // separator goes on whichever side the insertion did not already have one.
-func (r *run) insertBlock(header string, body []string, t hew.Transform, def int) ([]edit, error) {
-	pos, before, err := r.blockPos(t, def)
+func (r *run) insertBlock(holder *tnode, header string, body []string, t hew.Transform, def int) ([]edit, error) {
+	pos, before, err := r.blockPos(holder, t, def)
 	if err != nil {
 		return nil, err
 	}
+	r.remember(holder, t, pos)
 	src := r.d.src
 	text := strings.Join(append([]string{header}, body...), "\n") + "\n"
 	switch {
@@ -467,7 +528,7 @@ func (r *run) insertBlock(header string, body []string, t hew.Transform, def int
 // to def when the transform carries none. The second result reports that the
 // block is going in AHEAD of a sibling, which is what decides the side its
 // blank-line separator lands on.
-func (r *run) blockPos(t hew.Transform, def int) (int, bool, *hewerr.Error) {
+func (r *run) blockPos(holder *tnode, t hew.Transform, def int) (int, bool, *hewerr.Error) {
 	p, after := t.After, true
 	if p.IsZero() {
 		p, after = t.Before, false
@@ -477,6 +538,9 @@ func (r *run) blockPos(t hew.Transform, def int) (int, bool, *hewerr.Error) {
 	}
 	rf, he, _ := r.resolve(p, t.PatchLine)
 	if he != nil {
+		if pos, ok := r.pendingAt(holder, t); ok {
+			return pos, false, nil
+		}
 		return 0, false, he
 	}
 	start, end, ok := blockSpan(rf)

@@ -4,8 +4,10 @@ import (
 	"testing"
 
 	"github.com/hew-format/hew"
+	"github.com/hew-format/hew/hewhcl"
 	"github.com/hew-format/hew/hewjson"
 	"github.com/hew-format/hew/hewjsonc"
+	"github.com/hew-format/hew/hewtoml"
 	"github.com/hew-format/hew/hewyaml"
 )
 
@@ -15,6 +17,10 @@ func apply(target []byte, tl hew.TransformList) ([]byte, error) {
 		return hewjson.Apply(target, tl)
 	case hew.FormatJSONC:
 		return hewjsonc.Apply(target, tl)
+	case hew.FormatTOML:
+		return hewtoml.Apply(target, tl)
+	case hew.FormatHCL:
+		return hewhcl.Apply(target, tl)
 	default:
 		return hewyaml.Apply(target, tl)
 	}
@@ -100,6 +106,88 @@ func TestRoundTripIdentity(t *testing.T) {
 		{"comment added with its member", hew.FormatJSONC,
 			"{\n  \"server\": {\n    \"timeout\": 30\n  }\n}\n",
 			"{\n  \"server\": {\n    \"timeout\": 60,\n    // slow upstream\n    \"retries\": 5\n  }\n}\n"},
+
+		// TOML. The surface a member is written at is the document's, never the
+		// differ's (§8.4 rule 1), so the same edit has to survive at all three
+		// of them: a root-level line, a dotted key, and a `[table]` body.
+		{"scalar edit in a table", hew.FormatTOML,
+			"[server]\nport = 8080\ntimeout = 30\n",
+			"[server]\nport = 8080\ntimeout = 60\n"},
+		{"scalar edit at the root", hew.FormatTOML,
+			"title = \"old\"\n[server]\nport = 8080\n",
+			"title = \"new\"\n[server]\nport = 8080\n"},
+		{"dotted key edit", hew.FormatTOML,
+			"tool.ctxloom.timeout = 30\n",
+			"tool.ctxloom.timeout = 60\n"},
+		{"member appended to a table", hew.FormatTOML,
+			"[server]\nport = 8080\n",
+			"[server]\nport = 8080\ntls = true\n"},
+		{"two members appended to a table", hew.FormatTOML,
+			"[server]\nport = 8080\n",
+			"[server]\nport = 8080\ntls = true\ntimeout = 30\n"},
+		{"member removed from a table", hew.FormatTOML,
+			"[server]\nhost = \"localhost\"\nport = 8080\n",
+			"[server]\nport = 8080\n"},
+		{"string value edit", hew.FormatTOML,
+			"[hooks]\non_start = \"old\"\n",
+			"[hooks]\non_start = \"new\"\n"},
+		{"inline array element appended", hew.FormatTOML,
+			"[tool]\nargs = [\"a\", \"b\"]\n",
+			"[tool]\nargs = [\"a\", \"b\", \"c\"]\n"},
+		{"array-of-tables inner edit", hew.FormatTOML,
+			"[[plugin]]\nname = \"beta\"\nenabled = false\n",
+			"[[plugin]]\nname = \"beta\"\nenabled = true\n"},
+		{"edits in two tables at once", hew.FormatTOML,
+			"[a]\nk = 1\n\n[b]\nk = 1\n",
+			"[a]\nk = 2\n\n[b]\nk = 3\n"},
+
+		// HCL. A block is addressed by its `(type, labels)` tuple (§4.3), and
+		// an attribute's expression is a leaf compared as source text (§8.5).
+		{"attribute edit in a block", hew.FormatHCL,
+			"terraform {\n  required_version = \">= 1.6\"\n}\n",
+			"terraform {\n  required_version = \">= 1.7\"\n}\n"},
+		{"attribute edit in a labelled block", hew.FormatHCL,
+			"provider \"google\" {\n  project = \"old\"\n}\n",
+			"provider \"google\" {\n  project = \"new\"\n}\n"},
+		{"attribute added to a labelled block", hew.FormatHCL,
+			"provider \"google\" {\n  project = \"old-project\"\n}\n",
+			"provider \"google\" {\n  project = \"old-project\"\n  region  = \"us-central1\"\n}\n"},
+		{"attribute removed from a block", hew.FormatHCL,
+			"provider \"google\" {\n  project = \"p\"\n  region  = \"r\"\n}\n",
+			"provider \"google\" {\n  project = \"p\"\n}\n"},
+		{"two-label block", hew.FormatHCL,
+			"resource \"aws_instance\" \"web\" {\n  ami = \"old\"\n}\n",
+			"resource \"aws_instance\" \"web\" {\n  ami = \"new\"\n}\n"},
+		{"nested block attribute edit", hew.FormatHCL,
+			"terraform {\n  backend \"s3\" {\n    bucket = \"old\"\n  }\n}\n",
+			"terraform {\n  backend \"s3\" {\n    bucket = \"new\"\n  }\n}\n"},
+		{"two blocks edited at once", hew.FormatHCL,
+			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"1\"\n}\n",
+			"provider \"a\" {\n  k = \"2\"\n}\n\nprovider \"b\" {\n  k = \"3\"\n}\n"},
+		{"interpolated attribute edit", hew.FormatHCL,
+			"locals {\n  x = \"${var.old}\"\n}\n",
+			"locals {\n  x = \"${var.new}\"\n}\n"},
+		{"standalone comment added", hew.FormatTOML,
+			"[hooks]\non_start = \"x\"\n",
+			"[hooks]\non_start = \"x\"\n# note\n"},
+		{"array-of-tables element added", hew.FormatTOML,
+			"[[plugin]]\nname = \"beta\"\n",
+			"[[plugin]]\nname = \"beta\"\n\n[[plugin]]\nname = \"gamma\"\n"},
+		{"two inline array elements appended", hew.FormatTOML,
+			"[tool]\nargs = [\"a\"]\n",
+			"[tool]\nargs = [\"a\", \"b\", \"c\"]\n"},
+		{"two keyed inline elements appended", hew.FormatTOML,
+			"[tool]\nargs = [{name = \"a\"}]\n",
+			"[tool]\nargs = [{name = \"a\"}, {name = \"b\"}, {name = \"c\"}]\n"},
+		{"two array-of-tables elements added", hew.FormatTOML,
+			"[[plugin]]\nname = \"beta\"\n",
+			"[[plugin]]\nname = \"beta\"\n\n[[plugin]]\nname = \"gamma\"\n\n[[plugin]]\nname = \"delta\"\n"},
+		{"two attributes appended", hew.FormatHCL,
+			"provider \"a\" {\n  k = \"1\"\n}\n",
+			"provider \"a\" {\n  k = \"1\"\n  m = \"2\"\n  n = \"3\"\n}\n"},
+		{"edit in the second block of a type", hew.FormatHCL,
+			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"1\"\n}\n",
+			"provider \"a\" {\n  k = \"1\"\n}\n\nprovider \"b\" {\n  k = \"2\"\n}\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -37,6 +37,16 @@ type DiffNode struct {
 type DiffChild struct {
 	// Key is the member name. Empty for a sequence element and for a comment.
 	Key string
+	// Label marks a child the document addresses by a quoted LABEL rather than
+	// by a member name (§4.3): an HCL block's `(type, labels)` tuple spells one
+	// address as `/provider/"google"`, whose second step is not a key. Key
+	// carries the label text.
+	//
+	// It lives here rather than in the binding because the differ, not the
+	// binding, builds every path it emits — a binding that could not say "this
+	// child is spelled as a label" would watch the differ address it as
+	// `/provider/google`, which resolves to nothing.
+	Label bool
 	// Comment marks a standalone comment child (§4.5b); Text is its content,
 	// with the marker and one leading space already stripped, which is the
 	// form §6.1 compares. Node is nil.
@@ -90,7 +100,13 @@ func writeCanonical(b *strings.Builder, n *DiffNode) {
 				writeToken(b, c.Text)
 				continue
 			}
-			b.WriteByte('k')
+			// A label and a member name are different addresses, so they are
+			// different nodes even when they read the same (§4.3).
+			if c.Label {
+				b.WriteByte('l')
+			} else {
+				b.WriteByte('k')
+			}
 			writeToken(b, c.Key)
 			writeCanonical(b, c.Node)
 		}
