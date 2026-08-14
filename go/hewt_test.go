@@ -44,10 +44,35 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 	}
 }
 
-func TestUnmarshalEmptyTransformsIsError(t *testing.T) {
-	_, err := UnmarshalTransforms([]byte("hew-transforms: 1\ntarget: t\ntransforms: []\n"))
+// TestUnmarshalEmptyTransformsIsANoOpList pins §9.6's amended `transforms`
+// row (ruling O38): the sequence MAY be empty — that document is the IR of a
+// no-op patch — while the KEY is still required, because "no transforms" must
+// be said rather than inferred from an omission. Both halves are asserted
+// here, since the difference between them is the whole rule.
+func TestUnmarshalEmptyTransformsIsANoOpList(t *testing.T) {
+	tl, err := UnmarshalTransforms([]byte("hew-transforms: 1\ntarget: t\ntransforms: []\n"))
+	if err != nil {
+		t.Fatalf("an empty transforms sequence is the IR of a no-op patch (§9.6, O38): %v", err)
+	}
+	if tl.Target != "t" {
+		t.Errorf("target = %q, want t", tl.Target)
+	}
+	if len(tl.Transform) != 0 {
+		t.Errorf("%d transforms, want 0", len(tl.Transform))
+	}
+	// It round-trips: a no-op list marshals back to a document with the key
+	// present and the sequence empty.
+	out, err := MarshalTransforms(tl)
+	if err != nil {
+		t.Fatalf("Marshal of a no-op list: %v", err)
+	}
+	if !strings.Contains(string(out), "transforms: []") {
+		t.Errorf("a no-op list must still emit the transforms key, got:\n%s", out)
+	}
+
+	_, err = UnmarshalTransforms([]byte("hew-transforms: 1\ntarget: t\n"))
 	if err == nil {
-		t.Fatal("empty transforms sequence must be HEW001 (§9.6, §10.2)")
+		t.Fatal("a MISSING transforms key must stay HEW001 (§9.6)")
 	}
 	he, ok := hewerr.As(err)
 	if !ok || he.Code != hewerr.CodeParse {

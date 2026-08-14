@@ -5,13 +5,19 @@ package hewcli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/spf13/afero"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/hewfs"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
@@ -25,28 +31,30 @@ import (
 // Run executes argv (without argv0) with relative paths resolved against
 // dir, and returns the process exit code (Appendix B.3): 0 applied, 1 did
 // not apply (nothing modified), 2 trouble.
-func Run(argv []string, dir string, stdin io.Reader, stdout, stderr io.Writer) int {
+//
+// env is the process environment, and it is passed as DATA rather than read
+// from the process: `hew apply` reads exactly two variables (Appendix B.1),
+// both governing the record's applied_at, and a CLI that reached os.Getenv
+// directly could not be driven by the corpus harness, whose cases pin those
+// two through a manifest `env:` block (§13.4). Nothing else about hew's
+// behaviour is reachable through the environment — a patch tool whose EFFECT
+// depends on invisible input is the thing this format exists to refuse.
+func Run(argv []string, dir string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "hew: usage: hew <apply|diff> [flags] ...")
 		return 2
 	}
 	switch argv[0] {
 	case "apply":
-		return runApply(argv[1:], dir, stdin, stdout, stderr)
+		return runApply(argv[1:], dir, env, stdin, stdout, stderr)
 	case "diff":
+		// `hew diff` reads no environment at all: Appendix B.1's two variables
+		// govern the application record, and diff writes none.
 		return runDiff(argv[1:], dir, stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "hew: unknown command %q\n", argv[0])
 		return 2
 	}
-}
-
-// staged is one file section's staged result (§10.5's stage phase).
-type staged struct {
-	tl     hew.TransformList
-	format hew.FormatID
-	before []byte
-	after  []byte
 }
 
 // patchInput is the patch as read, retained because §9.7's record ties itself
@@ -69,6 +77,11 @@ type applyFlags struct {
 	transformsOut   string
 	format          string
 	quiet           bool
+	// reversal and reversalPath are `--reversal [FILE]` (O40): the flag is
+	// opt-in and its value optional, so "was it given" and "with what name"
+	// are two facts.
+	reversal     bool
+	reversalPath string
 }
 
 func parseApplyArgs(args []string) (*applyFlags, error) {
@@ -119,6 +132,19 @@ func parseApplyArgs(args []string) (*applyFlags, error) {
 			}
 			f.record = v
 			i++
+		case "--reversal":
+			// `--reversal` takes an OPTIONAL file name (Appendix B.1), which
+			// makes "is the next argument my value or the patch?" a real
+			// question. The rule is the only one that can read the corpus's own
+			// `--reversal target.yaml.undo.hew patch.hew`: the next argument is
+			// the value unless there is none or it is a flag. A caller who
+			// wants the derived name with a patch following writes
+			// `--reversal=` or puts the flag last.
+			f.reversal = true
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				f.reversalPath = args[i+1]
+				i++
+			}
 		case "--dry-run":
 			f.dryRun = true
 		case "--ops":
@@ -148,6 +174,14 @@ func parseApplyArgs(args []string) (*applyFlags, error) {
 		case "-":
 			f.patchFiles = append(f.patchFiles, "-")
 		default:
+			// `--reversal=FILE` is the attached spelling, and `--reversal=` is
+			// how a caller asks for the derived name with a patch still to
+			// come on the command line.
+			if v, ok := strings.CutPrefix(a, "--reversal="); ok {
+				f.reversal = true
+				f.reversalPath = v
+				continue
+			}
 			if strings.HasPrefix(a, "-") && a != "-" {
 				return nil, fmt.Errorf("unknown flag %q", a)
 			}
@@ -157,8 +191,17 @@ func parseApplyArgs(args []string) (*applyFlags, error) {
 	return f, nil
 }
 
-func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runApply(args []string, dir string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) int {
 	f, err := parseApplyArgs(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "hew: usage error: %v\n", err)
+		return 2
+	}
+	// §9.7's pin is read here, at the boundary, and checked BEFORE anything is
+	// read or written: a malformed HEW_APPLIED_AT or SOURCE_DATE_EPOCH is exit
+	// 2, never a silent fallback to the clock, because a pin that quietly does
+	// not pin is worse than no pin — the artifact still looks reproducible.
+	appliedAt, err := resolveAppliedAt(env)
 	if err != nil {
 		fmt.Fprintf(stderr, "hew: usage error: %v\n", err)
 		return 2
@@ -242,84 +285,88 @@ func runApply(args []string, dir string, stdin io.Reader, stdout, stderr io.Writ
 		return 0
 	}
 
-	var results []staged
-	for i, tl := range tls {
-		before, format, rerr := readTarget(dir, tl)
-		if rerr != nil {
-			printErr(stderr, rerr)
-			return exitFor(rerr)
-		}
-		var after []byte
-		var aerr error
-		if apply, ok := applierFor(format); ok {
-			after, aerr = apply(before, tl)
-		} else {
-			aerr = noBinding(tl.Target, format)
-		}
-		if aerr != nil {
-			printErr(stderr, withPatchFile(aerr, from[i]))
-			return exitFor(aerr)
-		}
-		results = append(results, staged{tl: tl, format: format, before: before, after: after})
+	// Everything below the flags is hewfs's (Appendix A.8): staging, §10.5's
+	// atomic temp-and-rename commit, the record, and the reversal patch. What
+	// stays here is what a filesystem boundary has no business knowing — which
+	// patch FILE a section came from (§10.3's provenance line), and how to
+	// write to a stream.
+	opt := hewfs.WriteOptions{
+		DryRun:       f.dryRun,
+		Format:       hew.FormatID(f.format),
+		RecordPath:   f.record,
+		AppliedAt:    appliedAt,
+		Patch:        patchProvenance(read),
+		Output:       f.output,
+		Reversal:     f.reversal,
+		ReversalPath: f.reversalPath,
 	}
-
-	if f.dryRun {
-		return 0
+	// The two entry points are the same execution behind two names (Appendix
+	// A.8), and the CLI calls the one that describes where its lists came from,
+	// so a reader of either side sees the same two words the spec uses.
+	apply := hewfs.ApplyFile
+	if fromTransforms {
+		apply = hewfs.ApplyTransforms
 	}
+	results, aerr := apply(afero.NewOsFs(), dir, tls, opt)
+	if aerr != nil {
+		return reportApplyErr(stderr, aerr, from)
+	}
+	if f.output == "-" {
+		for _, r := range results {
+			stdout.Write(r.After)
+		}
+	}
+	return 0
+}
 
-	if f.output != "" && len(results) != 1 {
-		fmt.Fprintln(stderr, "hew: usage error: -o/--output requires exactly one file section")
+// patchProvenance is §9.7's patch.source / patch.digest: the ONE patch the
+// record names, and a digest of the bytes exactly as read. runApply has already
+// refused --record with several patch sources, so the first input is the only
+// one.
+func patchProvenance(read []patchInput) hewfs.RecordPatch {
+	if len(read) == 0 {
+		return hewfs.RecordPatch{Source: "-"}
+	}
+	return hewfs.RecordPatch{Source: read[0].source, Digest: hewfs.Digest(read[0].bytes)}
+}
+
+// reportApplyErr prints a write-path failure in the §10.3 shape and returns its
+// exit code. A staging failure knows which file section raised it, and `from`
+// turns that index into the patch file's name — the difference between
+// "patch.hew:6" and a bare line number.
+func reportApplyErr(stderr io.Writer, err error, from []string) int {
+	if hewfs.IsUsage(err) {
+		fmt.Fprintf(stderr, "hew: usage error: %v\n", err)
 		return 2
 	}
-
-	// The record is BUILT before the commit and WRITTEN after it. Resolving
-	// the executed list can fail where the apply did not — an `? absent`
-	// assertion on a key-match that matches nothing is satisfied by the
-	// applier and has no RFC 6901 pointer at all — and a `--record` run that
-	// cannot produce its record must leave the target untouched (§10.5)
-	// rather than edit a file and then report failure.
-	var rec applicationRecord
-	if f.record != "" {
-		var berr error
-		rec, berr = buildRecord(read, results)
-		if berr != nil {
-			printErr(stderr, berr)
-			return exitFor(berr)
-		}
+	var se *hewfs.SectionError
+	if errors.As(err, &se) && se.Index < len(from) {
+		err = withPatchFile(err, from[se.Index])
 	}
+	printErr(stderr, err)
+	return exitFor(err)
+}
 
-	// Commit: every section staged successfully above, so every write here
-	// happens (§10.5's all-or-nothing already held at the staging boundary).
-	for _, r := range results {
-		switch {
-		case f.output == "-":
-			stdout.Write(r.after)
-		case f.output != "":
-			if werr := os.WriteFile(filepath.Join(dir, f.output), r.after, 0o644); werr != nil {
-				fmt.Fprintf(stderr, "hew: %s: %v\n", f.output, werr)
-				return 2
-			}
-		default:
-			if werr := os.WriteFile(filepath.Join(dir, r.tl.Target), r.after, 0o644); werr != nil {
-				fmt.Fprintf(stderr, "hew: %s: %v\n", r.tl.Target, werr)
-				return 2
-			}
+// resolveAppliedAt is §9.7's precedence at the boundary that owns it: the two
+// environment spellings, in order, and otherwise the zero time, which hewfs
+// reads as "the clock". The library takes a VALUE — a library that read the
+// environment itself could not implement the rule that an explicit caller wins.
+func resolveAppliedAt(env map[string]string) (time.Time, error) {
+	if v := strings.TrimSpace(env["HEW_APPLIED_AT"]); v != "" {
+		ts, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("HEW_APPLIED_AT %q is not an RFC 3339 timestamp (§9.7)", v)
 		}
+		return ts.UTC(), nil
 	}
-
-	if f.record != "" {
-		out, merr := marshalRecord(rec)
-		if merr != nil {
-			fmt.Fprintf(stderr, "hew: --record: %v\n", merr)
-			return 2
+	if v := strings.TrimSpace(env["SOURCE_DATE_EPOCH"]); v != "" {
+		secs, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("SOURCE_DATE_EPOCH %q is not an integer number of seconds since the Unix epoch (§9.7)", v)
 		}
-		if werr := os.WriteFile(filepath.Join(dir, f.record), out, 0o644); werr != nil {
-			fmt.Fprintf(stderr, "hew: %s: %v\n", f.record, werr)
-			return 2
-		}
+		return time.Unix(secs, 0).UTC(), nil
 	}
-
-	return 0
+	return time.Time{}, nil
 }
 
 // runOps implements `--ops`: print the RESOLVED RFC 6901 op list (§9.2) for
@@ -363,18 +410,6 @@ func readTarget(dir string, tl hew.TransformList) ([]byte, hew.FormatID, error) 
 		format = detectFormat(tl.Target)
 	}
 	return src, format, nil
-}
-
-// applierFor is the registry's answer to "can this build apply this format".
-// A format with no registered extension and a format whose extension ships no
-// applier are the same answer here — not found — because they are the same
-// fact for the caller: nothing linked into this binary can do it.
-func applierFor(format hew.FormatID) (hew.Applier, bool) {
-	b, ok := hew.Lookup(format)
-	if !ok || b.Applier == nil {
-		return nil, false
-	}
-	return b.Applier, true
 }
 
 // documentFor parses target bytes into the read-only view Resolve projects

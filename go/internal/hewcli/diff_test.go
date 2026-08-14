@@ -27,7 +27,7 @@ func initGitRepo(t *testing.T, dir string) bool {
 func runStdin(t *testing.T, dir, stdin string, argv ...string) (exit int, stdout, stderr string) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	exit = Run(argv, dir, strings.NewReader(stdin), &out, &errb)
+	exit = Run(argv, dir, nil, strings.NewReader(stdin), &out, &errb)
 	return exit, out.String(), errb.String()
 }
 
@@ -46,23 +46,88 @@ func TestDiffWritesAPatchToStdout(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit %d (%s)", exit, stderr)
 	}
-	want := "hew: 1\n\n--- new.yaml format=yaml\n\n@@ /server @@\n  port: 8080\n- timeout: 30\n+ timeout: 60\n"
+	// The `--- ` line names the OLD side (§9.4-R7, Appendix B.2.1, ruling
+	// O39): the patch applies to old, so naming new would stamp a file the
+	// applier never opens.
+	want := "hew: 1\n\n--- old.yaml format=yaml\n\n@@ /server @@\n  port: 8080\n- timeout: 30\n+ timeout: 60\n"
 	if stdout != want {
 		t.Fatalf("stdout:\n%q\nwant:\n%q", stdout, want)
 	}
 }
 
-// "A patch was produced, and it may be empty" is exit 0 (Appendix B.3). It is
-// written as no bytes at all rather than as a lone header, so that piping it
-// into `hew apply` does not turn "nothing changed" into HEW001 one command
-// later.
-func TestDiffOfIdenticalSourcesIsEmptyAndSucceeds(t *testing.T) {
+// TestDiffProducesAnApplicablePatch is the composition O39 exists to protect,
+// and the reason "which side" is not a matter of taste: the patch `hew diff`
+// writes must apply to the file it names.
+func TestDiffProducesAnApplicablePatch(t *testing.T) {
+	dir := twoSided(t)
+	if exit, _, stderr := run(t, dir, "diff", "old.yaml", "new.yaml", "-o", "p.hew"); exit != 0 {
+		t.Fatalf("diff: exit %d (%s)", exit, stderr)
+	}
+	if exit, _, stderr := run(t, dir, "apply", "p.hew"); exit != 0 {
+		t.Fatalf("apply: exit %d (%s)", exit, stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "old.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join(dir, "new.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("apply(diff(old, new), old) = %q, want %q", got, want)
+	}
+}
+
+// TestDiffOfIdenticalSourcesIsAPreambleOnlyPatch is ruling O38: two identical
+// inputs produce `hew: 1` plus a `--- ` line and nothing else, at exit 0. Not
+// zero bytes — zero bytes is a file `hew apply` refuses as HEW001, which would
+// turn "nothing changed" into an error one command later.
+func TestDiffOfIdenticalSourcesIsAPreambleOnlyPatch(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.yaml", "k: 1\n")
 	writeFile(t, dir, "b.yaml", "k: 1\n")
 	exit, stdout, stderr := run(t, dir, "diff", "a.yaml", "b.yaml")
-	if exit != 0 || stdout != "" {
-		t.Fatalf("exit %d stdout %q stderr %q", exit, stdout, stderr)
+	const want = "hew: 1\n\n--- a.yaml format=yaml\n"
+	if exit != 0 || stdout != want {
+		t.Fatalf("exit %d stdout %q stderr %q, want exit 0 and %q", exit, stdout, stderr, want)
+	}
+}
+
+// TestDiffThenApplyComposesWhenNothingChanged is the pipeline the ruling names:
+// `hew diff a b > p.hew && hew apply p.hew` must not break the day the answer
+// is "no change".
+func TestDiffThenApplyComposesWhenNothingChanged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.yaml", "k: 1\n")
+	writeFile(t, dir, "b.yaml", "k: 1\n")
+	if exit, _, stderr := run(t, dir, "diff", "a.yaml", "b.yaml", "-o", "p.hew"); exit != 0 {
+		t.Fatalf("diff: exit %d (%s)", exit, stderr)
+	}
+	exit, _, stderr := run(t, dir, "apply", "p.hew")
+	if exit != 0 {
+		t.Fatalf("apply of a no-op patch: exit %d (%s)", exit, stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "a.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "k: 1\n" {
+		t.Fatalf("a no-op apply rewrote the target: %q", got)
+	}
+}
+
+// TestDiffStdinOldSideBorrowsTheNewLabel is Appendix B.2.1's second corollary:
+// a stdin old side has no name to give, so the new side's label stands in.
+func TestDiffStdinOldSideBorrowsTheNewLabel(t *testing.T) {
+	dir := twoSided(t)
+	exit, stdout, stderr := runStdin(t, dir, "server:\n  host: localhost\n  port: 8080\n  timeout: 30\n",
+		"diff", "-", "new.yaml")
+	if exit != 0 {
+		t.Fatalf("exit %d (%s)", exit, stderr)
+	}
+	if !strings.Contains(stdout, "--- new.yaml") {
+		t.Fatalf("want the new side's label to stand in for stdin, got:\n%s", stdout)
 	}
 }
 

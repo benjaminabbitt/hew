@@ -161,9 +161,12 @@ func boolNode(b bool) *yaml.Node {
 
 // UnmarshalTransforms reads a single-document .hewt file. Reading is strict:
 // an unknown document key, an unknown transform field, a missing or non-1
-// version, a missing target, or an empty transform sequence is HEW001. `op:
-// move` is accepted as input sugar and normalized to copy+remove on the way
-// in (§11.10 reduction 1).
+// version, a missing target, or a missing `transforms` key is HEW001. An
+// EMPTY `transforms` sequence is accepted — it is the IR of a no-op patch
+// (§9.6 as amended by O38) — but the key itself is still required, because "no
+// transforms" must be said rather than inferred from an omission. `op: move`
+// is accepted as input sugar and normalized to copy+remove on the way in
+// (§11.10 reduction 1).
 func UnmarshalTransforms(src []byte) (TransformList, error) {
 	tls, err := UnmarshalTransformStream(src)
 	if err != nil {

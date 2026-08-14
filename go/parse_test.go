@@ -748,8 +748,11 @@ func TestParseErrors(t *testing.T) {
 		{"preamble junk", "hew: 1\nnonsense\n", hewerr.CodeParse, 2, "preamble directive"},
 		{"bad pragma", "hew: 1\nidempotent: sometimes\n", hewerr.CodeParse, 2, "expected a boolean"},
 		{"unsupported preamble format", "hew: 1\nformat: ini\n\n--- t.x\n", hewerr.CodeUnsupportedFormat, 2, "unknown format"},
-		{"empty patch", "hew: 1\n", hewerr.CodeParse, 0, "no hunks"},
-		{"section with no hunks", "hew: 1\n\n--- t.json format=json\n", hewerr.CodeParse, 3, "no hunks"},
+		// §10.2 as amended by O38: a preamble with no `--- ` line is still
+		// HEW001, because it says nothing about any file. A preamble WITH a
+		// `--- ` line and no hunks is legal and is pinned by
+		// TestParseHunklessSectionIsANoOpList below, not here.
+		{"empty patch", "hew: 1\n", hewerr.CodeParse, 0, "names no file section"},
 		{"target line with no path", "hew: 1\n\n---\n", hewerr.CodeParse, 3, "no path"},
 		{"unterminated quoted target", "hew: 1\n\n--- \"a b\n", hewerr.CodeParse, 3, "unterminated"},
 		{"unknown target attribute", "hew: 1\n\n--- t.json mode=fast\n", hewerr.CodeParse, 3, `unknown target attribute "mode"`},
@@ -822,6 +825,56 @@ func TestParseErrors(t *testing.T) {
 				t.Errorf("message %q does not contain %q", err.Error(), tc.contains)
 			}
 		})
+	}
+}
+
+// TestParseHunklessSectionIsANoOpList pins the parser half of ruling O38: a
+// file section with a target and no hunks is a LEGAL patch whose IR is a
+// transform list with a target and no transforms (§9.6, §10.2 as amended).
+// This is the exact artifact `hew diff` emits for two identical inputs, and the
+// reason it must parse is composition — `hew diff a b > p.hew && hew apply
+// p.hew` must not become an error the day the answer is "no change".
+func TestParseHunklessSectionIsANoOpList(t *testing.T) {
+	for _, src := range []string{
+		"hew: 1\n\n--- t.json format=json\n",
+		"hew: 1\n\n--- t.json format=json",             // no trailing newline
+		"hew: 1\n\n--- t.json format=json\n\n# note\n", // blanks and comments are not hunks
+	} {
+		tls, err := Parse([]byte(src))
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", src, err)
+		}
+		if len(tls) != 1 {
+			t.Fatalf("Parse(%q): %d file sections, want 1", src, len(tls))
+		}
+		if tls[0].Target != "t.json" {
+			t.Errorf("Parse(%q): target = %q, want t.json", src, tls[0].Target)
+		}
+		if tls[0].Format != FormatJSON {
+			t.Errorf("Parse(%q): format = %q, want json", src, tls[0].Format)
+		}
+		if len(tls[0].Transform) != 0 {
+			t.Errorf("Parse(%q): %d transforms, want 0", src, len(tls[0].Transform))
+		}
+	}
+}
+
+// TestParseHunklessSectionAmongOthers keeps the no-op section from swallowing
+// the sections around it: a hunkless section is one document in the stream, not
+// a terminator and not a merge into its neighbour.
+func TestParseHunklessSectionAmongOthers(t *testing.T) {
+	tls, err := Parse([]byte("hew: 1\n\n--- a.json format=json\n\n--- b.json format=json\n\n@@ / @@\n+ x: 1\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(tls) != 2 {
+		t.Fatalf("%d file sections, want 2", len(tls))
+	}
+	if tls[0].Target != "a.json" || len(tls[0].Transform) != 0 {
+		t.Errorf("first section = %q/%d transforms, want a.json/0", tls[0].Target, len(tls[0].Transform))
+	}
+	if tls[1].Target != "b.json" || len(tls[1].Transform) != 1 {
+		t.Errorf("second section = %q/%d transforms, want b.json/1", tls[1].Target, len(tls[1].Transform))
 	}
 }
 
