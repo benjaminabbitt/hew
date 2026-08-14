@@ -728,6 +728,211 @@ func TestUnsupportedOpIsInexpressible(t *testing.T) {
 	}
 }
 
+// --- transform lists built in Go --------------------------------------------
+//
+// The .hewt codec drops `line` (§9.6) and refuses a valueless write, so the
+// cases that turn on a diagnostic's patch line, or on a value the notation
+// cannot produce, build their transform list directly.
+
+func p(s string) hew.Path { return hew.MustParsePath(s) }
+
+func val(t *testing.T, x any) hew.Value {
+	t.Helper()
+	v, err := hew.ValueOf(x)
+	if err != nil {
+		t.Fatalf("ValueOf(%v): %v", x, err)
+	}
+	return v
+}
+
+func applyTL(target string, ts ...hew.Transform) ([]byte, error) {
+	return Apply([]byte(target), hew.TransformList{Target: "t.yaml", Format: hew.FormatYAML, Transform: ts})
+}
+
+func TestAlreadyAppliedIsReportedAgainstTheStrictRecord(t *testing.T) {
+	target := "server:\n  timeout: 60\n"
+	// A file pragma tolerated the assert; the hunk's "! strict" did not
+	// tolerate the write, so the diagnostic belongs to the write's line.
+	_, err := applyTL(target,
+		hew.Transform{Op: hew.OpTest, Path: p("/server/timeout"), Value: val(t, 30), PatchLine: 6, Idempotent: true},
+		hew.Transform{Op: hew.OpReplace, Path: p("/server/timeout"), Value: val(t, 60), PatchLine: 9},
+	)
+	he, ok := hewerr.As(err)
+	if !ok {
+		t.Fatalf("want HEW011, got %v", err)
+	}
+	if he.Code != hewerr.CodeAssertionFailed || he.PatchLine != 9 {
+		t.Fatalf("want HEW011 at patch line 9, got %s at %d", he.Code, he.PatchLine)
+	}
+}
+
+func TestAConvergentWriteToleratesAStrictAssert(t *testing.T) {
+	target := "server:\n  timeout: 60\n"
+	got, err := applyTL(target,
+		hew.Transform{Op: hew.OpTest, Path: p("/server/timeout"), Value: val(t, 30), PatchLine: 6},
+		hew.Transform{Op: hew.OpReplace, Path: p("/server/timeout"), Value: val(t, 60), PatchLine: 7, Idempotent: true},
+	)
+	if err != nil {
+		t.Fatalf("an idempotent write tolerates its own assert: %v", err)
+	}
+	if string(got) != target {
+		t.Errorf("output: %q", got)
+	}
+}
+
+func TestValuelessTransforms(t *testing.T) {
+	target := "a: 1\n"
+	// A test with no value at all asserts nothing that can hold.
+	if _, err := applyTL(target, hew.Transform{Op: hew.OpTest, Path: p("/a")}); err == nil {
+		t.Error("a test with no value cannot pass")
+	}
+	// A valueless add writes a null, rather than panicking on the nil node.
+	got, err := applyTL(target, hew.Transform{Op: hew.OpAdd, Path: p("/b")})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if string(got) != "a: 1\nb: null\n" {
+		t.Errorf("output: %q", got)
+	}
+	got, err = applyTL("s:\n  - one\n", hew.Transform{Op: hew.OpAdd, Path: p("/s")})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if string(got) != "s:\n  - one\n  - null\n" {
+		t.Errorf("output: %q", got)
+	}
+}
+
+// --- the after-image machinery ----------------------------------------------
+
+func TestAfterImageOnlyLooksAtTheWriteForThisPath(t *testing.T) {
+	target := "a: 1\nb: 2\n"
+	// The write at /b sits between the failing assert and its own write; the
+	// after-image check must skip it and find the one at /a.
+	records := "" +
+		"  - op: test\n    path: /a\n    value: 0\n" +
+		"  - op: replace\n    path: /b\n    value: 22\n" +
+		"  - op: replace\n    path: /a\n    value: 1\n"
+	he := mustFail(t, target, records, hewerr.CodeAssertionFailed, "/a")
+	mustContain(t, he, "already applied")
+}
+
+func TestAfterImageDistinguishesRemovalFromWriting(t *testing.T) {
+	// A missing node whose paired write is an ADD has not been applied: the
+	// add would have created it, so this is drift.
+	records := "" +
+		"  - op: test\n    path: /gone\n    value: 1\n" +
+		"  - op: add\n    path: /gone\n    value: 1\n"
+	mustFail(t, "a: 1\n", records, hewerr.CodeStaleTarget, "/gone")
+
+	// A present-but-different node whose paired write is a REMOVE has not been
+	// applied either.
+	records = "" +
+		"  - op: test\n    path: /a\n    value: 1\n" +
+		"  - op: remove\n    path: /a\n"
+	mustFail(t, "a: 2\n", records, hewerr.CodeStaleTarget, "/a")
+}
+
+func TestAfterImageNeedsTheWholeValue(t *testing.T) {
+	// The map has the written key AND another one, so the after-image does not
+	// hold: subset matching is for asserts, not for "already applied".
+	target := "m:\n  a: 1\n  b: 9\n"
+	records := "" +
+		"  - op: test\n    path: /m\n    value:\n      b: 2\n" +
+		"  - op: replace\n    path: /m\n    value:\n      a: 1\n"
+	mustFail(t, target, records, hewerr.CodeStaleTarget, "/m")
+}
+
+// --- more shapes ------------------------------------------------------------
+
+func TestReplaceKeepsTheSpacingAfterTheColon(t *testing.T) {
+	mustApply(t, "a:    30\nb: 1\n", "  - op: replace\n    path: /a\n    value: 60\n", "a:    60\nb: 1\n")
+}
+
+func TestAddBeforeTheFirstChildOfTheDocument(t *testing.T) {
+	mustApply(t, "a: 1\nb: 2\n", "  - op: add\n    path: /z\n    before: /a\n    value: 0\n", "z: 0\na: 1\nb: 2\n")
+}
+
+func TestFinalErrorsKeepTheirOwnDiagnostic(t *testing.T) {
+	target := "tags:\n  - beta\n  - beta\n"
+	he := mustFail(t, target, "  - op: replace\n    path: /tags/=beta\n    value: x\n",
+		hewerr.CodeAmbiguousMatch, "/tags/=beta")
+	if strings.Contains(he.Error(), "replace requires the node to exist") {
+		t.Errorf("an ambiguity is not a missing node: %q", he.Error())
+	}
+}
+
+func TestForkMaterializesEvenWhenTheValueIsUnchanged(t *testing.T) {
+	// Forking is a statement about WHERE the value lives, so it writes the
+	// shadowing member even when the value it writes is what was inherited.
+	records := "  - op: replace\n    path: /service_a/timeout\n    anchor: fork\n    value: 30\n"
+	want := strings.Replace(aliasTarget, "  <<: *defaults\n  port: 8080\n", "  <<: *defaults\n  port: 8080\n  timeout: 30\n", 1)
+	mustApply(t, aliasTarget, records, want)
+}
+
+func TestFlowContainerTakesAFlowValue(t *testing.T) {
+	mustApply(t, "m: {a: 1}\n", "  - op: add\n    path: /m/b\n    value:\n      k: v\n",
+		"m: {a: 1, b: {k: v}}\n")
+	mustApply(t, "s: [1]\n", "  - op: add\n    path: /s\n    value: [2, 3]\n", "s: [1, [2, 3]]\n")
+}
+
+func TestEmptySequenceValueStaysInline(t *testing.T) {
+	mustApply(t, "m:\n  a: 1\n", "  - op: add\n    path: /m/tags\n    value: []\n", "m:\n  a: 1\n  tags: []\n")
+}
+
+func TestQuotingRules(t *testing.T) {
+	target := "m:\n  a: 1\n"
+	for _, tc := range []struct{ value, want string }{
+		{`""`, `k: ""`},
+		{`" x "`, `k: " x "`},
+		{`"a #b"`, `k: "a #b"`},
+		{`"["`, `k: "["`},
+		{`"@at"`, `k: "@at"`},
+		{`"plain-ok"`, "k: plain-ok"},
+		{`"3.5"`, `k: "3.5"`},
+	} {
+		got, err := applyIR(t, target, "  - op: add\n    path: /m/k\n    value: "+tc.value+"\n")
+		if err != nil {
+			t.Fatalf("value %s: %v", tc.value, err)
+		}
+		if want := "m:\n  a: 1\n  " + tc.want + "\n"; string(got) != want {
+			t.Errorf("value %s: got %q, want %q", tc.value, got, want)
+		}
+	}
+}
+
+func TestKeyMatchAgainstANonScalarField(t *testing.T) {
+	target := "s:\n  - name:\n      first: a\n  - name: b\n"
+	// name=b matches the scalar-valued element only; the map-valued one is not
+	// a candidate at all.
+	mustApply(t, target, "  - op: test\n    path: /s/name=b\n    value:\n      name: b\n", target)
+	mustFail(t, target, "  - op: test\n    path: /s/name=a\n    value: 1\n", hewerr.CodeStaleTarget, "/s/name=a")
+}
+
+func TestCopyABlockScalarMember(t *testing.T) {
+	target := "" +
+		"a:\n" +
+		"  script: |\n" +
+		"    one\n" +
+		"\n" +
+		"    two\n" +
+		"b:\n" +
+		"  keep: 1\n"
+	want := "" +
+		"a:\n" +
+		"  script: |\n" +
+		"    one\n" +
+		"\n" +
+		"    two\n" +
+		"b:\n" +
+		"  keep: 1\n" +
+		"  script2: |\n" +
+		"    one\n" +
+		"\n" +
+		"    two\n"
+	mustApply(t, target, "  - op: copy\n    from: /a/script\n    path: /b/script2\n", want)
+}
+
 // --- the mirror grammar, end to end -----------------------------------------
 
 func applyPatch(t *testing.T, target, patch string) ([]byte, error) {

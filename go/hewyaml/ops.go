@@ -346,18 +346,20 @@ func (r *run) planCopy(t hew.Transform) ([]edit, error) {
 }
 
 // copyMember renders a member's own source lines — leading comments, key,
-// value — dedented to column zero and re-keyed.
+// value — dedented to column zero and re-keyed. Everything but the key token
+// is the source's own bytes, which is how a copy preserves the value's
+// formatting and how a rename keeps the comment attached to what it renames.
 func (r *run) copyMember(e *entry, newKey string) []string {
 	raw := strings.TrimRight(string(r.d.src[e.blockStart:e.blockEnd]), "\n")
 	lines := strings.Split(raw, "\n")
 	for i := range lines {
 		lines[i] = cutIndent(lines[i], e.indent)
 	}
+	// The key's own line is the one after the leading comment block, and the
+	// key token starts that line: swapping it for the new key leaves the
+	// colon, the spacing, and the value exactly as authored.
 	keyLine := strings.Count(string(r.d.src[e.blockStart:e.lineStart]), "\n")
-	colonRel := e.colon - e.lineStart - e.indent
-	if keyLine < len(lines) && colonRel >= 0 && colonRel <= len(lines[keyLine]) {
-		lines[keyLine] = yamlKey(newKey) + lines[keyLine][colonRel:]
-	}
+	lines[keyLine] = yamlKey(newKey) + lines[keyLine][e.keyEnd-e.keyStart:]
 	return lines
 }
 
@@ -416,7 +418,7 @@ func (r *run) insert(container *ynode, p payload, before, after hew.Path, t hew.
 		pos = kids[i].start
 	}
 	text := indentBlock(p.lines, kids[0].indent)
-	if pos > 0 && pos <= len(r.d.src) && r.d.src[pos-1] != '\n' {
+	if pos > 0 && r.d.src[pos-1] != '\n' {
 		// The container's last line has no newline of its own: open one.
 		return []edit{{start: pos, end: pos, text: "\n" + text}}, nil
 	}

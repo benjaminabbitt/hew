@@ -153,12 +153,16 @@ func plainTag(s string) string {
 }
 
 func indentEach(lines []string, n int) []string {
-	if n <= 0 || len(lines) == 0 {
+	if n <= 0 {
 		return lines
 	}
 	pad := strings.Repeat(" ", n)
 	out := make([]string, len(lines))
 	for i, l := range lines {
+		if l == "" {
+			out[i] = l // a blank line stays blank: indenting it is trailing whitespace
+			continue
+		}
 		out[i] = pad + l
 	}
 	return out

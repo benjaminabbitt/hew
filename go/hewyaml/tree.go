@@ -139,7 +139,9 @@ func parseDoc(src []byte) (*doc, error) {
 		return nil, err
 	}
 	d.root = root
-	d.indent = d.inferIndent(root)
+	if step, ok := d.inferIndent(root); ok && step > 0 {
+		d.indent = step
+	}
 	return d, nil
 }
 
@@ -154,38 +156,34 @@ func lineStarts(src []byte) []int {
 }
 
 // inferIndent reads the document's own block indentation step off the first
-// nested block container it finds, so a created container matches the file
-// rather than a hard-coded house style. Two is the fallback.
-func (d *doc) inferIndent(n *ynode) int {
+// nested block mapping it finds, so a container this binding creates matches
+// the file rather than a hard-coded house style. ok=false means the document
+// has no nested block mapping to learn from.
+func (d *doc) inferIndent(n *ynode) (int, bool) {
 	switch n.kind {
 	case nMap:
 		for _, e := range n.entries {
 			if e.val.kind == nMap && !e.val.flow && len(e.val.entries) > 0 {
-				if step := e.val.entries[0].indent - e.indent; step > 0 {
-					return step
-				}
+				return e.val.entries[0].indent - e.indent, true
 			}
-			if step := d.inferIndent(e.val); step != 2 {
-				return step
+			if step, ok := d.inferIndent(e.val); ok {
+				return step, true
 			}
 		}
 	case nSeq:
 		for _, el := range n.elems {
-			if step := d.inferIndent(el.val); step != 2 {
-				return step
+			if step, ok := d.inferIndent(el.val); ok {
+				return step, true
 			}
 		}
 	}
-	return 2
+	return 0, false
 }
 
 // pos converts yaml.v3's 1-based (line, column) mark into a byte offset.
 // Columns count characters, not bytes, so a multi-byte line is walked rune by
 // rune.
 func (d *doc) pos(line, col int) int {
-	if line-1 >= len(d.lines) {
-		return len(d.src)
-	}
 	off := d.lines[line-1]
 	for c := 1; c < col && off < len(d.src) && d.src[off] != '\n'; c++ {
 		_, sz := utf8.DecodeRune(d.src[off:])
@@ -195,9 +193,6 @@ func (d *doc) pos(line, col int) int {
 }
 
 func (d *doc) lineStartOf(off int) int {
-	if off > len(d.src) {
-		off = len(d.src)
-	}
 	i := off
 	for i > 0 && d.src[i-1] != '\n' {
 		i--
@@ -225,19 +220,17 @@ func (d *doc) blockEndOf(off int) int {
 	return e
 }
 
+// indentOf is a line's indentation. YAML indentation is spaces only — a tab
+// there is a parse error yaml.v3 has already refused — so this counts spaces.
 func (d *doc) indentOf(lineStart int) int {
-	i := lineStart
-	for i < len(d.src) && (d.src[i] == ' ' || d.src[i] == '\t') {
-		i++
-	}
-	return i - lineStart
+	return d.firstNonSpace(lineStart) - lineStart
 }
 
 // firstNonSpace returns the offset of the line's first non-blank byte, or the
 // line end for a blank line.
 func (d *doc) firstNonSpace(lineStart int) int {
 	i := lineStart
-	for i < len(d.src) && (d.src[i] == ' ' || d.src[i] == '\t') {
+	for i < len(d.src) && d.src[i] == ' ' {
 		i++
 	}
 	return i
