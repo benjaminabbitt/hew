@@ -1,0 +1,13 @@
+hew-transforms: 1
+target: target.tf
+format: hcl
+transforms:
+  - op: test
+    path: /resource/"aws_s3_bucket"/"assets"/bucket
+    value: example-assets
+  - op: test
+    path: /resource/"aws_s3_bucket"/"assets"/acl
+    value: private
+  - op: replace
+    path: /resource/"aws_s3_bucket"/"assets"/acl
+    value: public-read
