@@ -89,15 +89,6 @@ type Binding struct {
 	// that claims a token owns its meaning; the core only carries the bytes.
 	Segments []SegmentForm
 
-	// QuotedLabels declares that this extension resolves a quoted segment
-	// (§4.1) against a BLOCK SET, where it is a LABEL (§4.3), rather than
-	// against a mapping, where it is a key. It is the half of O48's SegLabel
-	// restructure the extension has to supply: the core lexes one literal form
-	// and does not know what a block set is, so a format that has one says so
-	// here. For every other format a quoted segment is a key, which is why this
-	// is a declaration and not a switch.
-	QuotedLabels bool
-
 	// Qualifiers are the transform qualifier keys this extension OWNS —
 	// "anchor" for YAML (§9.6), "surface" for TOML. O48's first recorded
 	// tension is why this is a declaration and not a relocation: the field's
@@ -240,14 +231,6 @@ func OwnsQualifier(f FormatID, q string) bool {
 		}
 	}
 	return false
-}
-
-// quotedIsLabel reports whether f's extension resolves a quoted segment as an
-// HCL-style block label (§4.3) rather than as a mapping key. An unregistered
-// format has no block sets the core knows of, so the answer is no.
-func quotedIsLabel(f FormatID) bool {
-	b, ok := Lookup(f)
-	return ok && b.QuotedLabels
 }
 
 // claimSegment offers a lexed token to the segment forms in sc's scope and

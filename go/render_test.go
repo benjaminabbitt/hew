@@ -149,7 +149,6 @@ func TestRenderRoundTripCorpusIRFixtures(t *testing.T) {
 		"jsonc/add-with-leading-comment",
 		"yaml/set-scalar",
 		"toml/surface-directive-table",
-		"hcl/repeated-label-ordinal",
 	}
 	for _, c := range cases {
 		t.Run(c, func(t *testing.T) {
@@ -240,22 +239,6 @@ func TestRenderInexpressible(t *testing.T) {
 			{Op: OpAdd, Path: MustParsePath("/servers/b"), Value: tbl, Surface: SurfaceDotted},
 		}},
 	}, {
-		name: "an assertion under an ordinal-selected block",
-		tl: TransformList{Target: "t.tf", Format: FormatHCL, Transform: []Transform{
-			{Op: OpTest, Path: MustParsePath(`/provider/"aws"[1]/region`), Absent: true},
-		}},
-	}, {
-		name: "an ordinal-addressed assertion hosted in another hunk",
-		tl: TransformList{Target: "t.tf", Format: FormatHCL, Transform: []Transform{
-			{Op: OpTest, Path: MustParsePath("/terraform/required_version"), Value: mustValNoT(">= 1.6")},
-			{Op: OpTest, Path: MustParsePath(`/provider/"aws"[1]`), Absent: true},
-		}},
-	}, {
-		name: "an ordinal that is not the anchor's last segment",
-		tl: TransformList{Target: "t.tf", Format: FormatHCL, Transform: []Transform{
-			{Op: OpTest, Path: MustParsePath(`/provider/"aws"[1]/settings/region`), Value: mustValNoT("us-east-1")},
-		}},
-	}, {
 		name: "a remove with no test to supply the removed value",
 		tl: TransformList{Target: "t.json", Format: FormatJSON, Transform: []Transform{
 			{Op: OpRemove, Path: MustParsePath("/server/host")},
@@ -271,7 +254,7 @@ func TestRenderInexpressible(t *testing.T) {
 }
 
 func TestRenderAgainstCorpusRoundtripFixtures(t *testing.T) {
-	families := []string{"json", "jsonc", "yaml", "toml", "hcl"}
+	families := []string{"json", "jsonc", "yaml", "toml"}
 	for _, fam := range families {
 		t.Run(fam, func(t *testing.T) {
 			dir := corpusDir(t, fam+"/roundtrip-basic")

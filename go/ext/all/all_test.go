@@ -15,7 +15,7 @@ import (
 // fake formats; these tests pin what the six v0 extensions actually claim.
 
 func TestAllRegistersEveryV0Format(t *testing.T) {
-	want := []hew.FormatID{"hcl", "json", "jsonc", "markdown", "toml", "yaml"}
+	want := []hew.FormatID{"json", "jsonc", "markdown", "toml", "yaml"}
 	if got := hew.Formats(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("hew.Formats() = %v, want %v", got, want)
 	}
@@ -42,15 +42,6 @@ func TestShippedHalves(t *testing.T) {
 		// even when qualified Optional — failed with "cannot read \"toml\"
 		// documents" rather than doing the edit.
 		{"toml", true, true, true},
-		// HCL is the one appliable format with no reader, and the reason is a
-		// CONTRACT limit rather than missing work: Node resolves one segment to
-		// one child, while an HCL step consumes a tuple (block type, its label
-		// segments, an optional key-match and ordinal) and refuses a bare
-		// quoted segment. /provider names a set, not a node. Widening Node to
-		// let an extension consume several segments is the open interface
-		// question; until it is settled a reader here could only report
-		// addresses the applier rejects.
-		{"hcl", true, true, false},
 		// Markdown ships neither half while §8.7's dialect evaluation is open
 		// (O29). It is registered anyway, because detection and parsing a
 		// markdown patch are real and do not need an applier.
@@ -95,11 +86,6 @@ func TestShippedDetectionDefaults(t *testing.T) {
 		{"config.yaml", "yaml", true},
 		{"config.yml", "yaml", true},
 		{"config.toml", "toml", true},
-		{"main.tf", "hcl", true},
-		{"policy.hcl", "hcl", true},
-		{"prod.tfvars", "hcl", true},
-		{"job.nomad", "hcl", true},
-		{"build.pkr.hcl", "hcl", true},
 		{"README.md", "markdown", true},
 		{"README.markdown", "markdown", true},
 		{"CONFIG.YAML", "yaml", true},
@@ -142,7 +128,7 @@ func TestNoExtensionClaimsAnotherName(t *testing.T) {
 // node kinds and transform qualifiers the extensions now own.
 func TestExtensionDeclaredVocabulary(t *testing.T) {
 	if !hew.NodeKind("block").Valid() {
-		t.Error(`"block" is not a valid kind although ext/hcl and ext/markdown declare it`)
+		t.Error(`"block" is not a valid kind although ext/markdown declares it`)
 	}
 	if !hew.NodeKind("section").Valid() {
 		t.Error(`"section" is not a valid kind although ext/markdown declares it`)
@@ -158,14 +144,6 @@ func TestExtensionDeclaredVocabulary(t *testing.T) {
 	}
 	if hew.OwnsQualifier("json", "anchor") {
 		t.Error("ext/json owns `anchor:`, which is YAML's")
-	}
-	if b, _ := hew.Lookup("hcl"); !b.QuotedLabels {
-		t.Error("ext/hcl does not declare that a quoted segment is a block label (§4.3, O48)")
-	}
-	for _, id := range []hew.FormatID{"json", "jsonc", "yaml", "toml", "markdown"} {
-		if b, _ := hew.Lookup(id); b.QuotedLabels {
-			t.Errorf("%q declares block-set labels; a quoted segment there is a KEY (§4.1, O41)", id)
-		}
 	}
 }
 

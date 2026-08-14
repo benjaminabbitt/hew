@@ -553,26 +553,23 @@ func TestApplyRecordThatCannotBeResolvedLeavesTheTargetUntouched(t *testing.T) {
 
 // detectFormat knows the extension, but no binding exists for it yet: that is
 // HEW021 too, and by a different branch than an undetectable extension.
-// --ops projects the executed list onto RFC 6901, which needs the format's
-// Binding.Document. HCL is the one appliable format that ships no reader — its
-// addressing consumes a segment tuple, which the one segment / one child Node
-// contract cannot express — so it is what a "known format, no binding for the
-// thing --ops needs" case looks like now.
+// --ops needs the format's binding. Markdown is the durable case: it is
+// registered and detectable, so the patch parses and names a real format, but
+// it ships no applier at all while §8.7's dialect evaluation is open (O29).
 //
-// This was a YAML case until YAML gained a reader, at which point --ops began
-// working on it. If HCL gains one too this test FAILS rather than quietly
-// passing, and its premise has to be rebuilt on whatever is genuinely missing
-// then.
+// This was a YAML case, then an HCL one; both gained what they lacked. If
+// markdown ever ships an applier this test FAILS rather than quietly passing,
+// and whatever is genuinely unbound then becomes the case.
 func TestApplyOpsKnownFormatWithoutABindingExitsTwo(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "target.tf", "terraform {\n  required_version = \">= 1.6\"\n}\n")
-	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- target.tf\n\n@@ /terraform @@\n- required_version = \">= 1.6\"\n+ required_version = \">= 1.7\"\n")
+	writeFile(t, dir, "notes.md", "# Title\n\nbody\n")
+	writeFile(t, dir, "patch.hew", "hew: 1\n\n--- notes.md\n\n@@ / @@\n- body\n+ text\n")
 	exit, _, stderr := run(t, dir, "apply", "--ops", "patch.hew")
 	if exit != 2 || !strings.Contains(stderr, "HEW021") {
 		t.Fatalf("want exit 2 with HEW021, got %d: %q", exit, stderr)
 	}
-	if !strings.Contains(stderr, `no binding for format "hcl"`) {
-		t.Fatalf("stderr should name the missing binding: %q", stderr)
+	if !strings.Contains(stderr, `format "markdown"`) {
+		t.Fatalf("stderr should name the unbound format: %q", stderr)
 	}
 }
 

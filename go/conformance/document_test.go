@@ -30,7 +30,6 @@ var documentFixtures = map[hew.FormatID]struct {
 	"jsonc": {"config.jsonc", "{\n  // the host\n  \"host\": \"example.com\"\n}\n"},
 	"yaml":  {"config.yaml", "host: example.com\n"},
 	"toml":  {"config.toml", "host = \"example.com\"\n"},
-	"hcl":   {"main.tf", "host = \"example.com\"\n"},
 }
 
 // appliableFormats is every registered format that can be written to. Markdown
@@ -51,30 +50,9 @@ func appliableFormats(t *testing.T) []hew.FormatID {
 	return out
 }
 
-// HCL is exempt, and the reason is a CONTRACT limit rather than missing work.
-// Node resolves ONE segment to ONE child — resolve.go's walk is a plain range
-// over the segments — but HCL's applier consumes a TUPLE in a single step
-// (block type, then its label segments, then an optional key-match and
-// ordinal), and it refuses a bare quoted segment outright: a label "must follow
-// the block type it qualifies". So /provider names a SET rather than a node,
-// and /"aws" names nothing on its own.
-//
-// A reader could invent an intermediate block-set node to bridge that, and it
-// would be wrong: /provider would resolve to a pointer the applier rejects, and
-// these readers exist precisely so --ops and the §9.7 record report the
-// applier's own addresses instead of a second parser's opinion of them.
-// Widening Node to let an extension consume several segments is an interface
-// change, and it is the one this exemption is waiting on.
-//
-// Named by ID so a SEVENTH format cannot inherit the exemption by accident.
-func exemptFromReader(id hew.FormatID) bool { return id == "hcl" }
-
 func TestEveryAppliableFormatSuppliesAReader(t *testing.T) {
 	for _, id := range appliableFormats(t) {
 		t.Run(string(id), func(t *testing.T) {
-			if exemptFromReader(id) {
-				t.Skip("Node resolves one segment to one child; HCL's step consumes a tuple — see exemptFromReader")
-			}
 			b, _ := hew.Lookup(id)
 			if b.Document == nil {
 				t.Fatalf("format %q registers an Applier but no Document: it can be written to but not addressed, so Resolve, the §9.7 record and the fluent API's reads all fail on it", id)
@@ -115,9 +93,6 @@ func TestEveryAppliableFormatSuppliesAReader(t *testing.T) {
 func TestFluentReadPathWorksOnEveryAppliableFormat(t *testing.T) {
 	for _, id := range appliableFormats(t) {
 		t.Run(string(id), func(t *testing.T) {
-			if exemptFromReader(id) {
-				t.Skip("Node resolves one segment to one child; HCL's step consumes a tuple — see exemptFromReader")
-			}
 			fx, ok := documentFixtures[id]
 			if !ok {
 				t.Fatalf("no document fixture for registered format %q", id)
@@ -143,9 +118,6 @@ func TestFluentReadPathWorksOnEveryAppliableFormat(t *testing.T) {
 func TestResolveProducesOpsOnEveryAppliableFormat(t *testing.T) {
 	for _, id := range appliableFormats(t) {
 		t.Run(string(id), func(t *testing.T) {
-			if exemptFromReader(id) {
-				t.Skip("Node resolves one segment to one child; HCL's step consumes a tuple — see exemptFromReader")
-			}
 			fx, ok := documentFixtures[id]
 			if !ok {
 				t.Fatalf("no document fixture for registered format %q", id)

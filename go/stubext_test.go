@@ -11,7 +11,7 @@ package hew
 // have been made to say so.
 func init() {
 	for _, id := range []FormatID{
-		FormatJSON, FormatJSONC, FormatYAML, FormatTOML, FormatHCL, FormatMarkdown,
+		FormatJSON, FormatJSONC, FormatYAML, FormatTOML, FormatMarkdown,
 	} {
 		Register(id, Binding{})
 	}

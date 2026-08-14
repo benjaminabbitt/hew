@@ -83,7 +83,6 @@ func TestParseAgainstCorpusFixtures(t *testing.T) {
 		"jsonc/add-with-leading-comment",
 		"yaml/set-scalar",
 		"toml/surface-directive-table",
-		"hcl/repeated-label-ordinal",
 	}
 	for _, c := range cases {
 		t.Run(c, func(t *testing.T) { assertParsesTo(t, c) })

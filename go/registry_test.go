@@ -594,24 +594,3 @@ func TestTheParserScopesItsAddresses(t *testing.T) {
 		t.Fatalf(".hewt address parsed as %+v, want a key", got)
 	}
 }
-
-// TestQuotedLabelsIsADeclaration pins O48's SegLabel restructure at the
-// registry: the core cannot know which formats have block sets, so a format
-// says so, and every other format's quoted segment stays a key.
-func TestQuotedLabelsIsADeclaration(t *testing.T) {
-	isolate(t)
-	b := fakeBinding("hcl", []string{".tf"}, nil)
-	b.QuotedLabels = true
-	Register("hcl", b)
-	Register("json", fakeBinding("json", []string{".json"}, nil))
-
-	if !quotedIsLabel("hcl") {
-		t.Error("a format that declared block-set labels does not have them")
-	}
-	if quotedIsLabel("json") {
-		t.Error("a format that declared nothing has labels")
-	}
-	if quotedIsLabel("nope") {
-		t.Error("an unregistered format has labels")
-	}
-}
