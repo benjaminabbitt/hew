@@ -143,6 +143,18 @@ type Transform struct {
 	// ignored on input, and no corpus fixture carries it, so the codec
 	// neither writes nor reads it.
 	PatchLine int
+
+	// AnchorPath and AnchorLine are the hunk this transform was lowered from:
+	// its `@@ … @@` address and the line that address is written on. They
+	// are provenance, like PatchLine — never serialized, never compared —
+	// and they exist because a resolution failure INSIDE the anchor is the
+	// ANCHOR's failure and must be reported where the reviewer can fix it.
+	// The corpus pins that reporting in two places, hcl/repeated-label-ambiguous
+	// (HEW012 at the `@@` line, not at the context line that asked first) and
+	// markdown/duplicate-heading; Appendix A.1's Transform has no field for
+	// it, which is a spec gap found while implementing the HCL binding.
+	AnchorPath Path
+	AnchorLine int
 }
 
 // TransformList is the IR (§9.2, abstract form): the boundary between the
@@ -167,8 +179,8 @@ func (tl TransformList) Equal(o TransformList) bool {
 	return true
 }
 
-// Equal reports whether two transforms are the same record. PatchLine is
-// provenance, not content, and is not compared.
+// Equal reports whether two transforms are the same record. PatchLine,
+// AnchorPath and AnchorLine are provenance, not content, and are not compared.
 func (t Transform) Equal(o Transform) bool {
 	if t.Op != o.Op || t.Absent != o.Absent || t.OnConflict != o.OnConflict ||
 		t.Anchor != o.Anchor || t.Surface != o.Surface ||

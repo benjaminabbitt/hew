@@ -393,7 +393,7 @@ func (p *parser) hunk() ([]Transform, error) {
 	if len(body) == 0 {
 		return nil, parseErr(ln.num, anchor.String(), "hunk has no body lines (§2.3)")
 	}
-	return lowerHunk(anchor, body, p.filePragma)
+	return lowerHunk(anchor, ln.num, body, p.filePragma)
 }
 
 // splitHunkHeader splits `@@ address @@ [attrs]` into its address and
