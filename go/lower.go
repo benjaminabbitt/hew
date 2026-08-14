@@ -105,8 +105,9 @@ type lowerer struct {
 
 // lowerHunk compiles one hunk body into transforms (§9.1). filePragma is the
 // preamble's `idempotent:` (§2.1, ruling O3); a hunk's own `! strict` or
-// `! idempotent` overrides it.
-func lowerHunk(anchor Path, body []bodyLine, filePragma bool) ([]Transform, error) {
+// `! idempotent` overrides it. anchorLine is the `@@` header's line, carried
+// onto every transform the hunk produces as provenance (§10.3).
+func lowerHunk(anchor Path, anchorLine int, body []bodyLine, filePragma bool) ([]Transform, error) {
 	r := &bodyReader{lines: body}
 	entries, err := r.entries(body[0].indent)
 	if err != nil {
@@ -143,6 +144,9 @@ func lowerHunk(anchor Path, body []bodyLine, filePragma bool) ([]Transform, erro
 	}
 	if err := l.checkOrdinals(); err != nil {
 		return nil, err
+	}
+	for i := range l.out {
+		l.out[i].AnchorPath, l.out[i].AnchorLine = anchor, anchorLine
 	}
 	return l.out, nil
 }
