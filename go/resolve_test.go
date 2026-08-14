@@ -424,7 +424,7 @@ func TestResolveAddWithNoPlacementAppends(t *testing.T) {
 }
 
 // A placement that resolves but is not a direct element of the container
-// leaves the insertion at the end, which is what hewjson's applier does; the
+// leaves the insertion at the end, which is what ext/json's applier does; the
 // resolved list must describe the edit that really happened.
 func TestResolveAddWithForeignPlacementAppends(t *testing.T) {
 	doc := mustDoc(t, servers)

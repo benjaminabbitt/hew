@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	"github.com/benjaminabbitt/hew/go"
-	"github.com/benjaminabbitt/hew/go/hewhcl"
-	"github.com/benjaminabbitt/hew/go/hewjson"
-	"github.com/benjaminabbitt/hew/go/hewjsonc"
-	"github.com/benjaminabbitt/hew/go/hewtoml"
-	"github.com/benjaminabbitt/hew/go/hewyaml"
+	hewhcl "github.com/benjaminabbitt/hew/go/ext/hcl"
+	hewjson "github.com/benjaminabbitt/hew/go/ext/json"
+	hewjsonc "github.com/benjaminabbitt/hew/go/ext/jsonc"
+	hewtoml "github.com/benjaminabbitt/hew/go/ext/toml"
+	hewyaml "github.com/benjaminabbitt/hew/go/ext/yaml"
 )
 
 func apply(target []byte, tl hew.TransformList) ([]byte, error) {

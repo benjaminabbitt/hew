@@ -57,7 +57,7 @@ func TestApplyInPlaceDefault(t *testing.T) {
 }
 
 // TestApplyDispatchesJSONCTargets covers the §8.2 binding's wiring: a jsonc
-// target routes to hewjsonc, comments and all, rather than to the JSON
+// target routes to ext/jsonc, comments and all, rather than to the JSON
 // applier that would refuse them.
 func TestApplyDispatchesJSONCTargets(t *testing.T) {
 	dir := t.TempDir()

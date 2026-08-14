@@ -2,7 +2,7 @@
 // the transform-list IR (§9), and its canonical `.hewt` serialization (§9.6).
 //
 // The package is the notation-and-IR core. It imports no format library and
-// performs no I/O: format bindings (hewjson, hewyaml, …) and the filesystem
+// performs no I/O: format bindings (ext/json, ext/yaml, …) and the filesystem
 // layer sit above it.
 package hew
 

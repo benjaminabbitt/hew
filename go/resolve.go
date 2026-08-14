@@ -169,7 +169,7 @@ func (r *resolver) pointer(p Path, line int) (string, error) {
 //
 // Disambiguating a sequence-style add (path IS the container) from a
 // map-style one (path is container + the new key) uses exactly the signal
-// hewjson's planInsert uses — whether path resolves to an existing SEQUENCE —
+// ext/json's planInsert uses — whether path resolves to an existing SEQUENCE —
 // so that the resolved list describes the insertion the applier would really
 // perform rather than a second, independent guess.
 func (r *resolver) insertPointer(path, before, after Path, line int) (string, error) {
@@ -199,7 +199,7 @@ func (r *resolver) insertPointer(path, before, after Path, line int) (string, er
 }
 
 // placementIndex turns a relative placement (§6.2) into a concrete index in
-// container. It mirrors hewjson.insertArrayElement, sibling lookup and
+// container. It mirrors ext/json's insertArrayElement, sibling lookup and
 // fallback included: a placement path that resolves but is not a direct child
 // of the container leaves the insertion at the end, because that is what the
 // applier does, and a resolved list that disagreed with the applier would be
