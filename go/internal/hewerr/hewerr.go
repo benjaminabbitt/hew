@@ -5,6 +5,7 @@
 package hewerr
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -166,4 +167,40 @@ func As(err error) (*Error, bool) {
 		return he, true
 	}
 	return nil, false
+}
+
+// JSON is §10.3's machine-readable diagnostic: one object per error, carrying
+// the same facts the human form prints and nothing the human form invents.
+//
+// It exists because the human shape is prose that a consumer would otherwise
+// have to parse back out — and the fields it would want most, the codes and
+// the two line numbers, are exactly the ones prose makes ambiguous. Empty
+// fields are omitted so an absent fact reads as absent rather than as "".
+func (e *Error) JSON() ([]byte, error) {
+	type payload struct {
+		Code       string `json:"code"`
+		Slug       string `json:"slug,omitempty"`
+		Component  string `json:"component,omitempty"`
+		Target     string `json:"target,omitempty"`
+		TargetLine int    `json:"targetLine,omitempty"`
+		Path       string `json:"path,omitempty"`
+		Patch      string `json:"patch,omitempty"`
+		PatchLine  int    `json:"patchLine,omitempty"`
+		Want       string `json:"want,omitempty"`
+		Got        string `json:"got,omitempty"`
+		Detail     string `json:"detail,omitempty"`
+	}
+	return json.Marshal(payload{
+		Code:       string(e.Code),
+		Slug:       e.Code.Name(),
+		Component:  e.Component.String(),
+		Target:     e.Target,
+		TargetLine: e.TargetLine,
+		Path:       e.Path,
+		Patch:      e.PatchFile,
+		PatchLine:  e.PatchLine,
+		Want:       e.Want,
+		Got:        e.Got,
+		Detail:     e.Detail,
+	})
 }

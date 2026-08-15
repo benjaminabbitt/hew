@@ -102,6 +102,9 @@ func (r *run) evalValue(t hew.Transform) error {
 	}
 	e := r.err(hewerr.CodeStaleTarget, t.Path.String(), t.PatchLine, "")
 	e.Want, e.Got = t.Value.String(), r.d.describe(rf.node)
+	// §10.3's `found` line names WHERE in the target, not just what: the node
+	// is in hand here and its span is the only place that fact exists.
+	e.TargetLine = r.d.lineOf(rf.node)
 	return e
 }
 

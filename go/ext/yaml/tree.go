@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -679,4 +680,14 @@ func (d *doc) trailingComment(n *ynode) *commentNode {
 		}
 	}
 	return nil
+}
+
+// lineOf is the 1-based line a node starts on, for §10.3's `found` line. lines
+// holds each line's start offset, so the line number is simply how many starts
+// are at or before the node. Zero when there is no span to report.
+func (d *doc) lineOf(n *ynode) int {
+	if n == nil || n.start < 0 {
+		return 0
+	}
+	return sort.SearchInts(d.lines, n.start+1)
 }

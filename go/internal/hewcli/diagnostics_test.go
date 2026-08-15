@@ -74,22 +74,32 @@ func TestFormatOutRejectsAnUnknownValue(t *testing.T) {
 	}
 }
 
-// --- 2. one cause, one code -------------------------------------------------
+// --- 2. two paths, two questions -------------------------------------------
 
-// A key-match that matches nothing is HEW013 no-match on EVERY path. It read
-// HEW010 stale-target from apply and HEW013 from --ops, which gave a consumer
-// keying on the code two different categories for one cause.
-func TestNoMatchReportsTheSameCodeOnBothPaths(t *testing.T) {
+// apply and --ops report DIFFERENT codes for the same absent node, and that is
+// correct rather than a bug — they are not asking the same thing:
+//
+//	apply  asks "does the before-image hold?"  A node that is not there means
+//	       it does not, so the target drifted: HEW010, and the remedy is to
+//	       re-derive the patch.
+//	--ops  is address-only (§9.2) and evaluates nothing, so the only question
+//	       it can answer is whether the address resolves: HEW013, and the
+//	       remedy is to fix the address.
+//
+// This is pinned because it LOOKS like an inconsistency, and a future reader
+// who "fixes" it collapses two different remedies into one.
+func TestApplyAndOpsAnswerDifferentQuestions(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "s.yaml", "servers:\n  - name: web\n    port: 80\n")
 	writeFile(t, dir, "m.hew", "hew: 1\n\n--- s.yaml format=yaml\n\n@@ /servers/name=nope @@\n- port: 80\n+ port: 81\n")
 
 	_, _, applyErr := run(t, dir, "apply", "m.hew")
+	if !strings.Contains(applyErr, "HEW010") {
+		t.Errorf("apply reported %q, want HEW010 stale-target (the before-image does not hold)", applyErr)
+	}
 	_, _, opsErr := run(t, dir, "apply", "--ops", "m.hew")
-	for name, out := range map[string]string{"apply": applyErr, "--ops": opsErr} {
-		if !strings.Contains(out, "HEW013") {
-			t.Errorf("%s reported %q, want HEW013 no-match", name, out)
-		}
+	if !strings.Contains(opsErr, "HEW013") {
+		t.Errorf("--ops reported %q, want HEW013 no-match (the address resolves to nothing)", opsErr)
 	}
 }
 
@@ -126,16 +136,24 @@ func TestStaleTargetNamesTheTargetLine(t *testing.T) {
 
 // --- 5. how much else is wrong ----------------------------------------------
 
-// Reporting the first failure and stopping is right — nothing is written
-// either way — but a reader deserves to know whether fixing it is the whole
-// job. A bare count is enough and stays cheap.
+// Reporting the first failure in full and stopping is right — nothing is
+// written either way — but a reader deserves to know whether fixing it is the
+// whole job. A bare count is enough and stays cheap.
+//
+// The count is per FILE SECTION, not per transform. Counting within a section
+// would mean evaluating one `test` outside its hunk, where a paired write can
+// converge an assertion that would fail alone, so a per-transform count could
+// report failures that are not real. Two sections here, both stale.
 func TestSeveralFailuresReportTheRemainingCount(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "c.yaml", "a: 1\nb: 2\n")
-	writeFile(t, dir, "two.hew", "hew: 1\n\n--- c.yaml format=yaml\n\n@@ / @@\n- a: 99\n+ a: 3\n\n@@ / @@\n- b: 98\n+ b: 4\n")
+	writeFile(t, dir, "a.yaml", "k: 1\n")
+	writeFile(t, dir, "b.yaml", "k: 2\n")
+	writeFile(t, dir, "two.hew",
+		"hew: 1\n\n--- a.yaml format=yaml\n\n@@ / @@\n- k: 99\n+ k: 3\n"+
+			"\n--- b.yaml format=yaml\n\n@@ / @@\n- k: 98\n+ k: 4\n")
 	_, _, stderr := run(t, dir, "apply", "two.hew")
 	if !strings.Contains(stderr, "1 more") {
-		t.Errorf("stderr does not say how many other failures there are: %q", stderr)
+		t.Errorf("stderr does not say how many other sections failed: %q", stderr)
 	}
 }
 
