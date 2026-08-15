@@ -81,6 +81,48 @@ func diffErr(code hewerr.Code, target, path, format string, args ...any) error {
 	}
 }
 
+// Invert returns the transform list that UNDOES an application which turned
+// before into after: applying it to the after-image yields the before-image.
+//
+// The inverse of an application is a hew question, not a caller's, which is
+// why this exists rather than leaving every consumer to assemble it. Derived
+// by hand it is a rule per op shape — an add that replaced a value inverts to
+// an add carrying the old one, an add that created a key inverts to a remove,
+// a remove inverts to an add of what was there — and each rule is somewhere to
+// be quietly wrong. Diffing the other way round answers all of them at once.
+//
+// The DIRECTION is the whole point of the function. `Diff(before, after)` and
+// `Diff(after, before)` are both well-formed calls that both return a valid
+// transform list, and only one of them undoes anything; a caller that swaps
+// them gets the FORWARD list back and finds out when its pointers fail to
+// resolve, if it is lucky, and silently reapplies its own change if it is not.
+// Naming the direction here means it is decided once.
+//
+// APPLY THE RESULT TO THE AFTER-IMAGE. The addresses it carries name positions
+// in the document as it stands after the application, not as it stood before.
+// Resolving it against the before-image is the other easy mistake and this
+// function cannot prevent it — it returns the abstract list, as DiffTrees does.
+//
+// An inverse carries values: restoring what an op replaced means holding the
+// replaced content. It copies only what an op actually touched, which is why
+// a record can store this instead of a copy of the whole pre-image.
+func Invert(format FormatID, before, after []byte, opt DiffOptions) (TransformList, error) {
+	b, ok := Lookup(format)
+	if !ok || b.Differ == nil {
+		return TransformList{}, diffErr(hewerr.CodeUnsupportedFormat, opt.Target, "",
+			"this build cannot diff %q documents, so an application to one cannot be inverted", string(format))
+	}
+	afterTree, err := b.Differ(after)
+	if err != nil {
+		return TransformList{}, err
+	}
+	beforeTree, err := b.Differ(before)
+	if err != nil {
+		return TransformList{}, err
+	}
+	return DiffTrees(afterTree, beforeTree, format, opt)
+}
+
 // DiffTrees computes the structural difference between two parsed documents
 // and returns the abstract transform list (§9.2) that turns old into new.
 //

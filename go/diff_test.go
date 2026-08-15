@@ -1,6 +1,8 @@
 package hew
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -688,5 +690,92 @@ func TestDiffAcceptsSpellableKeys(t *testing.T) {
 	tl := diffOK(t, old, new, DiffOptions{Target: "package.json"})
 	if len(tl.Transform) == 0 {
 		t.Fatal("a changed version must produce transforms")
+	}
+}
+
+// --- Invert -----------------------------------------------------------------
+
+// invertFormat registers a binding whose Differ maps two known byte strings to
+// two known trees, so a test can state exactly which document Invert treated as
+// the before-image and which as the after-image.
+func invertFormat(t *testing.T, id FormatID, before, after []byte, beforeTree, afterTree *DiffNode) {
+	t.Helper()
+	Register(id, Binding{
+		Differ: func(src []byte) (*DiffNode, error) {
+			switch string(src) {
+			case string(before):
+				return beforeTree, nil
+			case string(after):
+				return afterTree, nil
+			}
+			return nil, fmt.Errorf("unexpected source %q", src)
+		},
+	})
+}
+
+// The direction IS the function. Invert must diff after -> before; the opposite
+// call is equally well-formed and returns the forward list, which undoes
+// nothing.
+func TestInvertDiffsFromTheAfterImage(t *testing.T) {
+	before, after := []byte("BEFORE"), []byte("AFTER")
+	beforeTree := dmap("dependencies", dmap("left-pad", dstr("1.0.0")))
+	afterTree := dmap("dependencies", dmap("left-pad", dstr("2.0.0")))
+	invertFormat(t, "invtoy", before, after, beforeTree, afterTree)
+
+	got, err := Invert("invtoy", before, after, DiffOptions{Target: "package.json"})
+	if err != nil {
+		t.Fatalf("Invert: %v", err)
+	}
+	// The inverse restores the OLD version, so its value is 1.0.0. The forward
+	// list would carry 2.0.0 — that is the whole difference between the two
+	// directions, and asserting the value is what tells them apart.
+	want, err := DiffTrees(afterTree, beforeTree, "invtoy", DiffOptions{Target: "package.json"})
+	if err != nil {
+		t.Fatalf("DiffTrees: %v", err)
+	}
+	if len(got.Transform) == 0 {
+		t.Fatal("Invert produced no transforms for a changed document")
+	}
+	if !reflect.DeepEqual(got.Transform, want.Transform) {
+		t.Fatalf("Invert did not diff after->before:\n got %+v\nwant %+v", got.Transform, want.Transform)
+	}
+	var carried string
+	for _, tr := range got.Transform {
+		if !tr.Value.IsZero() {
+			carried = tr.Value.String()
+		}
+	}
+	if carried != "1.0.0" {
+		t.Fatalf("the inverse must carry the value it restores; got %q, want 1.0.0", carried)
+	}
+}
+
+// A format this build cannot diff cannot be inverted, and must say so rather
+// than returning an empty list a caller would read as "nothing to undo".
+func TestInvertRefusesAFormatItCannotDiff(t *testing.T) {
+	Register("invnodiff", Binding{})
+	_, err := Invert("invnodiff", []byte("a"), []byte("b"), DiffOptions{Target: "t"})
+	if err == nil {
+		t.Fatal("inverting a format with no differ must fail")
+	}
+	// Not mustCode: that helper pins ComponentApplier because RESOLUTION
+	// errors are the applier's. This is the differ refusing a format it cannot
+	// read, so the differ owns it.
+	he, ok := hewerr.As(err)
+	if !ok {
+		t.Fatalf("want a *hewerr.Error, got %T: %v", err, err)
+	}
+	if he.Code != hewerr.CodeUnsupportedFormat {
+		t.Fatalf("want %s, got %s (%v)", hewerr.CodeUnsupportedFormat, he.Code, err)
+	}
+	if he.Component != hewerr.ComponentDiffer {
+		t.Fatalf("an un-diffable format is the differ's refusal; got component %v", he.Component)
+	}
+}
+
+func TestInvertRefusesAnUnregisteredFormat(t *testing.T) {
+	_, err := Invert("invmissing", []byte("a"), []byte("b"), DiffOptions{Target: "t"})
+	if err == nil {
+		t.Fatal("inverting an unregistered format must fail")
 	}
 }
