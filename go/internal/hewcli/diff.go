@@ -195,7 +195,6 @@ func runDiff(args []string, dir string, stdin io.Reader, stdout, stderr io.Write
 		dest = f.transformsOut
 	} else {
 		out, err = hew.Render(tl, hew.RenderOptions{
-			Preamble: true,
 			Context:  f.context,
 			Comment:  strings.Join(notes, "\n"),
 			Fragment: hew.FragmentNative,

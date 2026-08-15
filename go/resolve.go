@@ -147,6 +147,7 @@ func (r *resolver) transform(t Transform) (ResolvedOp, error) {
 	op := ResolvedOp{
 		Op:         t.Op,
 		Value:      t.Value,
+		OnConflict: t.OnConflict,
 		Absent:     t.Absent,
 		Count:      t.Count,
 		NodeKind:   t.NodeKind,
@@ -647,6 +648,11 @@ func resolvedOpJSON(op ResolvedOp) string {
 	}
 	if op.Exhaustive {
 		add("exhaustive", "true")
+	}
+	// An add's policy, when it is not the default: a consumer replaying the
+	// list has to know whether this was a Set, a Default or an Add (OP-02/03/04).
+	if op.OnConflict != "" && op.OnConflict != ConflictFail {
+		add("on_conflict", strconv.Quote(string(op.OnConflict)))
 	}
 	if !op.Value.IsZero() {
 		add("value", jsonLiteral(op.Value.Node()))

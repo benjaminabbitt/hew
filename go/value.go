@@ -2,6 +2,7 @@ package hew
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -37,6 +38,24 @@ func (v Value) Decode(out any) error {
 // lose key order (Go maps are unordered), so the codec preserves decoded nodes
 // rather than re-encoding through this path.
 func ValueOf(x any) (Value, error) {
+	// A Value handed back in is the value it already is. Transform.Value and
+	// ResolvedOp.Value give a caller this type, so the API that CONSUMES a
+	// value has to accept the one the API PRODUCES — encoding the struct
+	// instead yields `{}`, because its only field is unexported, and an
+	// assertion of `{}` fails much later against the target while naming the
+	// wrong problem entirely.
+	switch v := x.(type) {
+	case Value:
+		if v.IsZero() {
+			return Value{}, errors.New("the zero Value carries no node; it asserts nothing")
+		}
+		return v, nil
+	case *Value:
+		if v == nil || v.IsZero() {
+			return Value{}, errors.New("the zero Value carries no node; it asserts nothing")
+		}
+		return *v, nil
+	}
 	var n yaml.Node
 	if err := n.Encode(x); err != nil {
 		return Value{}, err

@@ -22,7 +22,7 @@ func rt2(t *testing.T, tl TransformList) {
 	if err := tl.Validate(); err != nil {
 		t.Fatalf("fixture invalid: %v", err)
 	}
-	out, err := Render(tl, RenderOptions{Preamble: true, Context: 1})
+	out, err := Render(tl, RenderOptions{Context: 1})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRenderCopyIsInexpressible(t *testing.T) {
 			{Op: OpCopy, From: MustParsePath("/defaults"), Path: MustParsePath("/service_b")},
 		},
 	}
-	_, err := Render(tl, RenderOptions{Preamble: true})
+	_, err := Render(tl, RenderOptions{})
 	if err == nil {
 		t.Fatal("copy must be ErrInexpressible (Appendix C.2)")
 	}
@@ -246,7 +246,7 @@ func TestRenderInexpressible(t *testing.T) {
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Render(tc.tl, RenderOptions{Preamble: true}); !errors.Is(err, ErrInexpressible) {
+			if _, err := Render(tc.tl, RenderOptions{}); !errors.Is(err, ErrInexpressible) {
 				t.Fatalf("want ErrInexpressible, got %v", err)
 			}
 		})

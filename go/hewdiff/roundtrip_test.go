@@ -160,7 +160,7 @@ func TestRoundTripIdentity(t *testing.T) {
 			if len(tl.Transform) == 0 {
 				t.Fatal("the documents differ, so the patch must not be empty")
 			}
-			text, err := hew.Render(tl, hew.RenderOptions{Preamble: true, Fragment: hew.FragmentNative})
+			text, err := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative})
 			if err != nil {
 				t.Fatalf("render: %v\n%+v", err, tl)
 			}

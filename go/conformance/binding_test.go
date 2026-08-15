@@ -72,7 +72,7 @@ func newBinding() harness.Binding {
 			if err != nil {
 				return nil, err
 			}
-			return hew.Render(tl, hew.RenderOptions{Preamble: true, Context: 1})
+			return hew.Render(tl, hew.RenderOptions{Context: 1})
 		},
 		// DiffToHew composes the two halves the diff seam pins: the differ
 		// produces the abstract list (§9.4) and the renderer writes it as
@@ -91,7 +91,7 @@ func newBinding() harness.Binding {
 			if err != nil {
 				return nil, err
 			}
-			return hew.Render(tl, hew.RenderOptions{Preamble: true, Context: hew.ContextDefault, Fragment: hew.FragmentNative})
+			return hew.Render(tl, hew.RenderOptions{Context: hew.ContextDefault, Fragment: hew.FragmentNative})
 		},
 		// The case's env: block goes straight through to the CLI, which takes
 		// its environment as data rather than reading the process's (O37,
