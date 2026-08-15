@@ -62,6 +62,12 @@ type ResolvedOp struct {
 	From  string // OpCopy only; RFC 6901 pointer
 	Value Value
 
+	// OnConflict is the add policy the transform carried (OP-02/03/04). A
+	// resolved list is a projection, not a serialization (§9.2) — but a
+	// consumer replaying one has to know whether an `add` was a Set, a
+	// Default or an Add, and without this the only answer was a guess.
+	OnConflict OnConflict
+
 	// The assertion modes of OpTest, carried through unchanged.
 	Absent     bool
 	Count      *int
@@ -141,6 +147,7 @@ func (r *resolver) transform(t Transform) (ResolvedOp, error) {
 	op := ResolvedOp{
 		Op:         t.Op,
 		Value:      t.Value,
+		OnConflict: t.OnConflict,
 		Absent:     t.Absent,
 		Count:      t.Count,
 		NodeKind:   t.NodeKind,
@@ -641,6 +648,11 @@ func resolvedOpJSON(op ResolvedOp) string {
 	}
 	if op.Exhaustive {
 		add("exhaustive", "true")
+	}
+	// An add's policy, when it is not the default: a consumer replaying the
+	// list has to know whether this was a Set, a Default or an Add (OP-02/03/04).
+	if op.OnConflict != "" && op.OnConflict != ConflictFail {
+		add("on_conflict", strconv.Quote(string(op.OnConflict)))
 	}
 	if !op.Value.IsZero() {
 		add("value", jsonLiteral(op.Value.Node()))

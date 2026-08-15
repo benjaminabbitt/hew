@@ -23,11 +23,6 @@ type RenderOptions struct {
 	// own note warns against). The radius is DiffOptions.Context's to choose,
 	// because choosing it needs both documents, which the renderer never has.
 	Context int
-	// Preamble controls whether "hew: 1" is emitted. Convergence is never
-	// written as the file-level `idempotent:` pragma (§2.1, ruling O3): the
-	// pragma governs every hunk, while Idempotent is a per-transform
-	// qualifier, so it goes back out as the `! idempotent` line it came from.
-	Preamble bool
 	// Comment, if non-empty, is written as a leading "# " comment line before
 	// the preamble.
 	Comment string
@@ -101,10 +96,12 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error) {
 			b.WriteByte('\n')
 		}
 	}
-	if opt.Preamble {
-		fmt.Fprintf(&b, "hew: %d\n", Version)
-		b.WriteByte('\n')
-	}
+	// The preamble is ALWAYS emitted: §2.1 requires it first and §13.5 pins
+	// render -> parse as an identity, so output without it would not be hew
+	// input. It was an option, and every caller in the tree set it — the
+	// zero value was the only way to get output hew itself rejects.
+	fmt.Fprintf(&b, "hew: %d\n", Version)
+	b.WriteByte('\n')
 	fmt.Fprintf(&b, "--- %s", targetToken(tl.Target))
 	if tl.Format != "" {
 		fmt.Fprintf(&b, " format=%s", tl.Format)

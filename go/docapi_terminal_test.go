@@ -82,7 +82,7 @@ func TestRenderPatchCarriesRealContext(t *testing.T) {
 	d := opsDoc(t)
 	d.At("/host").Replace("example.com")
 
-	out, err := d.RenderPatch(RenderOptions{Preamble: true})
+	out, err := d.RenderPatch(RenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestRenderPatchRoundTripsThroughApply(t *testing.T) {
 	d := opsDoc(t)
 	d.At("/host").Replace("example.com")
 
-	patch, err := d.RenderPatch(RenderOptions{Preamble: true})
+	patch, err := d.RenderPatch(RenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

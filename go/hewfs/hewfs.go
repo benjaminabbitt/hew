@@ -327,7 +327,6 @@ func ReversalPatch(after, before []byte, format hew.FormatID, target string) ([]
 		return nil, err
 	}
 	return hew.Render(tl, hew.RenderOptions{
-		Preamble: true,
 		Context:  hew.ContextDefault,
 		Fragment: hew.FragmentNative,
 	})

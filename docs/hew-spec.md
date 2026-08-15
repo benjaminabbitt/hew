@@ -3333,7 +3333,6 @@ func Render(tl TransformList, opt RenderOptions) ([]byte, error)
 
 type RenderOptions struct {
     Context   int  // sibling radius, spec §9.4-R2. Default 1. -1 = all siblings.
-    Preamble  bool // emit "hew: 1"; false when appending to an existing document
     Comment   string
 }
 

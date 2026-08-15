@@ -22,7 +22,7 @@ func diffText(t *testing.T, old, new string, format hew.FormatID, opt hew.DiffOp
 	if len(tl.Transform) == 0 {
 		return ""
 	}
-	out, err := hew.Render(tl, hew.RenderOptions{Preamble: true, Fragment: hew.FragmentNative})
+	out, err := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestDiffOfScopedPackageJSONIsPatchable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a scoped dependency is an ordinary key and must diff: %v", err)
 	}
-	out, rerr := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative, Preamble: true})
+	out, rerr := hew.Render(tl, hew.RenderOptions{Fragment: hew.FragmentNative})
 	if rerr != nil {
 		t.Fatalf("rendering the patch: %v", rerr)
 	}
