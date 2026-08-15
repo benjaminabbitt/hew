@@ -41,10 +41,13 @@ import (
 // depends on invisible input is the thing this format exists to refuse.
 func Run(argv []string, dir string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "hew: usage: hew <apply|diff> [flags] ...")
+		fmt.Fprintln(stderr, usageText)
 		return 2
 	}
 	switch argv[0] {
+	case "-h", "--help", "help":
+		fmt.Fprintln(stdout, usageText)
+		return 0
 	case "apply":
 		return runApply(argv[1:], dir, env, stdin, stdout, stderr)
 	case "diff":
@@ -53,9 +56,41 @@ func Run(argv []string, dir string, env map[string]string, stdin io.Reader, stdo
 		return runDiff(argv[1:], dir, stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "hew: unknown command %q\n", argv[0])
+		fmt.Fprintln(stderr, usageText)
 		return 2
 	}
 }
+
+// usageText is the whole of hew's help. It lists the flags because two of them
+// — --ops and --record — are the troubleshooting affordances, and a reader who
+// cannot discover them is left guessing at a failure they could have inspected.
+const usageText = `hew: structure-aware patching
+
+usage:
+  hew apply [flags] <patch.hew>...   apply a patch
+  hew diff  [flags] <old> <new>      write a patch between two documents
+
+apply flags:
+  -i, --in-place        write the result over the target (the default when a
+                        patch names its target and no -o is given)
+  -o, --output FILE     write to FILE instead; "-" writes to stdout
+      --transforms      read a .hewt transform list instead of .hew notation
+      --ops             print the RESOLVED RFC 6901 op list and write nothing
+      --record FILE     write the §9.7 application record to FILE
+      --reversal[=FILE] write an undo patch; with no FILE, <target>.undo.hew
+      --format FORMAT   override format detection for every target
+      --format-out MODE diagnostics on failure: "human" (default) or "json"
+  -q, --quiet           suppress progress output
+
+diff flags:
+  -o, --output FILE     write the patch to FILE instead of stdout
+      --format FORMAT   override format detection
+      --context N       context radius (default 1)
+
+exit codes:
+  0  applied
+  1  did not apply, and NOTHING was written
+  2  the patch, the target or the invocation was unusable`
 
 // patchInput is the patch as read, retained because §9.7's record ties itself
 // to the exact bytes that produced it (patch.digest).
@@ -77,6 +112,9 @@ type applyFlags struct {
 	transformsOut   string
 	format          string
 	quiet           bool
+	// formatOut selects the diagnostic channel on failure (§10.3): "human"
+	// (default) or "json", one object per error on stdout.
+	formatOut string
 	// reversal and reversalPath are `--reversal [FILE]` (O40): the flag is
 	// opt-in and its value optional, so "was it given" and "with what name"
 	// are two facts.
@@ -164,11 +202,17 @@ func parseApplyArgs(args []string) (*applyFlags, error) {
 			f.format = v
 			i++
 		case "--format-out":
-			_, err := need(i, a)
+			v, err := need(i, a)
 			if err != nil {
 				return nil, err
 			}
-			i++ // parsed, not implemented: human-readable stderr only in this slice
+			switch v {
+			case "human", "json":
+				f.formatOut = v
+			default:
+				return nil, usageErr("--format-out takes %q or %q, got %q", "human", "json", v)
+			}
+			i++
 		case "-q", "--quiet":
 			f.quiet = true
 		case "-":
@@ -247,7 +291,7 @@ func runApply(args []string, dir string, env map[string]string, stdin io.Reader,
 			more, perr = hew.Parse(src)
 		}
 		if perr != nil {
-			printErr(stderr, withPatchFile(perr, in))
+			printDiag(stdout, stderr, f.formatOut, withPatchFile(perr, in))
 			return exitFor(perr)
 		}
 		tls = append(tls, more...)
@@ -270,12 +314,12 @@ func runApply(args []string, dir string, env map[string]string, stdin io.Reader,
 	}
 
 	if f.ops {
-		return runOps(tls, dir, stdout, stderr)
+		return runOps(tls, from, dir, stdout, stderr, f.formatOut)
 	}
 	if f.transformsOut != "" {
 		out, merr := hew.MarshalTransformStream(tls)
 		if merr != nil {
-			printErr(stderr, merr)
+			printDiag(stdout, stderr, f.formatOut, merr)
 			return exitFor(merr)
 		}
 		if werr := writeOutput(dir, f.transformsOut, out, stdout); werr != nil {
@@ -309,7 +353,7 @@ func runApply(args []string, dir string, env map[string]string, stdin io.Reader,
 	}
 	results, aerr := apply(afero.NewOsFs(), dir, tls, opt)
 	if aerr != nil {
-		return reportApplyErr(stderr, aerr, from)
+		return reportApplyErr(stdout, stderr, f.formatOut, aerr, from)
 	}
 	if f.output == "-" {
 		for _, r := range results {
@@ -334,16 +378,26 @@ func patchProvenance(read []patchInput) hewfs.RecordPatch {
 // exit code. A staging failure knows which file section raised it, and `from`
 // turns that index into the patch file's name — the difference between
 // "patch.hew:6" and a bare line number.
-func reportApplyErr(stderr io.Writer, err error, from []string) int {
+func reportApplyErr(stdout, stderr io.Writer, mode string, err error, from []string) int {
 	if hewfs.IsUsage(err) {
 		fmt.Fprintf(stderr, "hew: usage error: %v\n", err)
 		return 2
 	}
 	var se *hewfs.SectionError
-	if errors.As(err, &se) && se.Index < len(from) {
-		err = withPatchFile(err, from[se.Index])
+	more := 0
+	if errors.As(err, &se) {
+		if se.Index < len(from) {
+			err = withPatchFile(err, from[se.Index])
+		}
+		more = se.More
 	}
-	printErr(stderr, err)
+	printDiag(stdout, stderr, mode, err)
+	// The scale of the failure, after the failure itself: a reader who fixes
+	// this one should know whether that finishes the job. It goes to stderr
+	// even in json mode, because it is about the report rather than in it.
+	if more > 0 {
+		fmt.Fprintf(stderr, "hew: and %d more file section(s) failed\n", more)
+	}
 	return exitFor(err)
 }
 
@@ -374,22 +428,31 @@ func resolveAppliedAt(env map[string]string) (time.Time, error) {
 // resolution is only meaningful against a concrete document, and it evaluates
 // nothing — a stale target still prints, because `--ops` reports addresses,
 // not an apply.
-func runOps(tls []hew.TransformList, dir string, stdout, stderr io.Writer) int {
+// from names the patch file each transform list came from, positionally, so a
+// resolve failure can say "named.hew:6" instead of a bare "patch:6" that no
+// caller with more than one patch can act on.
+func runOps(tls []hew.TransformList, from []string, dir string, stdout, stderr io.Writer, mode string) int {
 	var out bytes.Buffer
-	for _, tl := range tls {
+	patchName := func(i int) string {
+		if i < len(from) {
+			return from[i]
+		}
+		return ""
+	}
+	for i, tl := range tls {
 		target, format, rerr := readTarget(dir, tl)
 		if rerr != nil {
-			printErr(stderr, rerr)
+			printDiag(stdout, stderr, mode, withPatchFile(rerr, patchName(i)))
 			return exitFor(rerr)
 		}
 		doc, derr := documentFor(tl.Target, format, target)
 		if derr != nil {
-			printErr(stderr, derr)
+			printDiag(stdout, stderr, mode, withPatchFile(derr, patchName(i)))
 			return exitFor(derr)
 		}
 		ops, oerr := hew.Resolve(tl, doc)
 		if oerr != nil {
-			printErr(stderr, oerr)
+			printDiag(stdout, stderr, mode, withPatchFile(oerr, patchName(i)))
 			return exitFor(oerr)
 		}
 		out.Write(hew.MarshalResolvedOps(ops))
@@ -474,10 +537,30 @@ func withPatchFile(err error, patchFile string) error {
 	return err
 }
 
+// usageErr is an invocation the CLI refuses before doing any work.
+func usageErr(format string, args ...any) error {
+	return &hewerr.Error{Code: hewerr.CodeParse, Component: hewerr.ComponentParser,
+		Detail: fmt.Sprintf(format, args...)}
+}
+
 // printErr writes a hew error to stderr in the §10.3 human diagnostic
 // shape.
-func printErr(w io.Writer, err error) {
-	fmt.Fprintln(w, "hew: "+strings.TrimPrefix(err.Error(), "hew: "))
+func printErr(w io.Writer, err error) { printDiag(nil, w, "", err) }
+
+// printDiag writes one diagnostic on the channel the caller asked for: the
+// §10.3 human shape on stderr, or one JSON object per error on stdout. The
+// two are the SAME facts — json is not a richer mode, it is the same report
+// without the prose a consumer would have to parse back out.
+func printDiag(stdout, stderr io.Writer, mode string, err error) {
+	if mode == "json" && stdout != nil {
+		if he, ok := hewerr.As(err); ok {
+			if b, jerr := he.JSON(); jerr == nil {
+				fmt.Fprintln(stdout, string(b))
+				return
+			}
+		}
+	}
+	fmt.Fprintln(stderr, "hew: "+strings.TrimPrefix(err.Error(), "hew: "))
 }
 
 // exitFor classifies an error into Appendix B.3's exit code: HEW010-HEW041

@@ -550,3 +550,18 @@ func (n *node) childCount() int {
 	}
 	return len(n.members)
 }
+
+// lineOf is the 1-based line the byte at off sits on, for §10.3's `found`
+// line. Zero for an offset outside the source.
+func lineOf(src []byte, off int) int {
+	if off < 0 || off > len(src) {
+		return 0
+	}
+	n := 1
+	for _, c := range src[:off] {
+		if c == '\n' {
+			n++
+		}
+	}
+	return n
+}

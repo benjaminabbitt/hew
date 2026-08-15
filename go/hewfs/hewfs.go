@@ -101,6 +101,23 @@ type FileResult struct {
 type SectionError struct {
 	Index int
 	Err   error
+	// More is how many LATER file sections also fail to stage. It exists so a
+	// caller can say "and 2 more" instead of leaving the reader to discover
+	// them one re-run at a time.
+	More int
+}
+
+// countFailingSections stages the sections after a failure purely to count the
+// ones that also fail. It writes nothing and its errors are discarded: the
+// report belongs to the first failure, and this is only its scale.
+func countFailingSections(fsys afero.Fs, root string, rest []hew.TransformList, opt WriteOptions) int {
+	n := 0
+	for _, tl := range rest {
+		if _, err := stageOne(fsys, root, tl, opt); err != nil {
+			n++
+		}
+	}
+	return n
 }
 
 func (e *SectionError) Error() string { return e.Err.Error() }
@@ -156,7 +173,18 @@ func applyLists(fsys afero.Fs, root string, tls []hew.TransformList, opt WriteOp
 	for i, tl := range tls {
 		s, err := stageOne(fsys, root, tl, opt)
 		if err != nil {
-			return nil, &SectionError{Index: i, Err: err}
+			// Nothing is written either way, so the remaining sections are
+			// staged anyway — not to apply them, but to tell the reader
+			// whether fixing this one finishes the job. Only the FIRST failure
+			// is reported in full; the rest are a count, which is the cheap
+			// half of the answer and the half a reader acts on.
+			//
+			// The count is per SECTION, deliberately. Counting failures WITHIN
+			// a section would mean evaluating one `test` outside its hunk, and
+			// a transform's meaning depends on its siblings there — a paired
+			// write converges an assertion that would fail alone — so a
+			// per-transform count could report failures that are not real.
+			return nil, &SectionError{Index: i, Err: err, More: countFailingSections(fsys, root, tls[i+1:], opt)}
 		}
 		stages = append(stages, s)
 	}

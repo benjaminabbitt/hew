@@ -98,6 +98,8 @@ func (d *doc) evalTest(target string, t hew.Transform) error {
 		if !got.Equal(t.Value) {
 			e := appErr(hewerr.CodeStaleTarget, target, t.Path.String(), t.PatchLine, "")
 			e.Want, e.Got = t.Value.String(), got.String()
+			// §10.3's `found` line names WHERE in the target, not only what.
+			e.TargetLine = lineOf(d.src, n.start)
 			return e
 		}
 		return nil
