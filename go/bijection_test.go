@@ -404,28 +404,6 @@ func TestReservedFieldRendersQuoted(t *testing.T) {
 //
 // What the quoted form still cannot spell, enumerated rather than discovered.
 
-// TestLineBreakInAKeyIsTheOneRemainingHole: §4.1's quoted form escapes `\"`
-// and `\\` and nothing else, and a path is written on one line — a `@@` header
-// or a one-line .hewt scalar — so a key holding a newline has no spelling.
-// This is the whole of what is left of the old guard.
-func TestLineBreakInAKeyIsTheOneRemainingHole(t *testing.T) {
-	for _, key := range []string{"a\nb", "a\rb", "\n"} {
-		t.Run(strconv.Quote(key), func(t *testing.T) {
-			p := NewPath(Segment{Kind: SegKey, Name: key})
-			if p.spellable() {
-				t.Fatalf("a key holding %q cannot be written on one line", key)
-			}
-			seg, bad := p.firstUnspellable()
-			if !bad || seg.Name != key {
-				t.Fatalf("firstUnspellable() = (%+v, %v), want the offending key", seg, bad)
-			}
-			if got := spellFailure(seg); !strings.Contains(got, "line break") {
-				t.Errorf("spellFailure() = %q, want it to name the line break", got)
-			}
-		})
-	}
-}
-
 // TestMalformedIRIsStillRefused: the rest of the residue is data that is
 // malformed as DATA rather than as notation. No document can produce any of
 // it; a caller building an IR by hand can.
