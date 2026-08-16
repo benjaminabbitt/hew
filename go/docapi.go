@@ -158,7 +158,7 @@ func (d *Doc) Format() FormatID { return d.format }
 // call and latched: nothing has happened yet, so there is nothing to fail
 // except the terminal.
 func (d *Doc) At(pattern string, args ...SegmentArg) *Sel {
-	p, err := buildPath(pattern, args)
+	p, err := buildPath(d.format, pattern, args)
 	if err != nil {
 		d.fail(err)
 		return &Sel{d: d, dead: true}
@@ -294,15 +294,15 @@ func (s *Sel) place(sibling string, before bool) *Sel {
 	}
 	s.sibPath, s.sibling = Path{}, Segment{}
 	if strings.HasPrefix(sibling, "/") {
-		p, err := ParsePath(sibling)
+		p, err := ParsePathIn(s.d.format, sibling)
 		if err != nil {
 			return s.reject(s.badf("placement sibling %q: %s", sibling, detailOf(err)))
 		}
 		s.sibPath = p
 	} else {
-		// buildScope, matching ParsePath on the branch above: both halves of a
-		// placement sibling resolve in the same grammar.
-		seg, err := parseSegment(sibling, buildScope)
+		// The document's own format, matching the whole-path branch above:
+		// both halves of a placement sibling read in one grammar (O46).
+		seg, err := parseSegment(sibling, formatScope(s.d.format))
 		if err != nil {
 			return s.reject(s.badf("placement sibling %q: %s", sibling, err.Error()))
 		}
