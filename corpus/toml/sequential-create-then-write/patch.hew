@@ -1,0 +1,12 @@
+hew: 1
+
+--- target.toml format=toml
+
+@@ / @@
+! default
+  port = 8080
++ mcpServers = {}
+
+@@ /mcpServers @@
+! upsert
++ ctxloom: {command: ctxloom}

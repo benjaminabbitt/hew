@@ -1,0 +1,17 @@
+name: toml/sequential-create-then-write
+seams: [e2e]
+kind: ok
+format: toml
+ops: [OP-04, OP-03]
+why: |
+  SEQUENTIAL RESOLUTION (§9.2, §9.3): the second hunk writes into
+  "/mcpServers", a container the FIRST hunk creates (`! default` over an
+  absent top-level key, OP-04, the shape toml/default-key-absent pins
+  alone). The second hunk must resolve against the document as the first
+  hunk left it, not against the original pre-image where "/mcpServers" does
+  not exist — and specifically against the INLINE table ("mcpServers = {}")
+  the first hunk just wrote, which only `insertInline` (§8.4 rule 3) can
+  expand once it is real. Before sequential resolution the second hunk's
+  add fell through to a competing `[mcpServers]` table-HEADER creation
+  instead, producing two surfaces for the same key and HEW041.
+spec: "§9.2, §9.3, §8.4 rule 3, §11 OP-04, OP-03"

@@ -1,0 +1,5 @@
+{
+  // pinned
+  "port": 8080,
+  "mcpServers": { "ctxloom": { "command": "ctxloom" } }
+}
