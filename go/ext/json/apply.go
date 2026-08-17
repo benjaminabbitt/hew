@@ -11,83 +11,80 @@ import (
 )
 
 // Apply is the JSON binding's apply half (§8.1, Appendix A.4's Applier.Apply
-// for the "json" format). It resolves every path against the document it
-// just parsed, evaluates every OpTest before performing any mutation, and
-// returns the re-serialized bytes — or, on any error, nil bytes and that
-// error (§10.5's all-or-nothing).
+// for the "json" format). SEQUENTIAL RESOLUTION (§9.2, §9.3, human ruling):
+// every transform — `test` included — is resolved and evaluated (or applied)
+// against the document AS MODIFIED BY every transform before it, one at a
+// time, in list order. There is no longer a fixed "every test before any
+// mutation" split; a `test` placed after an earlier write in the same list
+// sees that write, exactly as an `add` placed after one does.
+//
+// Everything happens against an in-memory byte buffer that is only ever
+// returned once every transform has succeeded (§10.5's all-or-nothing): an
+// error at any step — test or mutation — discards the buffer and returns nil
+// bytes, so nothing this call staged ever reaches the caller, let alone disk.
 //
 // Byte preservation is structural, not textual: every untouched byte range
 // of the source is copied verbatim into the output, and an edit's own
 // replacement text is the only place new bytes appear (§6.3, §8.1 — no
 // float64 round trip of numeric literals, since edits splice source text
-// rather than re-encoding untouched values at all).
+// rather than re-encoding untouched values at all). That holds edit by edit
+// under sequential application exactly as it held for one batch: each step
+// splices against bytes the step before it already produced.
 func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
-	d, err := parseDoc(target)
-	if err != nil {
-		return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
-			Target: tl.Target, Detail: "target does not parse as JSON: " + err.Error()}
-	}
-
-	// Pass 1: evaluate every test before any mutation is even computed
-	// (§9.0, §9.3).
+	cur := target
 	for _, t := range tl.Transform {
-		if t.Op != hew.OpTest {
+		d, err := parseDoc(cur)
+		if err != nil {
+			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
+				Target: tl.Target, Detail: "target does not parse as JSON: " + err.Error()}
+		}
+		if t.Op == hew.OpTest {
+			if err := d.evalTest(tl.Target, t); err != nil {
+				return nil, err
+			}
 			continue
 		}
-		if err := d.evalTest(tl.Target, t); err != nil {
+		e, err := d.planOne(tl.Target, t)
+		if err != nil {
+			return nil, err
+		}
+		if e == nil {
+			continue
+		}
+		cur, err = applyEdits(cur, []edit{*e})
+		if err != nil {
 			return nil, err
 		}
 	}
-
-	// Pass 2: compute edits for add/remove/replace/copy. Still no bytes
-	// written — an error here also leaves the target untouched.
-	var edits []edit
-	for _, t := range tl.Transform {
-		switch t.Op {
-		case hew.OpTest:
-			continue
-		case hew.OpAdd:
-			e, err := d.planAdd(tl.Target, t)
-			if err != nil {
-				return nil, err
-			}
-			if e != nil {
-				edits = append(edits, *e)
-			}
-		case hew.OpRemove:
-			e, err := d.planRemove(tl.Target, t)
-			if err != nil {
-				return nil, err
-			}
-			if e != nil {
-				edits = append(edits, *e)
-			}
-		case hew.OpReplace:
-			e, err := d.planReplace(tl.Target, t)
-			if err != nil {
-				return nil, err
-			}
-			edits = append(edits, *e)
-		case hew.OpCopy:
-			e, err := d.planCopy(tl.Target, t)
-			if err != nil {
-				return nil, err
-			}
-			edits = append(edits, *e)
-		default:
-			return nil, &hewerr.Error{Code: hewerr.CodeInexpressible, Component: hewerr.ComponentApplier,
-				Target: tl.Target, Path: t.Path.String(), Detail: fmt.Sprintf("unsupported op %q", t.Op)}
-		}
-	}
-
-	return applyEdits(target, edits)
+	return cur, nil
 }
 
-// doc is a parsed JSON target: the source bytes and the tree.
+// planOne computes the single edit one mutating transform stands for, or nil
+// if it is satisfied with no change at all (`! default` over an existing
+// key, `! idempotent` over an equal value — §7.5, §7.7).
+func (d *doc) planOne(target string, t hew.Transform) (*edit, error) {
+	switch t.Op {
+	case hew.OpAdd:
+		return d.planAdd(target, t)
+	case hew.OpRemove:
+		return d.planRemove(target, t)
+	case hew.OpReplace:
+		return d.planReplace(target, t)
+	case hew.OpCopy:
+		return d.planCopy(target, t)
+	default:
+		return nil, &hewerr.Error{Code: hewerr.CodeInexpressible, Component: hewerr.ComponentApplier,
+			Target: target, Path: t.Path.String(), Detail: fmt.Sprintf("unsupported op %q", t.Op)}
+	}
+}
+
+// doc is a parsed JSON target: the source bytes and the tree. One doc is
+// built per transform (Apply reparses the buffer each step), so it never
+// needs to track insertions still pending against a stale parse — the next
+// step's parse already contains them for real.
 type doc struct {
-	src     []byte
-	root    *jNode
-	pending []pendingAdd
+	src  []byte
+	root *jNode
 }
 
 func parseDoc(src []byte) (*doc, error) {

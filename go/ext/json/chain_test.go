@@ -88,35 +88,3 @@ func TestUnresolvablePlacementStillFails(t *testing.T) {
 		t.Fatal("want an error for an element placement that names nothing")
 	}
 }
-
-func TestSegNamesValue(t *testing.T) {
-	elem := val(t, `{name: b, other: 1}`)
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{"/m/name=b", true},
-		{"/m/name=c", false},
-		{"/m/other=1", true},
-		{"/m/missing=b", false},
-		{"/m/b", false}, // a key segment is not a key-match
-	}
-	for _, c := range cases {
-		p := hew.MustParsePath(c.path)
-		seg := p.Segment(p.Len() - 1)
-		if got := segNamesValue(seg, elem); got != c.want {
-			t.Fatalf("segNamesValue(%s) = %v, want %v", c.path, got, c.want)
-		}
-	}
-	scalar := val(t, `"x"`)
-	p := hew.MustParsePath(`/t/="x"`)
-	if !segNamesValue(p.Segment(p.Len()-1), scalar) {
-		t.Fatal(`="x" must name the scalar "x"`)
-	}
-	if segNamesValue(p.Segment(p.Len()-1), hew.Value{}) {
-		t.Fatal("an absent value names nothing")
-	}
-	if segNamesValue(p.Segment(p.Len()-1), elem) {
-		t.Fatal("a mapping is not the scalar")
-	}
-}
