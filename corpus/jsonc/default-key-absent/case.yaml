@@ -1,0 +1,11 @@
+name: jsonc/default-key-absent
+seams: [e2e]
+kind: ok
+format: jsonc
+ops: [OP-04]
+why: |
+  `! default` on a TOP-LEVEL key whose immediate parent is the document root
+  (always present): absent here, so it is created. Same shape as
+  json/default-key-absent, pinned separately because jsonc/apply.go carries its
+  own resolveFull/walk (§8.1's comment-aware variant) rather than sharing json's.
+spec: "§7.7, §11 OP-04"

@@ -1,0 +1,8 @@
+hew: 1
+
+--- target.yaml format=yaml
+
+@@ / @@
+! default
+  port: 8080
++ mcpServers: {}

@@ -1,0 +1,13 @@
+name: yaml/default-key-absent-root
+seams: [e2e]
+kind: ok
+format: yaml
+ops: [OP-04]
+why: |
+  `! default` on a TOP-LEVEL key whose immediate parent is the document root
+  (always present): absent here, so it is created. yaml/default-key-absent
+  defaults a LEAF under an already-existing nested container ("/server");
+  this pins the same op one level up, where the parent being defaulted-into
+  is the root itself rather than a child map — the shape a caller hits
+  addressing a container like "mcpServers" that may or may not exist yet.
+spec: "§7.7, §11 OP-04"

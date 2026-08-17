@@ -1,0 +1,13 @@
+name: json/default-key-absent
+seams: [e2e]
+kind: ok
+format: json
+ops: [OP-04]
+why: |
+  `! default` on a TOP-LEVEL key whose immediate parent is the document root
+  (always present): absent here, so it is created. This is the shape a caller
+  hits addressing a container like "mcpServers" that may or may not exist yet —
+  distinct from json/add-key's OP-02 (must-not-exist) and from
+  yaml/default-key-absent, which defaults a LEAF under an already-existing
+  nested container rather than a key directly under root.
+spec: "§7.7, §11 OP-04"
