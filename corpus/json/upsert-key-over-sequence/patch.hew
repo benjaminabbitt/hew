@@ -1,0 +1,7 @@
+hew: 1
+
+--- target.json format=json
+
+@@ /s @@
+! upsert
++ args: ["a", "b", "c"]

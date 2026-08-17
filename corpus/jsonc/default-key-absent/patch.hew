@@ -1,0 +1,9 @@
+hew: 1
+
+--- target.jsonc format=jsonc
+
+@@ / @@
+! default
+  // pinned
+  "port": 8080
++ "mcpServers": {}

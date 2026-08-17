@@ -181,7 +181,16 @@ func (d *doc) planInsert(target string, path, before, after hew.Path, v hew.Valu
 	}
 
 	if existing, err := d.resolveFull(target, path, line); err == nil {
-		if existing.node != nil && existing.node.kind == kArr {
+		// The array signal below is ONLY the sequence-style-add reading
+		// (OP-11, plain `add`) — an OP-03 `! upsert` or OP-04 `! default`
+		// targeting a path that happens to hold an array still means the
+		// whole node, not its container: `! upsert` replaces regardless of
+		// current value (§7.7), and appending into the old array on a
+		// replace corrupts the target. ConflictKeep and ConflictReplace both
+		// name an existing node directly, so they route to planConflict,
+		// which already implements both correctly.
+		if existing.node != nil && existing.node.kind == kArr &&
+			onConflict != hew.ConflictReplace && onConflict != hew.ConflictKeep {
 			return d.planChildInsert(target, existing.node, before, after, d.insertText(v, raw), true, line)
 		}
 		return d.planConflict(target, path, existing, v, raw, onConflict, idempotent, line)
