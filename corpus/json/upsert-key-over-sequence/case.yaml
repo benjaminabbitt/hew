@@ -1,0 +1,16 @@
+name: json/upsert-key-over-sequence
+seams: [e2e]
+kind: ok
+format: json
+ops: [OP-03]
+why: |
+  `! upsert` replaces whatever is at the key regardless of its current value
+  (§7.7, OP-03: "Present → replaced regardless of current value"). When the
+  current value is a SEQUENCE this must still be a whole-node replace, not an
+  append into the existing array. An implementation that special-cases "path
+  resolves to an array" as sequence-append (OP-11) without checking
+  on_conflict corrupts the target to `"args": ["a", "b", ["a", "b", "c"]]`
+  instead of replacing it — the defect ctxloom's MCP-server rewrite hit
+  (every server entry has an `args` array, and a second write of any other
+  field nests a copy of the array inside itself).
+spec: "§7.7, §11 OP-03"

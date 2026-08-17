@@ -164,9 +164,18 @@ func (d *doc) planCopy(target string, t hew.Transform) (*edit, error) {
 // resolve to something that is NOT an array, that is not an error — it is a
 // map-style add whose key already exists, the ordinary OnConflict/idempotent
 // case json/reapply-add-exists pins.
+//
+// That array signal is ONLY the sequence-style-add reading (OP-11, plain
+// `add` with no on_conflict) — an OP-03 `! upsert` or OP-04 `! default`
+// targeting a path that happens to hold an array still means the whole node,
+// not its container: `! upsert` replaces regardless of current value (§7.7),
+// and appending into the old array on a replace corrupts the target (see
+// json/upsert-key-over-sequence). ConflictKeep and ConflictReplace both name
+// an existing node directly, so they route to handleExistingConflict, which
+// already implements both correctly.
 func (d *doc) planInsert(target string, path, before, after hew.Path, value hew.Value, text string, onConflict hew.OnConflict, idempotent bool, line int) (*edit, error) {
 	if existing, err := d.resolveFull(target, path, line); err == nil {
-		if existing.kind == jArr {
+		if existing.kind == jArr && onConflict != hew.ConflictReplace && onConflict != hew.ConflictKeep {
 			return d.insertArrayElement(existing, before, after, value, text, line)
 		}
 		return d.handleExistingConflict(target, path, existing, value, text, onConflict, idempotent, line)
