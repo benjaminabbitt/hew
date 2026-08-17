@@ -177,7 +177,17 @@ func (r *run) planAdd(t hew.Transform) ([]edit, error) {
 		// A path that resolves to a SEQUENCE is the sequence-style add: the
 		// container itself is addressed and the value is a new element. Any
 		// other resolved node is a map-style add whose key already exists.
-		if rf.node != nil && rf.node.kind == nSeq {
+		//
+		// That reading is ONLY for the plain OP-11 append — an OP-03
+		// `! upsert` or OP-04 `! default` targeting a path that happens to
+		// hold a sequence still means the whole node, not its container:
+		// `! upsert` replaces regardless of current value (§7.7), and
+		// appending into the old sequence on a replace corrupts the target.
+		// ConflictKeep and ConflictReplace both name an existing node
+		// directly, so they route to conflict, which already implements
+		// both correctly.
+		if rf.node != nil && rf.node.kind == nSeq &&
+			t.OnConflict != hew.ConflictReplace && t.OnConflict != hew.ConflictKeep {
 			return r.insert(rf.node, r.elemPayload(t.Value.Node()), t.Before, t.After, t)
 		}
 		return r.conflict(t, rf)
