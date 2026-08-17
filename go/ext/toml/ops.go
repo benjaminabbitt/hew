@@ -361,62 +361,14 @@ func (r *run) insertItem(seq *tnode, t hew.Transform) ([]edit, error) {
 	}
 	i, err2 := r.placeAmong(elemSpans(seq), t)
 	if err2 != nil {
-		pos, ok := r.pendingAt(seq, t)
-		if !ok {
-			return nil, err2
-		}
-		r.remember(seq, t, pos)
-		return []edit{{start: pos, end: pos, text: ", " + text}}, nil
+		return nil, err2
 	}
 	if i < 0 {
 		pos := seq.elems[0].blockStart
-		r.remember(seq, t, pos)
 		return []edit{{start: pos, end: pos, text: text + ", "}}, nil
 	}
 	pos := seq.elems[i].blockEnd
-	r.remember(seq, t, pos)
 	return []edit{{start: pos, end: pos, text: ", " + text}}, nil
-}
-
-// pendingAdd is one insertion this run has already planned: the container it
-// lands in, what it creates, and where. §9.1 step 5 chains a run of `+` lines,
-// each placed after the one above it, so a placement may name a sibling that is
-// not in the parsed document at all but IS in this run's pending inserts.
-type pendingAdd struct {
-	holder *tnode
-	path   hew.Path // the add's own address, or the container for an array item
-	value  hew.Value
-	pos    int
-}
-
-func (r *run) remember(holder *tnode, t hew.Transform, pos int) {
-	r.pending = append(r.pending, pendingAdd{holder: holder, path: t.Path, value: t.Value, pos: pos})
-}
-
-// pendingAt reports the offset of an add this run has already planned that the
-// transform's `after:` placement names. Landing at the SAME offset puts this
-// add immediately behind it, because equal-offset edits keep their list order.
-// Only `after:` is consulted: a forward placement never names an added
-// sibling, because the sibling would not be there yet (§9.1 step 5).
-func (r *run) pendingAt(holder *tnode, t hew.Transform) (int, bool) {
-	// A zero path and the root both have no last segment to match on.
-	p := t.After
-	if p.Len() == 0 {
-		return 0, false
-	}
-	seg := p.Segment(p.Len() - 1)
-	// The most recent match wins, so a chain of three `+` lines walks forward
-	// rather than collapsing onto the first.
-	for i := len(r.pending) - 1; i >= 0; i-- {
-		pa := r.pending[i]
-		if pa.holder != holder {
-			continue
-		}
-		if pa.path.Equal(p) || segNamesValue(seg, pa.value) {
-			return pa.pos, true
-		}
-	}
-	return 0, false
 }
 
 // placeAmong turns a before:/after: placement into the index of the sibling to
@@ -486,7 +438,6 @@ func (r *run) insertLines(holder *tnode, lines []string, t hew.Transform) ([]edi
 	if pos > 0 && r.d.src[pos-1] != '\n' {
 		text = "\n" + text
 	}
-	r.remember(holder, t, pos)
 	return []edit{{start: pos, end: pos, text: text}}, nil
 }
 
@@ -495,9 +446,6 @@ func (r *run) linePos(holder *tnode, t hew.Transform) (int, *hewerr.Error) {
 	spans := lineSpans(holder)
 	i, err := r.placeAmong(spans, t)
 	if err != nil {
-		if pos, ok := r.pendingAt(holder, t); ok {
-			return pos, nil
-		}
 		return 0, err
 	}
 	switch {
@@ -518,7 +466,6 @@ func (r *run) insertBlock(holder *tnode, header string, body []string, t hew.Tra
 	if err != nil {
 		return nil, err
 	}
-	r.remember(holder, t, pos)
 	src := r.d.src
 	text := strings.Join(append([]string{header}, body...), "\n") + "\n"
 	switch {
@@ -550,9 +497,6 @@ func (r *run) blockPos(holder *tnode, t hew.Transform, def int) (int, bool, *hew
 	}
 	rf, he, _ := r.resolve(p, t.PatchLine)
 	if he != nil {
-		if pos, ok := r.pendingAt(holder, t); ok {
-			return pos, false, nil
-		}
 		return 0, false, he
 	}
 	start, end, ok := blockSpan(rf)

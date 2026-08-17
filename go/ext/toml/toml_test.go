@@ -818,14 +818,24 @@ func TestDescendingIntoAScalarOrArrayByKeyIsRefused(t *testing.T) {
 	}
 }
 
-func TestOverlappingEditsAreAConflict(t *testing.T) {
-	_, err := applyIR(t, "x = {a = 1, b = 2}\n",
-		"  - op: remove\n    path: /x/a\n  - op: remove\n    path: /x/b\n")
-	he, ok := hewerr.As(err)
-	if !ok || he.Code != hewerr.CodeConflict {
-		t.Fatalf("want HEW030, got %v", err)
-	}
-	mustContain(t, he, "overlapping regions")
+// TestTwoRemovesFromTheSameInlineTableSucceed is a FINDING from sequential
+// resolution (docs/hew-spec.md §9.2/§9.3, human ruling), and this test's
+// rename: it used to be TestOverlappingEditsAreAConflict, asserting HEW030.
+// TOML can only edit an inline table by rewriting its whole span (there is no
+// way to splice out one entry of `{a = 1, b = 2}` in place), so under BATCH
+// resolution both removes computed an edit against the SAME original span —
+// genuinely overlapping byte ranges — and splicing both into one buffer was
+// correctly refused.
+//
+// Under sequential resolution the first remove is applied for real before
+// the second is even planned: `remove /x/a` produces `x = {b = 2}`, and
+// `remove /x/b` is then planned and applied against THAT document, producing
+// `x = {}`. There is only ever one edit in flight, so there is nothing left
+// to overlap.
+func TestTwoRemovesFromTheSameInlineTableSucceed(t *testing.T) {
+	mustApply(t, "x = {a = 1, b = 2}\n",
+		"  - op: remove\n    path: /x/a\n  - op: remove\n    path: /x/b\n",
+		"x = {}\n")
 }
 
 func TestATargetThatIsNotTomlIsATargetParseError(t *testing.T) {
