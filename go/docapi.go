@@ -57,6 +57,7 @@ type OpenOption func(*openOpts)
 
 type openOpts struct {
 	format FormatID
+	create bool
 }
 
 // As overrides detection, and is the exact analogue of a target line's
@@ -66,14 +67,31 @@ func As(format FormatID) OpenOption {
 	return func(o *openOpts) { o.format = format }
 }
 
+// CreateIfMissing opens a path that does not exist yet as an EMPTY document of
+// its format, so a caller writing a config file need not special-case the
+// first write. The empty document comes from the binding (Binding.EmptyDocument);
+// a format that declares none is refused rather than invented.
+//
+// It changes nothing when the file IS there: the document is read as usual.
+func CreateIfMissing() OpenOption { return func(o *openOpts) { o.create = true } }
+
 // Open reads path from fsys and returns a document bound to the format §8.0
 // detects FROM THE PATH. Content is never sniffed: a path whose format cannot
 // be determined is HEW021, fixable at this call site and only here.
 func Open(fsys afero.Fs, path string, opts ...OpenOption) (*Doc, error) {
+	var o openOpts
+	for _, opt := range opts {
+		opt(&o)
+	}
 	src, err := afero.ReadFile(fsys, path)
 	if err != nil {
-		return nil, &hewerr.Error{Code: hewerr.CodeTargetPath, Component: hewerr.ComponentResolver,
-			Target: path, Detail: err.Error()}
+		if !o.create {
+			return nil, &hewerr.Error{Code: hewerr.CodeTargetPath, Component: hewerr.ComponentResolver,
+				Target: path, Detail: err.Error()}
+		}
+		if src, err = emptyDocumentFor(path, o); err != nil {
+			return nil, err
+		}
 	}
 	d, err := newDoc(path, src, opts)
 	if err != nil {
@@ -764,4 +782,29 @@ func (d *Doc) document() (Document, error) {
 	}
 	d.doc = doc
 	return doc, nil
+}
+
+// emptyDocumentFor is CreateIfMissing's half of Open: the blank document to
+// open in place of a file that is not there. Whether the caller ASKED for one
+// is the caller's test, not a nil return here — TOML's empty document is
+// legitimately zero bytes, so "empty content" and "no empty document" cannot
+// share a signal. A format that declares none is an error rather than a
+// guess: inventing initial bytes is the one thing core must not do.
+func emptyDocumentFor(path string, o openOpts) ([]byte, error) {
+	format := o.format
+	if format == "" {
+		var ok bool
+		if format, ok = DetectFormat(path); !ok {
+			return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentResolver,
+				Target: path,
+				Detail: fmt.Sprintf("cannot determine a format from the name %q, so there is no empty document to create", path)}
+		}
+	}
+	b, ok := Lookup(format)
+	if !ok || b.EmptyDocument == nil {
+		return nil, &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentResolver,
+			Target: path,
+			Detail: fmt.Sprintf("format %q declares no empty document, so hew will not create one from nothing", string(format))}
+	}
+	return append([]byte(nil), b.EmptyDocument...), nil
 }

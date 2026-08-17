@@ -30,11 +30,12 @@ const formatToy FormatID = "toy"
 // "surface", so the qualifier-ownership checks have both answers available.
 func toyBinding() Binding {
 	return Binding{
-		Applier:    toyApply,
-		Differ:     toyDiff,
-		Document:   toyDocument,
-		Detect:     DetectRule{Extensions: []string{".toy"}, WellKnownNames: []string{"toyrc"}},
-		Qualifiers: []string{"anchor"},
+		Applier:       toyApply,
+		Differ:        toyDiff,
+		Document:      toyDocument,
+		EmptyDocument: []byte(""),
+		Detect:        DetectRule{Extensions: []string{".toy"}, WellKnownNames: []string{"toyrc"}},
+		Qualifiers:    []string{"anchor"},
 	}
 }
 

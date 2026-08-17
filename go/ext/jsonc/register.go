@@ -7,9 +7,10 @@ import (
 // init registers the JSONC binding (Appendix A.6, O35).
 func init() {
 	hew.Register(hew.FormatJSONC, hew.Binding{
-		Applier:  Apply,
-		Differ:   DiffTree,
-		Document: Document,
+		Applier:       Apply,
+		Differ:        DiffTree,
+		Document:      Document,
+		EmptyDocument: []byte("{}\n"),
 		Detect: hew.DetectRule{
 			Extensions: []string{".jsonc"},
 			// §8.0's well-known names: files that are JSONC by convention
