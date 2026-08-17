@@ -8,61 +8,54 @@ import (
 )
 
 // Apply is the JSONC binding's apply half (§8.2, Appendix A.4's Applier.Apply
-// for the "jsonc" format). It evaluates every OpTest against the document as
-// it was handed in, then performs the mutating transforms in order, and
-// returns the re-serialized bytes — or, on any error, nil bytes and that
-// error (§10.5's all-or-nothing).
+// for the "jsonc" format). SEQUENTIAL RESOLUTION (§9.2, §9.3, human ruling):
+// every transform — `test` included — is resolved and evaluated (or applied)
+// against the document AS MODIFIED BY every transform before it, one at a
+// time, in list order. There is no longer a fixed "every test against the
+// untouched document" pass; a `test` placed after an earlier write in the
+// same list sees that write, exactly as an `add` placed after one already
+// did (this binding was already reparsing before each MUTATION — see the
+// history below — it just was not yet doing so for `test`).
 //
-// Mutations are applied one transform at a time, each planned against the
-// document the transform before it produced. That sequencing is not an
-// implementation convenience: a JSONC patch may place a member relative to a
-// comment the same patch just added (jsonc/add-with-leading-comment lowers to
-// `add /#0 after /port` followed by `add /telemetry after /#0`), and the
-// second transform's anchor simply does not exist in the bytes the first one
-// was planned against.
+// Every transform is planned against the document the transform before it
+// produced. That sequencing is not an implementation convenience: a JSONC
+// patch may place a member relative to a comment the same patch just added
+// (jsonc/add-with-leading-comment lowers to `add /#0 after /port` followed by
+// `add /telemetry after /#0`), and the second transform's anchor simply does
+// not exist in the bytes the first one was planned against.
+//
+// Everything happens against an in-memory byte buffer that is only ever
+// returned once every transform has succeeded (§10.5's all-or-nothing): an
+// error at any step discards the buffer and returns nil bytes.
 //
 // Byte preservation is structural, not textual: every untouched byte range of
 // the source is copied verbatim, and an edit's own replacement text is the
 // only place new bytes appear (§6.3) — so indentation, quoting style, numeric
 // literal form and every comment outside the edit survive exactly.
 func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
-	d, err := parseDoc(target)
-	if err != nil {
-		return nil, targetParseErr(tl.Target, err)
-	}
-
-	// Pass 1: every test, against the untouched document (§9.0, §9.3).
-	for _, t := range tl.Transform {
-		if t.Op != hew.OpTest {
-			continue
-		}
-		if err := d.evalTest(tl.Target, t); err != nil {
-			return nil, err
-		}
-	}
-
-	// Pass 2: the mutations, in order.
 	cur := target
 	for _, t := range tl.Transform {
-		if t.Op == hew.OpTest {
-			continue
-		}
-		step, err := parseDoc(cur)
+		d, err := parseDoc(cur)
 		if err != nil {
 			return nil, targetParseErr(tl.Target, err)
 		}
-		edits, err := step.plan(tl.Target, t)
+		if t.Op == hew.OpTest {
+			if err := d.evalTest(tl.Target, t); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		edits, err := d.plan(tl.Target, t)
 		if err != nil {
 			return nil, err
 		}
 		if len(edits) == 0 {
 			continue
 		}
-		next, err := applyEdits(cur, edits)
+		cur, err = applyEdits(cur, edits)
 		if err != nil {
 			return nil, err
 		}
-		cur = next
 	}
 	return cur, nil
 }
