@@ -81,46 +81,36 @@ func TestUnresolvablePlacementStillFails(t *testing.T) {
 	}
 }
 
-// A `before:` naming a pending sibling is NOT satisfied from the run: it would
-// have to land ahead of an insert that has already been placed, which the
-// splice order cannot express. Failing is better than reordering silently.
-func TestBeforeAPendingSiblingFails(t *testing.T) {
+// TestBeforeASequentiallyAddedSiblingSucceeds is a FINDING from sequential
+// resolution (docs/hew-spec.md §9.2/§9.3, human ruling): a `before:` naming a
+// sibling THIS SAME LIST already added used to be refused (see this test's
+// prior name, TestBeforeAPendingSiblingFails, and its old reasoning below).
+// That refusal was an artifact of the old batch architecture — every add's
+// position was an offset computed against the ORIGINAL source, so a `before`
+// insertion point relative to a not-yet-real sibling had no splice-safe
+// answer. Under sequential resolution the second add is planned against the
+// document the first add actually produced, where the sibling is a REAL
+// child at a REAL offset: "before" it is exactly as well-defined as "before"
+// any child the original document held. Old comment, preserved because the
+// hazard it names is real for the case it was written against — a
+// FORWARD-referencing before/after relative to something LATER in the list,
+// which no reparse can make real ahead of time:
+//
+//	"A `before:` naming a pending sibling is NOT satisfied from the run: it
+//	would have to land ahead of an insert that has already been placed,
+//	which the splice order cannot express. Failing is better than
+//	reordering silently."
+func TestBeforeASequentiallyAddedSiblingSucceeds(t *testing.T) {
 	tl := hew.TransformList{Target: "t.yaml", Format: hew.FormatYAML, Transform: []hew.Transform{
 		{Op: hew.OpAdd, Path: hew.MustParsePath("/tags"), Value: chainVal(t, "b"), After: hew.MustParsePath("/tags/=alpha")},
 		{Op: hew.OpAdd, Path: hew.MustParsePath("/tags"), Value: chainVal(t, "c"), Before: hew.MustParsePath("/tags/=b")},
 	}}
-	if _, err := Apply([]byte("tags:\n  - alpha\n"), tl); err == nil {
-		t.Fatal("want an error")
+	got, err := Apply([]byte("tags:\n  - alpha\n"), tl)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
-}
-
-func TestSegNamesValue(t *testing.T) {
-	elem := chainVal(t, "name: b\nother: 1\n")
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{"/m/name=b", true},
-		{"/m/name=c", false},
-		{"/m/other=1", true},
-		{"/m/missing=b", false},
-		{"/m/b", false},
-	}
-	for _, c := range cases {
-		p := hew.MustParsePath(c.path)
-		if got := segNamesValue(p.Segment(p.Len()-1), elem); got != c.want {
-			t.Fatalf("segNamesValue(%s) = %v, want %v", c.path, got, c.want)
-		}
-	}
-	p := hew.MustParsePath("/t/=x")
-	seg := p.Segment(p.Len() - 1)
-	if !segNamesValue(seg, chainVal(t, "x")) {
-		t.Fatal("=x must name the scalar x")
-	}
-	if segNamesValue(seg, hew.Value{}) {
-		t.Fatal("an absent value names nothing")
-	}
-	if segNamesValue(seg, elem) {
-		t.Fatal("a mapping is not the scalar")
+	want := "tags:\n  - alpha\n  - c\n  - b\n"
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }

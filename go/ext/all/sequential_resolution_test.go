@@ -66,16 +66,25 @@ func TestSequentialResolutionCreatedContainerThenChildWrite(t *testing.T) {
 // op creates, addressed independently rather than chained by relative
 // placement (the pendingAdd sibling-chaining mechanism already handled
 // PLACEMENT; this exercises ordinary key addressing into a brand-new node).
+//
+// The starting documents carry one pre-existing top-level key rather than
+// being fully empty: an empty YAML/JSON root has its own pre-existing,
+// sequential-resolution-UNRELATED limitation (a root written in flow style
+// with nothing in it, "{}\n", has no owning entry for the binding to expand
+// — the same rule TestSequentialResolutionAddThenAddSiblingIntoNewContainer
+// would otherwise trip over one level higher than the case it means to
+// exercise). A non-empty root sidesteps that and keeps this test aimed at
+// the one thing it is for.
 func TestSequentialResolutionAddThenAddSiblingIntoNewContainer(t *testing.T) {
 	for _, c := range []struct {
 		format hew.FormatID
 		name   string
 		src    string
 	}{
-		{hew.FormatJSON, "config.json", "{}\n"},
-		{hew.FormatJSONC, ".mcp.json", "{}\n"},
-		{hew.FormatYAML, "config.yaml", "{}\n"},
-		{hew.FormatTOML, "config.toml", ""},
+		{hew.FormatJSON, "config.json", "{\n  \"port\": 8080\n}\n"},
+		{hew.FormatJSONC, ".mcp.json", "{\n  \"port\": 8080\n}\n"},
+		{hew.FormatYAML, "config.yaml", "port: 8080\n"},
+		{hew.FormatTOML, "config.toml", "port = 8080\n"},
 	} {
 		t.Run(string(c.format), func(t *testing.T) {
 			doc, err := hew.OpenBytes(c.name, []byte(c.src), hew.As(c.format))

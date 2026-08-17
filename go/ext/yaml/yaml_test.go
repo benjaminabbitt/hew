@@ -536,8 +536,9 @@ func TestSequenceIndexOutOfRange(t *testing.T) {
 
 func TestEveryTransformIsExecutedInOrder(t *testing.T) {
 	target := "a: 1\nb: 2\n"
-	// A test AFTER a write must still be evaluated (pass 1 covers the whole
-	// list, not a prefix of it).
+	// A test AFTER a write must still be evaluated: sequential resolution
+	// (§9.2/§9.3) processes the whole list, one transform at a time, not a
+	// prefix of it.
 	records := "" +
 		"  - op: replace\n    path: /a\n    value: 9\n" +
 		"  - op: test\n    path: /b\n    value: 99\n"
@@ -550,11 +551,27 @@ func TestEveryTransformIsExecutedInOrder(t *testing.T) {
 	mustApply(t, target, records, "a: 1\nb: 2\nc: 3\nd: 4\n")
 }
 
-func TestTwoAddsAtTheSamePositionKeepListOrder(t *testing.T) {
+// TestTwoAddsAtTheSamePositionAreBothRelativeToTheAnchor is a FINDING from
+// sequential resolution (docs/hew-spec.md §9.2/§9.3, human ruling), and this
+// test's rename: it used to be TestTwoAddsAtTheSamePositionKeepListOrder,
+// asserting "k, x, y, z" — both adds computed their position against the
+// SAME original image (batch resolution), so a stable sort of same-offset
+// edits kept them in LIST order.
+//
+// Under sequential resolution each `after: /m/k` is resolved against the
+// document as the transforms before it left it. The first add lands right
+// after k, for real ("k, x, z"); the second add's `after: /m/k` is resolved
+// again, against THAT document, and k is still exactly where it was — so the
+// second add lands right after k too, ahead of the first one's own insert:
+// "k, y, x, z". This is the more faithful reading: "after k" means after k,
+// not after k-or-whatever-this-same-patch-already-put-there. A patch that
+// wants x THEN y says so by chaining ("after: /m/x" for y), which is exactly
+// what TestChainedMemberAdds already pins.
+func TestTwoAddsAtTheSamePositionAreBothRelativeToTheAnchor(t *testing.T) {
 	mustApply(t, "m:\n  k: 1\n  z: 9\n",
 		"  - op: add\n    path: /m/x\n    after: /m/k\n    value: 1\n"+
 			"  - op: add\n    path: /m/y\n    after: /m/k\n    value: 2\n",
-		"m:\n  k: 1\n  x: 1\n  y: 2\n  z: 9\n")
+		"m:\n  k: 1\n  y: 2\n  x: 1\n  z: 9\n")
 }
 
 func TestAmbiguousMatchIsRefused(t *testing.T) {
@@ -703,19 +720,27 @@ func TestScalarDocumentHasNoMembers(t *testing.T) {
 	mustFail(t, "just a scalar\n", "  - op: test\n    path: /0\n    value: 1\n", hewerr.CodeStaleTarget, "/0")
 }
 
-func TestOverlappingEditsAreAConflict(t *testing.T) {
+// TestReplaceThenRemoveTheParentSucceeds is a FINDING from sequential
+// resolution (docs/hew-spec.md §9.2/§9.3, human ruling), and this test's
+// rename: it used to be TestOverlappingEditsAreAConflict, asserting HEW030.
+// Under BATCH resolution both edits were computed against the same original
+// source and their byte ranges genuinely overlapped (replacing /a/b sits
+// inside the span removing /a deletes), so splicing both into one buffer was
+// undefined and correctly refused.
+//
+// Under sequential resolution the replace is applied for real before the
+// remove is even planned: the remove resolves against a document that
+// already holds `b: 9`, and removes the whole (now up-to-date) /a mapping.
+// There is no overlap to detect because there is only ever ONE edit in
+// flight at a time — the two transforms compose instead of colliding, which
+// is exactly the ruling's point. The result is the empty document: /a was
+// this target's only top-level key.
+func TestReplaceThenRemoveTheParentSucceeds(t *testing.T) {
 	target := "a:\n  b: 1\n  c: 2\n"
 	records := "" +
 		"  - op: replace\n    path: /a/b\n    value: 9\n" +
 		"  - op: remove\n    path: /a\n"
-	got, err := applyIR(t, target, records)
-	if err == nil {
-		t.Fatalf("expected HEW030, got %q", got)
-	}
-	he, _ := hewerr.As(err)
-	if he == nil || he.Code != hewerr.CodeConflict {
-		t.Fatalf("want HEW030, got %v", err)
-	}
+	mustApply(t, target, records, "")
 }
 
 func TestFileWithoutATrailingNewline(t *testing.T) {

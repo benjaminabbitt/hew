@@ -431,23 +431,10 @@ func (r *run) insert(container *ynode, p payload, before, after hew.Path, t hew.
 	pos := kids[len(kids)-1].end
 	if !after.IsZero() {
 		i, err := r.findChild(kids, after, t)
-		switch {
-		case err == nil:
-			pos = kids[i].end
-		default:
-			// The sibling may be one this same patch is adding: §9.1 step 5
-			// chains a run of `+` lines, each placed after the one above it,
-			// and corpus jsonc/add-with-leading-comment pins that shape. It
-			// is not in the parsed document, so resolution fails; it IS in
-			// this run's pending inserts, and landing at the same offset puts
-			// this add immediately after it, because equal-offset edits keep
-			// their list order.
-			p, ok := r.pendingAt(container, after)
-			if !ok {
-				return nil, err
-			}
-			pos = p
+		if err != nil {
+			return nil, err
 		}
+		pos = kids[i].end
 	} else if !before.IsZero() {
 		i, err := r.findChild(kids, before, t)
 		if err != nil {
@@ -456,60 +443,11 @@ func (r *run) insert(container *ynode, p payload, before, after hew.Path, t hew.
 		pos = kids[i].start
 	}
 	text := indentBlock(p.lines, kids[0].indent)
-	r.pending = append(r.pending, pendingAdd{container: container, path: t.Path, value: t.Value, pos: pos})
 	if pos > 0 && r.d.src[pos-1] != '\n' {
 		// The container's last line has no newline of its own: open one.
 		return []edit{{start: pos, end: pos, text: "\n" + text}}, nil
 	}
 	return []edit{{start: pos, end: pos, text: text + "\n"}}, nil
-}
-
-// pendingAdd is one insertion this run has already planned: where it lands,
-// and enough about what it inserts to recognize a later placement naming it.
-type pendingAdd struct {
-	container *ynode
-	path      hew.Path // the add's own address: a member/comment path, or the container for a sequence element
-	value     hew.Value
-	pos       int
-}
-
-// pendingAt reports the insertion offset of a pending add that the placement
-// path names. The most recent match wins, so a chain of three `+` lines walks
-// forward rather than collapsing onto the first.
-func (r *run) pendingAt(container *ynode, p hew.Path) (int, bool) {
-	seg := p.Segment(p.Len() - 1)
-	for i := len(r.pending) - 1; i >= 0; i-- {
-		pa := r.pending[i]
-		if pa.container != container {
-			continue
-		}
-		if pa.path.Equal(p) || segNamesValue(seg, pa.value) {
-			return pa.pos, true
-		}
-	}
-	return 0, false
-}
-
-// segNamesValue applies §4.2's key-match comparison to a value in hand, for a
-// node that is not in the document yet and so has no *ynode to compare.
-func segNamesValue(seg hew.Segment, v hew.Value) bool {
-	n := v.Node()
-	if n == nil || seg.Kind != hew.SegMatch {
-		return false
-	}
-	want := scalarNode(seg.Value)
-	if seg.Name == "" {
-		return n.Kind == yaml.ScalarNode && scalarEq(n, want)
-	}
-	if n.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == seg.Name {
-			return n.Content[i+1].Kind == yaml.ScalarNode && scalarEq(n.Content[i+1], want)
-		}
-	}
-	return false
 }
 
 // insertFlow adds to a flow collection. An EMPTY one has no sibling style to

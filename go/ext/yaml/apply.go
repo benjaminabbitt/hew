@@ -10,84 +10,101 @@ import (
 )
 
 // Apply is the YAML binding's apply half (§8.3, Appendix A.4's Applier.Apply
-// for the "yaml" format). It resolves every path against the document it just
-// parsed, evaluates every OpTest before performing any mutation, and returns
-// the re-serialized bytes — or, on any error, nil bytes and that error
-// (§10.5's all-or-nothing).
+// for the "yaml" format). SEQUENTIAL RESOLUTION (§9.2, §9.3, human ruling):
+// every transform — `test` included — is resolved and evaluated (or applied)
+// against the document AS MODIFIED BY every transform before it, one at a
+// time, in list order, by reparsing the current byte buffer before each
+// step. There is no longer a fixed "every test before any mutation" split; a
+// `test` placed after an earlier write in the same list sees that write,
+// exactly as an `add` placed after one does.
+//
+// Everything happens against an in-memory byte buffer that is only ever
+// returned once every transform has succeeded (§10.5's all-or-nothing): an
+// error at any step discards the buffer and returns nil bytes.
 func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
-	d, err := parseDoc(target)
-	if err != nil {
-		return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
-			Target: tl.Target, Detail: "target does not parse as YAML: " + err.Error()}
-	}
-	r := &run{d: d, target: tl.Target, all: tl.Transform, converged: map[string]bool{}}
-
 	// Pass 0: refuse qualifiers this binding does not implement. §9.3 is
-	// explicit that ignoring one is non-conformant, not lenient.
+	// explicit that ignoring one is non-conformant, not lenient. This is a
+	// property of the transform list alone, so it stays a single static pass
+	// ahead of the sequential one below.
 	for _, t := range tl.Transform {
-		if err := r.unsupported(t); err != nil {
+		if err := unsupported(tl.Target, t); err != nil {
 			return nil, err
 		}
 	}
 
-	// Pass 1: every test, before any mutation is even computed (§9.0, §9.3).
+	// converged spans the whole apply (§10.6/§7.5): whether a path's
+	// before-image assert was tolerated as "already applied" has to be seen
+	// by that path's own write, wherever in the list it falls, so it lives
+	// above the per-transform reparse rather than inside run.
+	converged := map[string]bool{}
+	cur := target
 	for _, t := range tl.Transform {
-		if t.Op != hew.OpTest {
+		d, err := parseDoc(cur)
+		if err != nil {
+			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
+				Target: tl.Target, Detail: "target does not parse as YAML: " + err.Error()}
+		}
+		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged}
+		if t.Op == hew.OpTest {
+			if err := r.evalTest(t); err != nil {
+				return nil, err
+			}
 			continue
 		}
-		if err := r.evalTest(t); err != nil {
+		es, err := r.planOne(t)
+		if err != nil {
+			return nil, err
+		}
+		if len(es) == 0 {
+			continue
+		}
+		cur, err = applyEdits(cur, es)
+		if err != nil {
 			return nil, err
 		}
 	}
-
-	// Pass 2: compute edits. Still no bytes written — an error here also
-	// leaves the target untouched.
-	var edits []edit
-	for _, t := range tl.Transform {
-		var es []edit
-		var perr error
-		switch t.Op {
-		case hew.OpTest:
-			continue
-		case hew.OpAdd:
-			es, perr = r.planAdd(t)
-		case hew.OpRemove:
-			es, perr = r.planRemove(t)
-		case hew.OpReplace:
-			es, perr = r.planReplace(t)
-		case hew.OpCopy:
-			es, perr = r.planCopy(t)
-		default:
-			perr = r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, fmt.Sprintf("unsupported op %q", t.Op))
-		}
-		if perr != nil {
-			return nil, perr
-		}
-		edits = append(edits, es...)
-	}
-	return applyEdits(target, edits)
+	return cur, nil
 }
 
-// run is one Apply invocation's state: the parsed target, the whole transform
-// list (the after-image checks of §10.6 need to see a test's paired write),
-// and the set of paths whose before-image assert was tolerated as "already
-// applied" (§7.5).
+// planOne computes the edits one mutating transform stands for.
+func (r *run) planOne(t hew.Transform) ([]edit, error) {
+	switch t.Op {
+	case hew.OpAdd:
+		return r.planAdd(t)
+	case hew.OpRemove:
+		return r.planRemove(t)
+	case hew.OpReplace:
+		return r.planReplace(t)
+	case hew.OpCopy:
+		return r.planCopy(t)
+	default:
+		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, fmt.Sprintf("unsupported op %q", t.Op))
+	}
+}
+
+// run is one transform's resolution state: the document that transform
+// reparsed and plans against, the whole transform list (the after-image
+// checks of §10.6 need to see a test's paired write, wherever in the list it
+// falls — not just the ones before this one), and the set of paths whose
+// before-image assert has been tolerated as "already applied" (§7.5), shared
+// across every transform's own run (Apply constructs a fresh run each step,
+// but converged is the same map throughout).
 type run struct {
 	d         *doc
 	target    string
 	all       []hew.Transform
 	converged map[string]bool
-	// pending records the inserts planned so far, so a placement naming a
-	// sibling this same patch adds can still find it (§9.1 step 5's chain).
-	pending []pendingAdd
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
-// honour: a TOML surface directive, which has no meaning here (§9.3).
-func (r *run) unsupported(t hew.Transform) error {
+// honour: a TOML surface directive, which has no meaning here (§9.3). It
+// needs no document, so it runs as a static pass over the whole list before
+// any parsing happens.
+func unsupported(target string, t hew.Transform) error {
 	if t.Surface != "" {
-		return r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
-			"surface is a TOML placement directive and has no YAML meaning (§8.4)")
+		return &hewerr.Error{Code: hewerr.CodeInexpressible, Component: hewerr.ComponentApplier,
+			Target: target, Path: t.Path.String(), PatchLine: t.PatchLine,
+			Detail: "surface is a TOML placement directive and has no YAML meaning (§8.4)"}
 	}
 	return nil
 }
