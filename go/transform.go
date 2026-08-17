@@ -3,7 +3,6 @@ package hew
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
@@ -346,10 +345,6 @@ func inexpressiblePath(comp hewerr.Component, target, field string, i int, p Pat
 // spellFailure says how a segment's spelling betrays it, in the words a
 // reviewer needs to see why the refusal is not pedantry.
 func spellFailure(seg Segment) string {
-	if strings.ContainsAny(seg.Name, "\r\n") || strings.ContainsAny(seg.Value.Text, "\r\n") {
-		return "it holds a line break, and §4.1's quoted form escapes only `\\\"` and `\\\\` — " +
-			"a path is written on one line, so there is nowhere to put it"
-	}
 	spelling := strconv.Quote(seg.String())
 	got, err := parseSegment(seg.String(), buildScope)
 	switch {

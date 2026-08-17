@@ -9,9 +9,10 @@ import (
 // detect, apply and diff JSON; nothing else has to be told.
 func init() {
 	hew.Register(hew.FormatJSON, hew.Binding{
-		Applier:  Apply,
-		Differ:   DiffTree,
-		Document: Document,
+		Applier:       Apply,
+		Differ:        DiffTree,
+		Document:      Document,
+		EmptyDocument: []byte("{}\n"),
 		Detect: hew.DetectRule{
 			// §8.0's shipped default. It is also the default for .json files
 			// known to forbid comments, package.json among them: those are

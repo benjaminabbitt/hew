@@ -158,7 +158,7 @@ func patternErr(pattern, detail string) error {
 // The parse is ParsePath's, over a pattern in which every hole has become a
 // sentinel key: the grammar lives in one place, and the arguments never touch
 // text. Filling is a structural swap afterwards.
-func buildPath(pattern string, args []SegmentArg) (Path, error) {
+func buildPath(format FormatID, pattern string, args []SegmentArg) (Path, error) {
 	if strings.Contains(pattern, holeMark) {
 		return Path{}, patternErr(pattern, "pattern contains a NUL byte")
 	}
@@ -174,7 +174,9 @@ func buildPath(pattern string, args []SegmentArg) (Path, error) {
 		return Path{}, patternErr(pattern, "pattern has "+strconv.Itoa(holes)+" hole(s) and "+
 			strconv.Itoa(len(args))+" argument(s); a mismatch is an error, not a partial path")
 	}
-	p, err := ParsePath(strings.Join(parts, "/"))
+	// Scoped to the document's own format (O46): a segment form another
+	// extension claims is not this document's to read that way.
+	p, err := ParsePathIn(format, strings.Join(parts, "/"))
 	if err != nil {
 		return Path{}, patternErr(pattern, detailOf(err))
 	}

@@ -270,6 +270,12 @@ func mustQuoteKey(name string) bool {
 		return true
 	case blockOrdinalShape(name): // `<kind>:<n>` (§4.5)
 		return true
+	case strings.ContainsAny(name, "\r\n"):
+		// Not a grammar collision: a raw line break re-reads as itself. It is
+		// refused because a path is written into .hew and .hewt, which are
+		// LINE-oriented, so a key holding one must be escaped to stay on one
+		// line (§4.1's `\n`/`\r`).
+		return true
 	}
 	// The safety net, defined by the round trip itself: anything the core's
 	// own lexer reads back as another form, or as a different key.
@@ -381,6 +387,11 @@ func mustQuoteScalar(text string) bool {
 		return true
 	}
 	if text[0] == '"' || isNumber(text) {
+		return true
+	}
+	// A path is written into line-oriented files, so a value holding a line
+	// break must be escaped to stay on one line (§4.1).
+	if strings.ContainsAny(text, "\r\n") {
 		return true
 	}
 	// The `?` of §4.4 and the `[n]` of §9.6 are stripped from the END of the
@@ -519,9 +530,6 @@ func (p Path) String() string {
 // re-reading its §4 spelling yields an Equal segment. It is a segment-local
 // judgement — see Path.spellable for what only the whole path can see.
 func (s Segment) spellable() bool {
-	if strings.ContainsAny(s.Name, "\r\n") || strings.ContainsAny(s.Value.Text, "\r\n") {
-		return false
-	}
 	got, err := parseSegment(s.String(), buildScope)
 	return err == nil && s.Equal(got)
 }
@@ -1020,6 +1028,10 @@ func unquotePrefix(s string) (text, after string, err error) {
 			switch s[i] {
 			case '"', '\\':
 				b.WriteByte(s[i])
+			case 'n':
+				b.WriteByte('\n')
+			case 'r':
+				b.WriteByte('\r')
 			default:
 				return "", "", segErr(`invalid escape "\` + string(s[i]) + `" in quoted segment`)
 			}
@@ -1044,6 +1056,10 @@ func quoteSegment(s string) string {
 			b.WriteString(`\"`)
 		case '\\':
 			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
 		default:
 			b.WriteByte(s[i])
 		}

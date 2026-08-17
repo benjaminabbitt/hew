@@ -297,7 +297,6 @@ func TestSpellFailureNamesTheCorruption(t *testing.T) {
 		{"different kind", Segment{Kind: SegExtension, Form: "heading", Raw: "# Setup"}, "re-reads as a key segment, not a heading"},
 		{"same kind, different segment", Segment{Kind: SegMatch, Name: "on", Value: Scalar{Kind: ScalarBool, Text: "True"}}, "re-reads as a different match segment"},
 		{"not a legal segment", Segment{Kind: SegExtension, Form: "wildcard", Raw: "*"}, "is not a legal segment"},
-		{"line break", Segment{Kind: SegKey, Name: "a\nb"}, "line break"},
 		{"positional", Segment{Kind: SegKey, Name: "x", Optional: true}, "does not survive in this position"},
 	}
 	for _, tc := range tests {

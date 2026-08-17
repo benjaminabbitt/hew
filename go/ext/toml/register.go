@@ -7,9 +7,10 @@ import (
 // init registers the TOML binding (Appendix A.6, O35).
 func init() {
 	hew.Register(hew.FormatTOML, hew.Binding{
-		Applier:  Apply,
-		Differ:   DiffTree,
-		Document: Document,
+		Applier:       Apply,
+		Differ:        DiffTree,
+		Document:      Document,
+		EmptyDocument: []byte(""),
 		Detect: hew.DetectRule{
 			Extensions: []string{".toml"},
 		},

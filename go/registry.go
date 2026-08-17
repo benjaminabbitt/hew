@@ -74,6 +74,14 @@ type Binding struct {
 	Document func(name string, src []byte) (Document, error)
 
 	// Detect is this format's filename claim (§8.0).
+	// EmptyDocument is what a document of this format looks like with nothing
+	// in it — "{}" for JSON, empty for YAML. It exists for CreateIfMissing and
+	// nothing else, and it lives HERE because only the extension knows it:
+	// core has never held an opinion about a format's initial content, only
+	// about editing bytes that already exist. A binding that leaves it nil
+	// cannot be created from nothing, and Open says so rather than guessing.
+	EmptyDocument []byte
+
 	Detect DetectRule
 
 	// Kinds are the node-kind names this extension DECLARES beyond the
