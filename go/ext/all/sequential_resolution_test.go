@@ -164,4 +164,3 @@ func strVal(t *testing.T, s string) hew.Value {
 	}
 	return v
 }
-
