@@ -370,6 +370,18 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 				key = fmt.Sprintf("+%d", syntheticN)
 				syntheticN++
 			}
+			// An add whose key is ALREADY held takes a body slot of its own.
+			// A mapping member that MOVED comes out of the differ as a remove
+			// plus a re-add of the same key, so its `-` and its `+` are two
+			// lines at two positions, not one entry: reusing the key would
+			// render only the `-` (remove outranks add below), and overwriting
+			// the entry drops the `-` AND leaves the key in `order` twice, so
+			// the one add renders as two `+` lines. Applying that appends the
+			// replacement into the value it was meant to replace, twice.
+			if _, taken := bySeg[key]; taken {
+				key = fmt.Sprintf("+%d", syntheticN)
+				syntheticN++
+			}
 			// A placement names a sibling by ADDRESS; the body knows it by slot
 			// key, and a sequence element added by this same hunk has no
 			// address of its own to be keyed by (its transform addresses the

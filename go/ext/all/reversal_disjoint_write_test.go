@@ -2,6 +2,7 @@ package all
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	hew "github.com/benjaminabbitt/hew/go"
@@ -136,5 +137,75 @@ func TestReversalUnaffectedByDisjointSiblingWrite(t *testing.T) {
 	if got.StatusLine["command"] != "echo status" {
 		t.Fatalf("the disjoint writer's /statusLine must survive the reversal, got %v:\n%s",
 			got.StatusLine, restored)
+	}
+}
+
+// The reduced cause, in every format that ships a differ and an applier.
+//
+// hew's emitters write a Go map's keys in sorted order, so setting a container
+// whose document spelled its keys in some other order REORDERS them. Diffing
+// back the other way then sees a member that MOVED, which the differ expresses
+// as a remove plus a re-add of the same key — the one shape the renderer used
+// to collapse. Nothing about it is JSON-specific: the renderer is shared, so
+// every format carried it.
+//
+// The two assertions are the two halves of "it reversed": the post-application
+// value is GONE, and the pre-application value is back exactly ONCE. The
+// corruption satisfied neither — it left the new value in place and appended
+// the old one twice.
+func TestReversalRestoresWhenMappingKeysWereReordered(t *testing.T) {
+	for _, c := range []struct {
+		format hew.FormatID
+		name   string
+		// seed spells /server's keys in non-sorted order, so that setting
+		// /server reorders them.
+		seed string
+	}{
+		{hew.FormatJSON, "config.json", "{\n  \"server\": {\"timeout\": 30, \"host\": \"localhost\"}\n}\n"},
+		{hew.FormatJSONC, ".mcp.json", "{\n  \"server\": {\"timeout\": 30, \"host\": \"localhost\"}\n}\n"},
+		{hew.FormatYAML, "config.yaml", "server:\n  timeout: 30\n  host: localhost\n"},
+		{hew.FormatTOML, "config.toml", "server = {timeout = 30, host = \"localhost\"}\n"},
+	} {
+		t.Run(string(c.format), func(t *testing.T) {
+			binding, ok := hew.Lookup(c.format)
+			if !ok {
+				t.Fatalf("no binding for %s", c.format)
+			}
+			after := setAt(t, c.name, c.format, []byte(c.seed), "/server",
+				map[string]any{"host": "localhost", "timeout": 60})
+			tl, err := hew.Invert(c.format, []byte(c.seed), after, hew.DiffOptions{Target: c.name})
+			if err != nil {
+				t.Fatalf("Invert: %v", err)
+			}
+			reversal, err := hew.Render(tl, hew.RenderOptions{})
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			replay, err := hew.ParseSingle(reversal)
+			if err != nil {
+				t.Fatalf("ParseSingle: %v\npatch=%s", err, reversal)
+			}
+			restored, err := binding.Applier(after, replay)
+			if err != nil {
+				t.Fatalf("applying the reversal: %v\npatch=%s\nafter=%s", err, reversal, after)
+			}
+			got := string(restored)
+			if strings.Contains(got, "60") {
+				t.Fatalf("the reversal left the post-application value in place:\npatch=%s\nrestored=%s", reversal, got)
+			}
+			if n := strings.Count(got, "30"); n != 1 {
+				t.Fatalf("the pre-application value must come back exactly once, got %d:\npatch=%s\nrestored=%s", n, reversal, got)
+			}
+			// And it is readable at the path it belongs to, not merely present
+			// somewhere in the bytes.
+			check, err := hew.OpenBytes(c.name, restored, hew.As(c.format))
+			if err != nil {
+				t.Fatalf("re-open restored: %v\n%s", err, got)
+			}
+			check.AtPath(hew.MustParsePath("/server/timeout")).Assert(30)
+			if _, err := check.Bytes(); err != nil {
+				t.Fatalf("/server/timeout did not come back as 30: %v\nrestored=%s", err, got)
+			}
+		})
 	}
 }
