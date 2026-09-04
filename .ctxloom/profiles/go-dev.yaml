@@ -1,0 +1,8 @@
+description: Working profile for hew Go development (parents personal go-developer; adds BDD, behavioral-interface-test, docs authoring)
+parents:
+    - hew-defaults
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/go-development#profiles/go-developer
+bundles:
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/bdd
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/behavioral-interface-test
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/docs-authoring

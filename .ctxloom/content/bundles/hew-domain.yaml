@@ -1,0 +1,41 @@
+version: 1.0.0
+description: 'hew domain vocabulary: what the project''s terms mean, for distillation and triage'
+tags:
+    - domain
+    - hew
+fragments:
+    glossary:
+        tags:
+            - domain
+            - glossary
+        content: |-
+            # hew — domain vocabulary
+
+            hew is a structure-aware replacement for patch(1)/diff(1) for structured
+            files (JSON, JSONC, YAML, TOML, HCL; Markdown managed blocks under
+            evaluation). A `.hew` patch reads like a unified diff but addresses
+            NODES, not lines: it survives key reordering, reformatting, and
+            unrelated edits, and fails loudly rather than silently misapplying.
+
+            Terms used across this project:
+            - **spec** — the normative definition, `docs/hew-spec.md`. The project
+              is spec-first; "the standard is the corpus".
+            - **corpus** — `corpus/`: input/patch/expected triples (plus
+              expected-failure and CLI-contract cases) every implementation must
+              pass. The executable definition of conformance.
+            - **features** — `features/`: Cucumber/Gherkin acceptance criteria
+              expressing the corpus obligations; an implementation is conformant
+              when they pass.
+            - **IR / transform list** — the single intermediate representation.
+              Five primitives: `test`, `add`, `remove`, `replace`, `copy`; richer
+              notation desugars in the parser. Context lines compile into `test`
+              transforms (staleness detection lives in the IR).
+            - **`.hewt`** — the IR's serialization; escape hatch for edits the
+              mirror grammar cannot express (`hew apply --transforms`).
+            - **parse / render** — notation side: `.hew` ↔ transforms.
+            - **diff / apply** — format side: documents ↔ transforms.
+            - **implementations** — `go/` (library + `hew` CLI, first) and `rust/`
+              (port; runs the same corpus).
+            - **open design questions** — numbered list at the end of the spec;
+              "a design question closes" is a common revive trigger for deferred
+              tasks.

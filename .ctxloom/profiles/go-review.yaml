@@ -1,0 +1,4 @@
+description: Go code review lens ensemble
+parents:
+    - hew-defaults
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/go-development#profiles/go-code-reviewer

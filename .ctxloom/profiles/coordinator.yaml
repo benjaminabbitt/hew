@@ -1,0 +1,4 @@
+description: 'Coordinator: delegates to per-language developers, finders, and review ensemble via agent_run'
+parents:
+    - hew-defaults
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/agent-ensemble#profiles/coordinator

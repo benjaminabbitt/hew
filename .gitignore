@@ -4,9 +4,15 @@
 .codex/config.toml
 .codex/auth.json
 .claude/
-.ctxloom/
 opencode.json
 
 # Built binaries. `just examples` builds go/hew so the transcript generator
 # drives the real CLI rather than an in-process shim.
 /go/hew
+
+# ctxloom private working state (rebuildable/local — cache, sessions, project id, local state)
+.ctxloom/cache/
+.ctxloom/sessions/
+.ctxloom/project-id
+.ctxloom/state/
+.ctxloom/*.lock

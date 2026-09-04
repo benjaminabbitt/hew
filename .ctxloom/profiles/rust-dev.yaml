@@ -1,0 +1,9 @@
+description: Working profile for hew Rust development (parents personal rust-developer; adds upstream rust language practices, BDD, behavioral-interface-test, docs authoring)
+parents:
+    - hew-defaults
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/rust-development#profiles/rust-developer
+bundles:
+    - https://github.com/ctxloom/ctxloom-default@bundles/rust-development
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/bdd
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/behavioral-interface-test
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/docs-authoring

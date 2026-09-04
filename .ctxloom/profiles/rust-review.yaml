@@ -1,0 +1,4 @@
+description: Rust code review lens ensemble
+parents:
+    - hew-defaults
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/rust-development#profiles/rust-code-reviewer

@@ -1,0 +1,8 @@
+default: ctxloom-default
+remotes:
+    ctxloom-default:
+        name: ""
+        url: https://github.com/ctxloom/ctxloom-default
+    personal:
+        name: ""
+        url: https://github.com/benjaminabbitt/ctxloom-personal

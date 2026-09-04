@@ -1,0 +1,54 @@
+agents:
+    coordinator:
+        llm: claude-code
+        profiles:
+            - coordinator
+        runtime: host
+    distiller:
+        llm: claude-fast
+        profiles:
+            - distiller
+        runtime: host
+    finder:
+        llm: claude-fast
+        profiles:
+            - finder
+        runtime: host
+    go-dev:
+        llm: claude-code
+        profiles:
+            - go-dev
+        runtime: container
+    go-review:
+        llm: claude-fast
+        profiles:
+            - go-review
+        runtime: host
+    rust-dev:
+        llm: claude-code
+        profiles:
+            - rust-dev
+        runtime: container
+    rust-review:
+        llm: claude-fast
+        profiles:
+            - rust-review
+        runtime: host
+    triage:
+        llm: claude-fast
+        profiles:
+            - triage
+        runtime: host
+llm:
+    configs:
+        claude-code:
+            model: claude-opus-5
+            type: claude-code
+        claude-fast:
+            model: claude-haiku-4-5-20251001
+            type: claude-code
+    defaults:
+        fast: claude-fast
+        primary: claude-code
+version: 6
+default_agent: coordinator

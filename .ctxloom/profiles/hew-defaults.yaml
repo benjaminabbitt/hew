@@ -1,0 +1,14 @@
+description: The tag:default set, composed explicitly (upstream bundles/default is retired)
+bundles:
+    - https://github.com/ctxloom/ctxloom-default@bundles/ai-coding-general
+    - https://github.com/ctxloom/ctxloom-default@bundles/code-quality
+    - https://github.com/ctxloom/ctxloom-default@bundles/conduct
+    - https://github.com/ctxloom/ctxloom-default@bundles/git
+    - https://github.com/ctxloom/ctxloom-default@bundles/ltk
+    - https://github.com/ctxloom/ctxloom-default@bundles/reprise
+    - https://github.com/ctxloom/ctxloom-default@bundles/sequential-thinking
+    - https://github.com/ctxloom/ctxloom-default@bundles/taskloom
+    - https://github.com/ctxloom/ctxloom-default@bundles/testing
+    - https://github.com/ctxloom/ctxloom-default@bundles/versionator
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/developer-mindset
+    - https://github.com/benjaminabbitt/ctxloom-personal@bundles/serena
