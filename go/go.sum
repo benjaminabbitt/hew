@@ -2,6 +2,8 @@ github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260722013940-10300d4f7632 h1:P
 github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260722013940-10300d4f7632/go.mod h1:Vk2gDTQ9CKv6LcaYBSWz0qX5pCZ3PvVBIJxAJ0hZBFQ=
 github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260905164745-0ceff968cc86 h1:HATGNo2TTt968eKd8NLpkas30Srbs22wRECexOY2a1Q=
 github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260905164745-0ceff968cc86/go.mod h1:Vk2gDTQ9CKv6LcaYBSWz0qX5pCZ3PvVBIJxAJ0hZBFQ=
+github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260905185216-9a2b04465c57 h1:y6EDmFhLPXIp+m4XcSNFU+E2bgm82RQ9wwg969V39rE=
+github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260905185216-9a2b04465c57/go.mod h1:Vk2gDTQ9CKv6LcaYBSWz0qX5pCZ3PvVBIJxAJ0hZBFQ=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/cucumber/gherkin/go/v42 v42.0.0 h1:Ulh3E2awUUSSja+wonP/IOQ+ycmiZwZbgmzqk5H8JNI=
 github.com/cucumber/gherkin/go/v42 v42.0.0/go.mod h1:CsaumaO2dR9XvBc6ZyiGLMhWCKtTRDxgoxqJigSjSSg=
