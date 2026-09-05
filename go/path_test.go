@@ -11,6 +11,44 @@ func TestParsePathEmptyIsError(t *testing.T) {
 	}
 }
 
+// A content-hash fragment (satisfied-recoil) is a `#<namespace>:key=value` tag
+// after the `#` locator, parsed by the shared tagma grammar. It round-trips, it
+// does not collide with the other `#` forms, and it decomposes into the tag's
+// namespace/key/value on the segment.
+func TestParsePathHashFragmentRoundTrips(t *testing.T) {
+	const hexDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	p, err := ParsePath("/tags/#hew:sha256=" + hexDigest)
+	if err != nil {
+		t.Fatalf("ParsePath hash fragment: %v", err)
+	}
+	segs := p.Segments()
+	last := segs[len(segs)-1]
+	if last.Kind != SegHash {
+		t.Fatalf("last segment kind = %v, want SegHash", last.Kind)
+	}
+	if last.Form != "hew" || last.Name != "sha256" || last.Hash != hexDigest {
+		t.Fatalf("decomposed = ns:%q key:%q value:%q, want hew/sha256/<hex>", last.Form, last.Name, last.Hash)
+	}
+	if got := p.String(); got != "/tags/#hew:sha256="+hexDigest {
+		t.Fatalf("render round-trip = %q", got)
+	}
+}
+
+// The hash fragment must not swallow the native `#` forms: a comment ordinal and
+// a trailing comment carry no namespace, so they stay SegComment.
+func TestHashFragmentDoesNotCaptureComments(t *testing.T) {
+	for _, s := range []string{"/server/#0", "/server/timeout/#t"} {
+		p, err := ParsePath(s)
+		if err != nil {
+			t.Fatalf("ParsePath(%q): %v", s, err)
+		}
+		segs := p.Segments()
+		if k := segs[len(segs)-1].Kind; k != SegComment {
+			t.Fatalf("%q last segment kind = %v, want SegComment", s, k)
+		}
+	}
+}
+
 func TestParsePathMustStartWithSlashOrDot(t *testing.T) {
 	if _, err := ParsePath("server/timeout"); err == nil {
 		t.Fatal("ParsePath without leading / or . should fail")

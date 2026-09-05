@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	tagma "github.com/benjaminabbitt/tagma/ports/go"
+
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
@@ -56,6 +58,14 @@ const (
 	// which is all the core needs to carry it and print it back unchanged. The
 	// extension that claimed it is what knows what it MEANS.
 	SegExtension
+	// SegHash is a content-hash fragment locator (§4.5c, satisfied-recoil): the
+	// `#hew:sha256=<hex>` form that identifies a set/sequence member by a digest
+	// of its canonical value, never by the value itself. The text after `#` is a
+	// tagma tag (`(namespace:)key(=value)`): Form is the namespace ("hew"), Name
+	// is the key (the algorithm, "sha256"), and Hash is the value (the hex
+	// digest). `#` is RFC 3986's fragment delimiter — a locate-by-identity — the
+	// same family as SegComment and a Markdown heading.
+	SegHash
 )
 
 func (k SegmentKind) String() string {
@@ -72,6 +82,8 @@ func (k SegmentKind) String() string {
 		return "comment"
 	case SegExtension:
 		return "extension"
+	case SegHash:
+		return "hash"
 	}
 	return "segment(" + strconv.Itoa(int(k)) + ")"
 }
@@ -150,8 +162,16 @@ type Segment struct {
 	// nothing more — decoding a heading's level or a marker's name is the
 	// claiming extension's business, and keeping the raw spelling is what makes
 	// print/parse exact for a shape the core does not understand.
+	//
+	// Form ALSO carries a SegHash's tag namespace ("hew") and Name its key (the
+	// algorithm, "sha256"); Hash carries the tag value (the hex digest). See
+	// SegHash.
 	Form string
 	Raw  string
+
+	// Hash is a SegHash's tag value — the hex digest of the addressed member's
+	// canonical form (satisfied-recoil). Empty on every other kind.
+	Hash string
 
 	// Trailing marks the `#t` comment form (§4.5b).
 	Trailing bool
@@ -187,7 +207,7 @@ func (s Segment) IsQuoted() bool {
 // built as data and the same key read back from text are one segment.
 func (s Segment) Equal(o Segment) bool {
 	if s.Kind != o.Kind || s.Name != o.Name || s.Index != o.Index ||
-		s.Form != o.Form || s.Raw != o.Raw || !s.Value.equal(o.Value) ||
+		s.Form != o.Form || s.Raw != o.Raw || s.Hash != o.Hash || !s.Value.equal(o.Value) ||
 		s.IsQuoted() != o.IsQuoted() ||
 		s.Trailing != o.Trailing || s.Optional != o.Optional {
 		return false
@@ -220,6 +240,14 @@ func (s Segment) String() string {
 		} else {
 			b.WriteString(strconv.Itoa(s.Index))
 		}
+	case SegHash:
+		// `#` + a tagma tag: namespace(Form) ":" key(Name) "=" value(Hash).
+		b.WriteByte('#')
+		b.WriteString(s.Form)
+		b.WriteByte(':')
+		b.WriteString(s.Name)
+		b.WriteByte('=')
+		b.WriteString(s.Hash)
 	}
 	if s.Optional {
 		b.WriteByte('?')
@@ -790,6 +818,23 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 		}
 		seg.Kind, seg.Form, seg.Raw = SegExtension, form, body
 		return seg, nil
+	}
+
+	// A `#<namespace>:...` fragment (§4.5c, satisfied-recoil): the text after `#`
+	// is a tagma tag carrying a namespace — hew's computed locators use "hew",
+	// and `#<ext>:...` is reserved for extension namespaces. Intercepted BEFORE
+	// the key-match fallback, because a `#hew:sha256=<hex>` contains an `=` that
+	// the fallback would otherwise read as field=value. A namespace-less `#foo`
+	// is left for the fallbacks; a Markdown heading (`# text`) was already
+	// claimed above.
+	if len(body) > 1 && body[0] == '#' {
+		if tag, terr := tagma.ParseTag(body[1:]); terr == nil && tag.Namespace != nil {
+			seg.Kind, seg.Form, seg.Name = SegHash, *tag.Namespace, tag.Key
+			if tag.Value != nil {
+				seg.Hash = *tag.Value
+			}
+			return seg, nil
+		}
 	}
 
 	if isIndex(body) {
