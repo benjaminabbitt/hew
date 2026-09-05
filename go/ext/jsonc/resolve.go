@@ -108,23 +108,22 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 		if cur.node.kind != kArr {
 			return ref{}, &resolveErr{detail: "not an array"}
 		}
-		var found *element
-		count := 0
-		for _, e := range cur.node.elems {
-			v, has := d.comparedValue(e.value, hew.Segment{})
-			if has && seg.MatchesHash(v) {
-				found = e
-				count++
+		var matches []int
+		for i, e := range cur.node.elems {
+			if v, has := d.comparedValue(e.value, hew.Segment{}); has && seg.MatchesHash(v) {
+				matches = append(matches, i)
 			}
 		}
-		switch {
-		case count == 0:
+		if len(matches) == 0 {
 			return ref{}, &resolveErr{detail: "no element matches " + seg.String()}
-		case count > 1:
-			// A collision is ambiguity, not a match: refuse (satisfied-recoil).
-			return ref{}, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements collide on %s", count, seg.String())}
 		}
-		return ref{node: found.value, parent: cur.node, elem: found}, nil
+		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
+		idx, ok := hew.PositionPick(matches, len(cur.node.elems), d.posAt, d.posOf)
+		if !ok {
+			return ref{}, &resolveErr{ambiguous: true,
+				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+		}
+		return ref{node: cur.node.elems[idx].value, parent: cur.node, elem: cur.node.elems[idx]}, nil
 	default:
 		return ref{}, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSONC representation (§8.2)", seg.Kind)}
 	}

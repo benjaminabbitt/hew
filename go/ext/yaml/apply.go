@@ -44,7 +44,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
 				Target: tl.Target, Detail: "target does not parse as YAML: " + err.Error()}
 		}
-		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged}
+		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged, posAt: t.At, posOf: t.Of}
 		if t.Op == hew.OpTest {
 			if err := r.evalTest(t); err != nil {
 				return nil, err
@@ -97,6 +97,8 @@ type run struct {
 	target    string
 	all       []hew.Transform
 	converged map[string]bool
+	// posAt/posOf: the current transform's position advisory (satisfied-recoil).
+	posAt, posOf *int
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
@@ -264,24 +266,22 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 		if n.kind != nSeq {
 			return nil, noMatch("not a sequence")
 		}
-		var found *elem
-		count := 0
-		for _, el := range n.elems {
-			v, has := r.d.comparedValue(el.val, hew.Segment{})
-			if has && seg.MatchesHash(v) {
-				found = el
-				count++
+		var matches []int
+		for i, el := range n.elems {
+			if v, has := r.d.comparedValue(el.val, hew.Segment{}); has && seg.MatchesHash(v) {
+				matches = append(matches, i)
 			}
 		}
-		switch count {
-		case 0:
+		if len(matches) == 0 {
 			return nil, noMatch("no element matches %s", seg.String())
-		case 1:
-			return &ref{node: found.val, parent: n, elem: found}, nil
 		}
-		// A collision is ambiguity, not a match: refuse (satisfied-recoil).
-		return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
-			detail: fmt.Sprintf("%d elements collide on %s; hew will not pick one", count, seg.String())}
+		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
+		idx, ok := hew.PositionPick(matches, len(n.elems), r.posAt, r.posOf)
+		if !ok {
+			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
+				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+		}
+		return &ref{node: n.elems[idx].val, parent: n, elem: n.elems[idx]}, nil
 	}
 	return nil, noMatch("segment kind %v has no YAML representation (§8.3)", seg.Kind)
 }

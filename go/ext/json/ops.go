@@ -309,7 +309,7 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 				return removeObjMember(d.src, parent, i), nil
 			}
 		}
-	case parent.kind == jArr && (last.Kind == hew.SegMatch || last.Kind == hew.SegIndex || last.Kind == hew.SegHash):
+	case parent.kind == jArr && (last.Kind == hew.SegMatch || last.Kind == hew.SegIndex):
 		for i, e := range parent.elems {
 			if last.Kind == hew.SegIndex && i == last.Index {
 				return removeArrElem(d.src, parent, i), nil
@@ -317,11 +317,20 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 			if last.Kind == hew.SegMatch && d.matchesSegMatch(e.value, last) {
 				return removeArrElem(d.src, parent, i), nil
 			}
-			if last.Kind == hew.SegHash {
-				if v, err := d.nodeValue(e.value); err == nil && last.MatchesHash(v) {
-					return removeArrElem(d.src, parent, i), nil
-				}
+		}
+	case parent.kind == jArr && last.Kind == hew.SegHash:
+		var matches []int
+		for i, e := range parent.elems {
+			if v, err := d.nodeValue(e.value); err == nil && last.MatchesHash(v) {
+				matches = append(matches, i)
 			}
+		}
+		if idx, ok := hew.PositionPick(matches, len(parent.elems), d.posAt, d.posOf); ok {
+			return removeArrElem(d.src, parent, idx), nil
+		}
+		if len(matches) > 1 {
+			return nil, appErr(hewerr.CodeAmbiguousMatch, target, t.Path.String(), t.PatchLine,
+				fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), last.String()))
 		}
 	}
 	if t.Optional {

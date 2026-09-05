@@ -1,8 +1,11 @@
 package hew
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
+	tagma "github.com/benjaminabbitt/tagma/ports/go"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,6 +60,11 @@ type mirrorEntry struct {
 	// plain key — a `#hew:sha256=<hex>` set locator (satisfied-recoil). nil for a
 	// key hint, whose key rides `key` like any member.
 	hintSeg *Segment
+
+	// advice are the trailing `~hew:key=value` advisory tags on this body line
+	// (satisfied-recoil): the position of a duplicate set element (`at`/`of`).
+	// Non-asserting; the lowerer folds them onto the mutation it emits.
+	advice []tagma.Tag
 
 	// Filled by the lowering pass: the line-scoped annotations attached to
 	// this entry (§7), and the container's entry list, which `? exhaustive`
@@ -150,6 +158,13 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 		e.kind, e.comment = mComment, body
 		return e, nil
 	}
+	// Trailing advisory tags (satisfied-recoil): `<value> ~hew:at=N ~hew:of=M`.
+	// Split them off before the value is parsed; the lowerer folds them onto the
+	// mutation. They ride any value-bearing line (a `-`/`+`/context element).
+	var aerr error
+	if text, e.advice, aerr = splitTrailingAdvice(text); aerr != nil {
+		return nil, parseErr(bl.num, "", "%v", aerr)
+	}
 	switch {
 	case closerText(text):
 		return nil, parseErr(bl.num, "", "unexpected closing delimiter %q (§2.3)", text)
@@ -199,6 +214,85 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 		return r.memberOrValue(e, bl, text)
 	}
 	return e, checkSubtreeMargins(e)
+}
+
+// splitTrailingAdvice peels the trailing `~<ns>:key=value` advisory tags off a
+// body line's content (satisfied-recoil): `dup ~hew:at=2 ~hew:of=3` splits into
+// the value `dup` and the two tags. A run begins at the first unquoted,
+// unbracketed space that is followed by `~` and a NAMESPACED tagma tag; a `~`
+// inside the value, or one not opening a namespaced tag, stays part of the value.
+func splitTrailingAdvice(text string) (string, []tagma.Tag, error) {
+	depth := 0
+	inQuote := false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inQuote {
+			if c == '\\' {
+				i++ // an escaped char is not the closer
+			} else if c == '"' {
+				inQuote = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inQuote = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			depth--
+		case ' ', '\t':
+			if depth != 0 {
+				continue
+			}
+			rest := strings.TrimLeft(text[i:], " \t")
+			if !strings.HasPrefix(rest, "~") {
+				continue
+			}
+			tags, ok, err := parseAdviceRun(rest)
+			if err != nil {
+				return "", nil, err
+			}
+			if ok {
+				return strings.TrimRight(text[:i], " \t"), tags, nil
+			}
+		}
+	}
+	return text, nil, nil
+}
+
+// parseAdviceRun parses a whitespace-separated run of `~`-prefixed namespaced
+// tagma tags. ok is false with no error when the first token is not a namespaced
+// tag — the caller then leaves the `~` in the value rather than treating it as
+// advice.
+func parseAdviceRun(s string) (tags []tagma.Tag, ok bool, err error) {
+	for _, tok := range strings.Fields(s) {
+		if !strings.HasPrefix(tok, "~") {
+			return nil, false, fmt.Errorf("advisory run has a non-`~` token %q", tok)
+		}
+		tag, perr := tagma.ParseTag(tok[1:])
+		if perr != nil || tag.Namespace == nil {
+			if len(tags) == 0 {
+				return nil, false, nil // not an advisory run at all
+			}
+			return nil, false, fmt.Errorf("advisory tag %q is not a namespaced tag", tok)
+		}
+		tags = append(tags, tag)
+	}
+	return tags, true, nil
+}
+
+// adviceInt reads an integer-valued advisory tag by namespace:key, e.g.
+// `~hew:at=2`, returning nil when it is absent.
+func adviceInt(advice []tagma.Tag, ns, key string) *int {
+	for _, t := range advice {
+		if t.Namespace != nil && *t.Namespace == ns && t.Key == key && t.Value != nil {
+			if n, err := strconv.Atoi(*t.Value); err == nil {
+				return &n
+			}
+		}
+	}
+	return nil
 }
 
 // memberOrValue reads the three remaining line shapes: a member, an HCL

@@ -101,6 +101,7 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 		if tl.Transform[i].Op == OpHint {
 			continue
 		}
+		r.posAt, r.posOf = tl.Transform[i].At, tl.Transform[i].Of
 		op, err := r.transform(tl.Transform[i])
 		if err != nil {
 			// OP-06: an OPTIONAL transform whose address is absent is a
@@ -130,6 +131,9 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 type resolver struct {
 	target string
 	root   Node
+	// posAt/posOf are the current transform's position advisory (satisfied-recoil):
+	// which of several hash-colliding elements it addresses. Set per transform.
+	posAt, posOf *int
 }
 
 func resolveErr(code hewerr.Code, target, path string, line int, format string, args ...any) error {
@@ -449,25 +453,28 @@ func (r *resolver) stepHash(n Node, seg Segment) (string, Node, *stepErr) {
 	if n.Kind() != KindSeq {
 		return "", nil, &stepErr{detail: "not a sequence"}
 	}
-	var hits []matched
+	var matches []int
+	byIndex := map[int]Node{}
 	for i := 0; i < n.Len(); i++ {
 		e, ok := n.Elem(i)
 		if !ok {
 			continue
 		}
 		if hashScalar(e.Value()) == seg.Hash {
-			hits = append(hits, matched{index: i, node: e})
+			matches = append(matches, i)
+			byIndex[i] = e
 		}
 	}
-	switch len(hits) {
-	case 0:
+	if len(matches) == 0 {
 		return "", nil, &stepErr{detail: "no element matches " + seg.String()}
-	case 1:
-		return strconv.Itoa(hits[0].index), hits[0].node, nil
-	default:
-		return "", nil, &stepErr{ambiguous: true,
-			detail: fmt.Sprintf("%d elements collide on %s", len(hits), seg.String())}
 	}
+	// A collision resolves by the position advisory, or refuses (satisfied-recoil).
+	idx, ok := PositionPick(matches, n.Len(), r.posAt, r.posOf)
+	if !ok {
+		return "", nil, &stepErr{ambiguous: true,
+			detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+	}
+	return strconv.Itoa(idx), byIndex[idx], nil
 }
 
 // --- the no-match diagnostic (§10.3, O46) ------------------------------------

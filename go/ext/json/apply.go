@@ -38,6 +38,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
 				Target: tl.Target, Detail: "target does not parse as JSON: " + err.Error()}
 		}
+		d.posAt, d.posOf = t.At, t.Of
 		if t.Op == hew.OpTest {
 			if err := d.evalTest(tl.Target, t); err != nil {
 				return nil, err
@@ -88,6 +89,9 @@ func (d *doc) planOne(target string, t hew.Transform) (*edit, error) {
 type doc struct {
 	src  []byte
 	root *jNode
+	// posAt/posOf are the current transform's position advisory (satisfied-recoil):
+	// which of several hash-colliding elements it means. Set per transform.
+	posAt, posOf *int
 }
 
 func parseDoc(src []byte) (*doc, error) {
@@ -205,26 +209,22 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 		if n.kind != jArr {
 			return nil, &resolveErr{detail: "not an array"}
 		}
-		var found *jNode
-		count := 0
-		for _, e := range n.elems {
-			v, err := d.nodeValue(e.value)
-			if err != nil {
-				continue
-			}
-			if seg.MatchesHash(v) {
-				found = e.value
-				count++
+		var matches []int
+		for i, e := range n.elems {
+			if v, err := d.nodeValue(e.value); err == nil && seg.MatchesHash(v) {
+				matches = append(matches, i)
 			}
 		}
-		if count == 0 {
+		if len(matches) == 0 {
 			return nil, &resolveErr{detail: "no element matches " + seg.String()}
 		}
-		if count > 1 {
-			// A collision is ambiguity, not a match: refuse (satisfied-recoil).
-			return nil, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements collide on %s", count, seg.String())}
+		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
+		idx, ok := hew.PositionPick(matches, len(n.elems), d.posAt, d.posOf)
+		if !ok {
+			return nil, &resolveErr{ambiguous: true,
+				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
 		}
-		return found, nil
+		return n.elems[idx].value, nil
 	default:
 		return nil, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSON representation (§8.1)", seg.Kind)}
 	}

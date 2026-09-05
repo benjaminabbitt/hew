@@ -36,6 +36,9 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 	cur := target
 	for _, t := range tl.Transform {
 		d, err := parseDoc(cur)
+		if d != nil {
+			d.posAt, d.posOf = t.At, t.Of
+		}
 		if err != nil {
 			return nil, targetParseErr(tl.Target, err)
 		}

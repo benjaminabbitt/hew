@@ -321,6 +321,7 @@ func commentOrdinals(children []DiffChild) []int {
 // are the same list.
 func (d *differ) emit(addr addressing, slots []slot) {
 	show := d.window(slots)
+	pos := positions(addr, slots)
 	for i := range slots {
 		if !show[i] {
 			continue
@@ -345,16 +346,23 @@ func (d *differ) emit(addr addressing, slots []slot) {
 			d.out = append(d.out, Transform{Op: OpHint, Path: slots[i].ref})
 			continue
 		}
-		d.out = append(d.out, addr.tests(&slots[i])...)
+		tests := addr.tests(&slots[i])
+		if p, ok := pos[i]; ok {
+			for j := range tests {
+				tests[j].At, tests[j].Of = intPtr(p.at), intPtr(p.of)
+			}
+		}
+		d.out = append(d.out, tests...)
 	}
 	for i := range slots {
+		var t Transform
 		switch slots[i].state {
 		case slotRemoved:
-			d.out = append(d.out, Transform{Op: OpRemove, Path: slots[i].ref})
+			t = Transform{Op: OpRemove, Path: slots[i].ref}
 		case slotReplaced:
-			d.out = append(d.out, Transform{Op: OpReplace, Path: slots[i].ref, Value: addr.valueOf(slots[i].new)})
+			t = Transform{Op: OpReplace, Path: slots[i].ref, Value: addr.valueOf(slots[i].new)}
 		case slotAdded:
-			t := Transform{Op: OpAdd, Path: slots[i].addPath, Value: addr.valueOf(slots[i].new)}
+			t = Transform{Op: OpAdd, Path: slots[i].addPath, Value: addr.valueOf(slots[i].new)}
 			if ref, ok := placement(slots, i); ok {
 				if ref.before {
 					t.Before = ref.path
@@ -362,9 +370,55 @@ func (d *differ) emit(addr addressing, slots []slot) {
 					t.After = ref.path
 				}
 			}
-			d.out = append(d.out, t)
+		default:
+			continue
+		}
+		if p, ok := pos[i]; ok {
+			t.At, t.Of = intPtr(p.at), intPtr(p.of)
+		}
+		d.out = append(d.out, t)
+	}
+}
+
+type elemPos struct{ at, of int }
+
+func intPtr(n int) *int { return &n }
+
+// positions computes the per-slot position advisory for a DUPLICATE by-value
+// scalar array (satisfied-recoil): a removed/replaced element carries its index
+// among the OLD elements, an added element its index among the NEW ones, each
+// with that side's length, so a value that collides on its digest stays
+// resolvable. Nil for every other addressing — unique arrays need no position.
+func positions(addr addressing, slots []slot) map[int]elemPos {
+	if !addr.byValue || !addr.dups {
+		return nil
+	}
+	oldLen, newLen := 0, 0
+	for i := range slots {
+		if slots[i].state.survives() { // present in new
+			newLen++
+		}
+		if slots[i].state != slotAdded { // present in old
+			oldLen++
 		}
 	}
+	out := map[int]elemPos{}
+	oldIdx, newIdx := 0, 0
+	for i := range slots {
+		switch slots[i].state {
+		case slotRemoved, slotReplaced:
+			out[i] = elemPos{oldIdx, oldLen}
+		case slotAdded:
+			out[i] = elemPos{newIdx, newLen}
+		}
+		if slots[i].state != slotAdded {
+			oldIdx++
+		}
+		if slots[i].state.survives() {
+			newIdx++
+		}
+	}
+	return out
 }
 
 // window marks which slots the hunk body shows: every changed slot, and every
@@ -441,6 +495,10 @@ type addressing struct {
 	field string
 	// byValue addresses scalar elements by their own value (/tags/=beta).
 	byValue bool
+	// dups is set when a by-value scalar array has repeated values, so its
+	// elements collide on their digest and need a position advisory to be
+	// resolvable (satisfied-recoil).
+	dups bool
 }
 
 // addressing picks a sequence's addressing per §9.4-R4: a key-match segment
@@ -473,9 +531,12 @@ func (d *differ) addressing(path Path, old, new *DiffNode) addressing {
 		}
 		return a
 	}
-	if allOfKind(oldE, KindScalar) && allOfKind(newE, KindScalar) &&
-		uniqueValues(oldE) && uniqueValues(newE) {
+	if allOfKind(oldE, KindScalar) && allOfKind(newE, KindScalar) {
+		// A scalar array is addressed by content hash (satisfied-recoil). When a
+		// value repeats, the digests collide, so its elements also carry a
+		// position advisory (`~hew:at=`/`~hew:of=`) to stay resolvable.
 		a.byValue = true
+		a.dups = !uniqueValues(oldE) || !uniqueValues(newE)
 	}
 	return a
 }

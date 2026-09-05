@@ -96,6 +96,8 @@ func (e *parseError) Error() string { return fmt.Sprintf("offset %d: %s", e.pos,
 type doc struct {
 	src  []byte
 	root *node
+	// posAt/posOf: the current transform's position advisory (satisfied-recoil).
+	posAt, posOf *int
 }
 
 // parseDoc parses a complete JSONC document: one value, optionally wrapped in

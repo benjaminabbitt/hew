@@ -472,7 +472,7 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			// and the parser reads a `-`/`+` pair as two entries: the test
 			// carries the `-` line's qualifiers, the replace the `+` line's.
 			lines = append(lines, qualLines(e.test())...)
-			lines = append(lines, dial.memberLines('-', e.seg, v)...)
+			lines = append(lines, withAdvice(dial.memberLines('-', e.seg, v), e.test())...)
 			lines = append(lines, qualLines(e.replace)...)
 			lines = append(lines, dial.memberLines('+', e.seg, e.replace.Value)...)
 		case e.remove != nil:
@@ -492,7 +492,7 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			// One `-` line carries both the test and the removal, so it takes
 			// the union of their qualifiers.
 			lines = append(lines, qualLines(e.test(), e.remove)...)
-			lines = append(lines, dial.memberLines('-', e.seg, v)...)
+			lines = append(lines, withAdvice(dial.memberLines('-', e.seg, v), e.remove)...)
 		case e.hint != nil:
 			lines = append(lines, dial.hintLine(e.seg))
 		case e.add != nil:
@@ -507,7 +507,7 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			lines = append(lines, dial.memberLines(' ', e.seg, v)...)
 		case e.plainTest != nil:
 			lines = append(lines, qualLines(e.plainTest)...)
-			lines = append(lines, dial.memberLines(' ', e.seg, e.plainTest.Value)...)
+			lines = append(lines, withAdvice(dial.memberLines(' ', e.seg, e.plainTest.Value), e.plainTest)...)
 		}
 	}
 	if len(lines) == 0 {
@@ -791,6 +791,24 @@ func (d dialect) hintLine(seg Segment) string {
 		return "~ " + seg.String()
 	}
 	return "~ " + d.key(seg.Name)
+}
+
+// withAdvice appends a transform's trailing position advisory (satisfied-recoil:
+// `~hew:at=N ~hew:of=M`) to the element's line — the last of the lines its value
+// rendered to. A transform without position leaves the lines untouched.
+func withAdvice(lines []string, t *Transform) []string {
+	if t == nil || len(lines) == 0 || (t.At == nil && t.Of == nil) {
+		return lines
+	}
+	var b strings.Builder
+	if t.At != nil {
+		fmt.Fprintf(&b, " ~hew:at=%d", *t.At)
+	}
+	if t.Of != nil {
+		fmt.Fprintf(&b, " ~hew:of=%d", *t.Of)
+	}
+	lines[len(lines)-1] += b.String()
+	return lines
 }
 
 func (d dialect) marginate(margin byte, lines []string) []string {
