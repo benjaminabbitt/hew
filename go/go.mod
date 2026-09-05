@@ -3,7 +3,7 @@ module github.com/benjaminabbitt/hew/go
 go 1.25.0
 
 require (
-	github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260722013940-10300d4f7632
+	github.com/benjaminabbitt/tagma/ports/go v0.0.0-20260905164745-0ceff968cc86
 	github.com/cucumber/godog v0.16.0
 	github.com/spf13/afero v1.15.0
 	gopkg.in/yaml.v3 v3.0.1

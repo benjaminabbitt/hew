@@ -241,13 +241,11 @@ func (s Segment) String() string {
 			b.WriteString(strconv.Itoa(s.Index))
 		}
 	case SegHash:
-		// `#` + a tagma tag: namespace(Form) ":" key(Name) "=" value(Hash).
+		// `#` + the tagma tag, rendered by the shared library so the spelling is
+		// the exact inverse of the ParseTag the parser used to read it.
 		b.WriteByte('#')
-		b.WriteString(s.Form)
-		b.WriteByte(':')
-		b.WriteString(s.Name)
-		b.WriteByte('=')
-		b.WriteString(s.Hash)
+		ns, val := s.Form, s.Hash
+		b.WriteString(tagma.Tag{Namespace: &ns, Key: s.Name, Value: &val}.String())
 	}
 	if s.Optional {
 		b.WriteByte('?')
