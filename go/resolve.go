@@ -400,6 +400,8 @@ func (r *resolver) step(n Node, seg Segment) (string, Node, *stepErr) {
 		return strconv.Itoa(n.Len()), nil, nil
 	case SegMatch:
 		return r.stepMatch(n, seg)
+	case SegHash:
+		return r.stepHash(n, seg)
 	default:
 		// Labels, headings, blocks, markers and comment addresses: §9.2's
 		// "no RFC 6902 representation at all".
@@ -436,6 +438,35 @@ func (r *resolver) stepMatch(n Node, seg Segment) (string, Node, *stepErr) {
 	default:
 		return "", nil, &stepErr{ambiguous: true,
 			detail: fmt.Sprintf("%d elements match %s", len(hits), seg.String())}
+	}
+}
+
+// stepHash resolves a SegHash element address (satisfied-recoil): the element
+// whose canonical value hashes to the fragment's digest. A digest matching more
+// than one element is a collision — AMBIGUITY, not a match — and refuses, exactly
+// as a duplicate key-match does; matching zero refuses as a no-match.
+func (r *resolver) stepHash(n Node, seg Segment) (string, Node, *stepErr) {
+	if n.Kind() != KindSeq {
+		return "", nil, &stepErr{detail: "not a sequence"}
+	}
+	var hits []matched
+	for i := 0; i < n.Len(); i++ {
+		e, ok := n.Elem(i)
+		if !ok {
+			continue
+		}
+		if hashScalar(e.Value()) == seg.Hash {
+			hits = append(hits, matched{index: i, node: e})
+		}
+	}
+	switch len(hits) {
+	case 0:
+		return "", nil, &stepErr{detail: "no element matches " + seg.String()}
+	case 1:
+		return strconv.Itoa(hits[0].index), hits[0].node, nil
+	default:
+		return "", nil, &stepErr{ambiguous: true,
+			detail: fmt.Sprintf("%d elements collide on %s", len(hits), seg.String())}
 	}
 }
 

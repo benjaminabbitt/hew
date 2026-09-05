@@ -170,3 +170,33 @@ func TestContextNoneEmitsNoNeighbourHints(t *testing.T) {
 		}
 	}
 }
+
+// SLICE 2 (satisfied-recoil): an untouched SET (by-value scalar) neighbour must
+// not disclose its value either. It rides the hint channel as a content-hash
+// fragment `~ #hew:sha256=<hex>` — the set analog of slice 1's `~ key`, since a
+// set member has no key, only its value, and a one-way digest gives identity
+// without carrying the thing. The edited member itself still shows its value on
+// its own `-`/`+` line (inherent to the op); only the untouched neighbours are
+// de-valued.
+func TestSetContextNeighbourIsNotDisclosed(t *testing.T) {
+	before := []byte(`{"tags": ["alpha", "secret-beta", "gamma"]}`)
+	after := []byte(`{"tags": ["alpha", "gamma"]}`) // secret-beta removed
+
+	tl, err := hew.Invert(hew.FormatJSON, after, before, hew.DiffOptions{Target: "t.json"})
+	if err != nil {
+		t.Fatalf("Invert: %v", err)
+	}
+	patch, err := hew.Render(tl, hew.RenderOptions{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	// The untouched neighbours must not appear by value; they must ride a hash hint.
+	for _, v := range []string{"alpha", "gamma"} {
+		if strings.Contains(string(patch), v) {
+			t.Fatalf("untouched set neighbour %q disclosed:\n%s", v, patch)
+		}
+	}
+	if !strings.Contains(string(patch), "#hew:sha256=") {
+		t.Fatalf("no content-hash hint in the patch:\n%s", patch)
+	}
+}

@@ -53,6 +53,11 @@ type mirrorEntry struct {
 	annot    annotation
 	children []*mirrorEntry
 
+	// hintSeg is a `~` hint line's pre-parsed child segment when it is not a
+	// plain key — a `#hew:sha256=<hex>` set locator (satisfied-recoil). nil for a
+	// key hint, whose key rides `key` like any member.
+	hintSeg *Segment
+
 	// Filled by the lowering pass: the line-scoped annotations attached to
 	// this entry (§7), and the container's entry list, which `? exhaustive`
 	// counts.
@@ -128,10 +133,17 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 
 	text := trimSeparator(bl.text)
 	if bl.margin == marginHint {
-		// A `~` line names a neighbour by KEY only (satisfied-recoil): never a
-		// value, never children. Read as a bare mKV key so it addresses like any
-		// member; the lowerer emits it as OpHint, not a test.
-		e.kind, e.key = mKV, unquoteAttr(text)
+		// A `~` line names a neighbour to locate, never a value (satisfied-recoil):
+		// a MAPPING neighbour by its key, a SET neighbour by a `#hew:sha256=<hex>`
+		// content-hash fragment. Either way the lowerer emits OpHint, not a test.
+		e.kind = mKV
+		if strings.HasPrefix(text, "#") {
+			if hs, ok := segHashFromTag(text[1:]); ok {
+				e.hintSeg = &hs
+				return e, nil
+			}
+		}
+		e.key = unquoteAttr(text)
 		return e, nil
 	}
 	if body, ok := targetCommentText(text); ok {

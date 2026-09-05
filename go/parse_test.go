@@ -3,6 +3,7 @@ package hew
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -159,11 +160,11 @@ func TestParseLowering(t *testing.T) {
 		name: "with no preceding sibling the following one places it before",
 		body: "@@ /tags @@\n+ - aardvark\n  - alpha\n",
 		want: `  - op: test
-    path: /tags/=alpha
+    path: /tags/<<str:alpha>>
     value: alpha
   - op: add
     path: /tags
-    before: /tags/=alpha
+    before: /tags/<<str:alpha>>
     value: aardvark
 `,
 	}, {
@@ -217,48 +218,48 @@ func TestParseLowering(t *testing.T) {
     value: z
 `,
 	}, {
-		name: "a scalar list is addressed by value, never by index",
+		name: "a scalar list is addressed by hash, never by index",
 		body: "@@ /tags @@\n- - beta\n",
 		want: `  - op: test
-    path: /tags/=beta
+    path: /tags/<<str:beta>>
     value: beta
   - op: remove
-    path: /tags/=beta
+    path: /tags/<<str:beta>>
 `,
 	}, {
 		name: "sequence elements pair by offset within an adjacent run",
 		body: "@@ /tags @@\n- - alpha\n- - beta\n+ - ALPHA\n+ - BETA\n+ - gamma\n",
 		want: `  - op: test
-    path: /tags/=alpha
+    path: /tags/<<str:alpha>>
     value: alpha
   - op: test
-    path: /tags/=beta
+    path: /tags/<<str:beta>>
     value: beta
   - op: replace
-    path: /tags/=alpha
+    path: /tags/<<str:alpha>>
     value: ALPHA
   - op: replace
-    path: /tags/=beta
+    path: /tags/<<str:beta>>
     value: BETA
   - op: add
     path: /tags
-    after: /tags/=BETA
+    after: /tags/<<str:BETA>>
     value: gamma
 `,
 	}, {
 		name: "a removed element with no add after it is just a removal",
 		body: "@@ /tags @@\n- - alpha\n  - beta\n+ - gamma\n",
 		want: `  - op: test
-    path: /tags/=alpha
+    path: /tags/<<str:alpha>>
     value: alpha
   - op: test
-    path: /tags/=beta
+    path: /tags/<<str:beta>>
     value: beta
   - op: remove
-    path: /tags/=alpha
+    path: /tags/<<str:alpha>>
   - op: add
     path: /tags
-    after: /tags/=beta
+    after: /tags/<<str:beta>>
     value: gamma
 `,
 	}, {
@@ -450,35 +451,35 @@ func TestParseLowering(t *testing.T) {
     value: 60
 `,
 	}, {
-		name: "a string that would read back as another kind is quoted in an address",
+		name: "a string that would read back as another kind hashes distinctly from it",
 		body: "@@ /tags @@\n- \"8080\"\n- \"true\"\n- \"a b\"\n",
 		want: `  - op: test
-    path: /tags/="8080"
+    path: /tags/<<str:8080>>
     value: "8080"
   - op: test
-    path: /tags/="true"
+    path: /tags/<<str:true>>
     value: "true"
   - op: test
-    path: /tags/="a b"
+    path: /tags/<<str:a b>>
     value: a b
   - op: remove
-    path: /tags/="8080"
+    path: /tags/<<str:8080>>
   - op: remove
-    path: /tags/="true"
+    path: /tags/<<str:true>>
   - op: remove
-    path: /tags/="a b"
+    path: /tags/<<str:a b>>
 `,
 	}, {
-		name: "non-string element addresses keep their decoded kind",
+		name: "non-string element addresses keep their decoded kind in the hash",
 		body: "@@ /flags @@\n  true\n  7\n  null\n",
 		want: `  - op: test
-    path: /flags/=true
+    path: /flags/<<bool:true>>
     value: true
   - op: test
-    path: /flags/=7
+    path: /flags/<<int:7>>
     value: 7
   - op: test
-    path: /flags/=null
+    path: /flags/<<null:null>>
     value: null
 `,
 	}, {
@@ -544,12 +545,27 @@ func TestParseLowering(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := lowered(t, hdr+tc.body); got != tc.want {
-				t.Errorf("lowered transforms:\n%s\nwant:\n%s", got, tc.want)
+			want := subHashTokens(tc.want)
+			if got := lowered(t, hdr+tc.body); got != want {
+				t.Errorf("lowered transforms:\n%s\nwant:\n%s", got, want)
 			}
 		})
 	}
 }
+
+// subHashTokens replaces a `<<kind:text>>` token with the content-hash fragment
+// a scalar of that kind and text is addressed by (satisfied-recoil), so a
+// scalar-set case's expected .hewt keeps the opaque 64-hex digest COMPUTED — via
+// the same hashSegment the code uses — rather than transcribed. `<<null>>` has no
+// text. Example: `path: /tags/<<str:beta>>`.
+func subHashTokens(s string) string {
+	return hashTokenRe.ReplaceAllStringFunc(s, func(m string) string {
+		g := hashTokenRe.FindStringSubmatch(m)
+		return hashSegment(dscalar("!!"+g[1], g[2]).Value).String()
+	})
+}
+
+var hashTokenRe = regexp.MustCompile(`<<(str|int|bool|null):?([^>]*)>>`)
 
 // TestParsePragmaAndPrecedence pins §7.5's precedence ladder: a hunk
 // directive beats the file pragma beats the strict default. The pragma is
@@ -664,7 +680,8 @@ func TestParseTargetLineWins(t *testing.T) {
 	if len(tls) != 2 {
 		t.Fatalf("Parse = %d file sections, want 2", len(tls))
 	}
-	if got := lowered(t, hdr+"@@ /tags @@\n- -- x\n"); !strings.Contains(got, `path: /tags/="-- x"`) {
+	want := "path: /tags/" + hashSegment(dstr("-- x").Value).String()
+	if got := lowered(t, hdr+"@@ /tags @@\n- -- x\n"); !strings.Contains(got, want) {
 		t.Errorf("`- -- x` should lower as a removal of the text `-- x`, got:\n%s", got)
 	}
 }

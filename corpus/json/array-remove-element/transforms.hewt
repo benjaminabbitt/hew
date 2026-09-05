@@ -3,13 +3,13 @@ target: target.json
 format: json
 transforms:
   - op: test
-    path: /tags/=alpha
+    path: /tags/#hew:sha256=b753904d78940f1188be7408053987fb411eca36f64aa300a576f7dad4bf3f1e
     value: alpha
   - op: test
-    path: /tags/=beta
+    path: /tags/#hew:sha256=a5bdd2784405a5f75fddf09a07a373f3c8f1a4cdd5f463e28f74a44e1f4215ea
     value: beta
   - op: test
-    path: /tags/=gamma
+    path: /tags/#hew:sha256=cce90edf02cd6b4778b3362634aac2e321bee68e76edaf5a87ee710139170976
     value: gamma
   - op: remove
-    path: /tags/=beta
+    path: /tags/#hew:sha256=a5bdd2784405a5f75fddf09a07a373f3c8f1a4cdd5f463e28f74a44e1f4215ea

@@ -826,11 +826,8 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 	// is left for the fallbacks; a Markdown heading (`# text`) was already
 	// claimed above.
 	if len(body) > 1 && body[0] == '#' {
-		if tag, terr := tagma.ParseTag(body[1:]); terr == nil && tag.Namespace != nil {
-			seg.Kind, seg.Form, seg.Name = SegHash, *tag.Namespace, tag.Key
-			if tag.Value != nil {
-				seg.Hash = *tag.Value
-			}
+		if hs, ok := segHashFromTag(body[1:]); ok {
+			seg.Kind, seg.Form, seg.Name, seg.Hash = hs.Kind, hs.Form, hs.Name, hs.Hash
 			return seg, nil
 		}
 	}
@@ -876,6 +873,22 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 // starting with "#" that matches neither this nor an extension's shape — a
 // Markdown heading is `#`s and a SPACE — is an ordinary key, which is why
 // "#foo" and "##0" address keys.
+// segHashFromTag parses the text after a `#` fragment marker (a tagma tag) into
+// a SegHash segment (satisfied-recoil). It reports ok only when the tag carries
+// a NAMESPACE, which is what distinguishes `#hew:sha256=<hex>` from a
+// namespace-less `#foo` and from the native `#0`/`#t` comment forms.
+func segHashFromTag(tagText string) (Segment, bool) {
+	tag, err := tagma.ParseTag(tagText)
+	if err != nil || tag.Namespace == nil {
+		return Segment{}, false
+	}
+	seg := Segment{Kind: SegHash, Form: *tag.Namespace, Name: tag.Key}
+	if tag.Value != nil {
+		seg.Hash = *tag.Value
+	}
+	return seg, true
+}
+
 func isComment(body string) bool {
 	if len(body) < 2 || body[0] != '#' {
 		return false

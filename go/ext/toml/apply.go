@@ -260,6 +260,28 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		}
 		return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
 			detail: fmt.Sprintf("%d elements match %s; hew will not pick one (§6.4.2)", count, seg.String())}
+	case hew.SegHash:
+		if n.kind != nSeq {
+			return nil, noMatch("not an array")
+		}
+		var found *elem
+		count := 0
+		for _, el := range n.elems {
+			v, has := comparedValue(el.val, hew.Segment{})
+			if has && seg.MatchesHash(v) {
+				found = el
+				count++
+			}
+		}
+		switch count {
+		case 0:
+			return nil, noMatch("no element matches %s", seg.String())
+		case 1:
+			return &ref{node: found.val, parent: n, elem: found}, nil
+		}
+		// A collision is ambiguity, not a match: refuse (satisfied-recoil).
+		return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
+			detail: fmt.Sprintf("%d elements collide on %s; hew will not pick one", count, seg.String())}
 	}
 	return nil, noMatch("segment kind %v has no TOML representation (§8.4)", seg.Kind)
 }

@@ -604,12 +604,22 @@ const syntheticKind SegmentKind = 250
 // placements from the rendered body.
 func resolveSlot(order []string, bySeg map[string]*contentEntry, seg Segment) string {
 	key := seg.String()
-	if _, ok := bySeg[key]; ok || seg.Kind != SegMatch {
+	if _, ok := bySeg[key]; ok || (seg.Kind != SegMatch && seg.Kind != SegHash) {
 		return key
 	}
 	for _, k := range order {
 		e := bySeg[k]
-		if e != nil && e.add != nil && e.seg.Kind == syntheticKind && valueMatchesSegment(e.add.Value, seg) {
+		if e == nil || e.add == nil || e.seg.Kind != syntheticKind {
+			continue
+		}
+		// A placement that names a sibling this hunk ADDS: match it by the same
+		// identity the applier will — value for a key-match, content hash for a
+		// SegHash (satisfied-recoil) — since the added element has no address of
+		// its own until it is in the document.
+		if seg.Kind == SegHash && seg.MatchesHash(e.add.Value) {
+			return k
+		}
+		if seg.Kind == SegMatch && valueMatchesSegment(e.add.Value, seg) {
 			return k
 		}
 	}
@@ -771,10 +781,15 @@ func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
 	}
 }
 
-// hintLine renders a keys-only neighbour hint (satisfied-recoil): `~ key`, the
-// key in the dialect's own spelling, never a value. The mirror grammar reads it
-// back the same way it reads a member key.
+// hintLine renders a non-asserting neighbour hint (satisfied-recoil), never a
+// value: `~ key` for a mapping neighbour (the key in the dialect's own spelling)
+// and `~ #hew:sha256=<hex>` for a set neighbour (the content-hash fragment,
+// spelled by SegHash.String() -> tagma). The mirror grammar reads each back the
+// same way it addresses the corresponding member.
 func (d dialect) hintLine(seg Segment) string {
+	if seg.Kind == SegHash {
+		return "~ " + seg.String()
+	}
 	return "~ " + d.key(seg.Name)
 }
 

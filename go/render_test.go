@@ -73,11 +73,14 @@ func TestRenderRoundTripRemove(t *testing.T) {
 }
 
 func TestRenderRoundTripScalarSeqElement(t *testing.T) {
+	// A scalar set element addresses by content hash now (satisfied-recoil); the
+	// `- beta` body line still shows the value, so render->parse round-trips.
+	beta := "/tags/" + hfrag(dstr("beta"))
 	tl := TransformList{
 		Target: "target.json", Format: FormatJSON,
 		Transform: []Transform{
-			{Op: OpTest, Path: MustParsePath("/tags/=beta"), Value: mustValNoT("beta")},
-			{Op: OpRemove, Path: MustParsePath("/tags/=beta")},
+			{Op: OpTest, Path: MustParsePath(beta), Value: mustValNoT("beta")},
+			{Op: OpRemove, Path: MustParsePath(beta)},
 		},
 	}
 	rt2(t, tl)
@@ -209,8 +212,8 @@ func TestRenderRoundTripQualifiers(t *testing.T) {
 	}, {
 		name: "a replaced sequence element keeps its before-image address",
 		tl: TransformList{Target: "t.yaml", Format: FormatYAML, Transform: []Transform{
-			{Op: OpTest, Path: MustParsePath("/tags/=alpha"), Value: mustValNoT("alpha")},
-			{Op: OpReplace, Path: MustParsePath("/tags/=alpha"), Value: mustValNoT("ALPHA")},
+			{Op: OpTest, Path: MustParsePath("/tags/" + hfrag(dstr("alpha"))), Value: mustValNoT("alpha")},
+			{Op: OpReplace, Path: MustParsePath("/tags/" + hfrag(dstr("alpha"))), Value: mustValNoT("ALPHA")},
 		}},
 	}, {
 		name: "a free assertion keeps the body position it was written in",

@@ -325,18 +325,23 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		if !show[i] {
 			continue
 		}
-		// A pure context sibling in a MAPPING rides the non-asserting hint channel
-		// (satisfied-recoil): a positioned OpHint (`~ key`) instead of a
-		// value-carrying OpTest. Asserting an untouched neighbour made the patch
-		// brittle — an edit to it refused the whole patch — and copied its value
-		// verbatim, which is how a neighbour's `Authorization: Bearer …` reached an
-		// audit record. A key path asserts nothing and carries no value; being
-		// positioned in body order, it still anchors an add's placement.
+		// A pure context sibling rides the non-asserting hint channel
+		// (satisfied-recoil): a positioned OpHint instead of a value-carrying
+		// OpTest. Asserting an untouched neighbour made the patch brittle — an edit
+		// to it refused the whole patch — and copied its value verbatim, which is
+		// how a neighbour's `Authorization: Bearer …` reached an audit record. The
+		// hint asserts nothing and carries no value; being positioned in body
+		// order, it still anchors an add's placement.
 		//
-		// Sequences and sets keep their current emission until the hash-based
-		// locator (slices 2-3): a by-value element path (/tags/=beta) would itself
-		// carry the value.
-		if slots[i].state == slotSame && !addr.seq && slots[i].old != nil && !slots[i].old.Comment {
+		//   - a MAPPING neighbour rides its KEY path      -> `~ key`
+		//   - a SET (by-value scalar) neighbour rides its content HASH
+		//                                                 -> `~ #hew:sha256=<hex>`
+		//
+		// Keyed and index sequences keep their current emission for now: a keyed
+		// element's context line is already just its identity field (an address),
+		// and an index carries no value in the address.
+		if slots[i].state == slotSame && slots[i].old != nil && !slots[i].old.Comment &&
+			(!addr.seq || addr.byValue) {
 			d.out = append(d.out, Transform{Op: OpHint, Path: slots[i].ref})
 			continue
 		}
@@ -524,7 +529,9 @@ func (a addressing) childPath(path Path, c DiffChild, index, commentIndex int) P
 		}
 		return path.Append(Segment{Kind: SegIndex, Index: index})
 	case a.byValue:
-		return path.Append(Segment{Kind: SegMatch, Value: valueScalar(c.Node.Value)})
+		// A set member is addressed by a hash of its value, never by the value
+		// itself (satisfied-recoil): `/tags/#hew:sha256=<hex>`, not `/tags/=beta`.
+		return path.Append(hashSegment(c.Node.Value))
 	default:
 		return path.Append(Segment{Kind: SegIndex, Index: index})
 	}

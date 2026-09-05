@@ -104,6 +104,27 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 			return ref{}, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
 		}
 		return ref{node: found.value, parent: cur.node, elem: found}, nil
+	case hew.SegHash:
+		if cur.node.kind != kArr {
+			return ref{}, &resolveErr{detail: "not an array"}
+		}
+		var found *element
+		count := 0
+		for _, e := range cur.node.elems {
+			v, has := d.comparedValue(e.value, hew.Segment{})
+			if has && seg.MatchesHash(v) {
+				found = e
+				count++
+			}
+		}
+		switch {
+		case count == 0:
+			return ref{}, &resolveErr{detail: "no element matches " + seg.String()}
+		case count > 1:
+			// A collision is ambiguity, not a match: refuse (satisfied-recoil).
+			return ref{}, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements collide on %s", count, seg.String())}
+		}
+		return ref{node: found.value, parent: cur.node, elem: found}, nil
 	default:
 		return ref{}, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSONC representation (§8.2)", seg.Kind)}
 	}

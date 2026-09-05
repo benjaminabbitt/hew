@@ -428,6 +428,12 @@ func (l *lowerer) testsOnly(path Path, entries []*mirrorEntry, q quals) error {
 // record naming a sibling by path, which positions a change and can NEVER fail a
 // match (satisfied-recoil). It carries no value and no qualifiers.
 func (l *lowerer) hint(path Path, e *mirrorEntry) error {
+	// A set neighbour carries its address as a pre-parsed #hew:sha256 segment; a
+	// mapping neighbour addresses by its key like any member.
+	if e.hintSeg != nil {
+		l.push(Transform{Op: OpHint, Path: path.Append(*e.hintSeg)}, e, quals{})
+		return nil
+	}
 	p, err := l.entryPath(path, e, true)
 	if err != nil {
 		return err
@@ -530,6 +536,12 @@ func (l *lowerer) entryPath(path Path, e *mirrorEntry, before bool) (Path, error
 }
 
 func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
+	// A `~` hint that names a set member carries its address as a pre-parsed
+	// #hew:sha256 segment (satisfied-recoil); it has no key, so an add that
+	// anchors on it must take that segment, not an empty SegKey.
+	if e.hintSeg != nil {
+		return path.Append(*e.hintSeg), nil
+	}
 	switch e.kind {
 	case mKV:
 		return path.Append(Segment{Kind: SegKey, Name: e.key}), nil
@@ -561,12 +573,11 @@ func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
 // keyed one. The parser has no target to count against, so a positional
 // address is not available to it even as a fallback.
 func identityPath(path Path, e *mirrorEntry) (Path, error) {
-	if v, ok := elementScalar(e); ok {
-		s, serr := matchScalar(v, e.line)
-		if serr != nil {
-			return Path{}, serr
-		}
-		return path.Append(Segment{Kind: SegMatch, Value: s}), nil
+	if _, ok := elementScalar(e); ok {
+		// A scalar (set) element is addressed by a hash of its value, never by the
+		// value itself (satisfied-recoil): the same #hew:sha256=<hex> the differ's
+		// childPath emits, so a parsed patch and a differ-produced one agree.
+		return path.Append(hashSegment(e.inline)), nil
 	}
 	name, val, ok := elementKeyField(e)
 	if !ok {

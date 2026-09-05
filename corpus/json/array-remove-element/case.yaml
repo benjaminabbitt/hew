@@ -5,8 +5,9 @@ format: json
 ops: [OP-14, OP-15]
 why: |
   A `-` element in a scalar sequence, and the reorder-survival claim made with bytes
-  that actually exercise it. The parser addresses every listed element by value
-  (`/tags/=beta`), not by index (§4.2), so the fixture deliberately shuffles the
+  that actually exercise it. The parser addresses every listed element by a hash of
+  its value (`/tags/#hew:sha256=…`, satisfied-recoil), not by index (§4.2, §4.5c),
+  so the fixture deliberately shuffles the
   target away from the order the hunk is written in: the hunk reads `alpha`, `beta`,
   `gamma` at what would be indices 0, 1, 2, and the target holds them at 1, 3 and 4
   with an unlisted `delta` ahead of all three and an unlisted `epsilon` interleaved

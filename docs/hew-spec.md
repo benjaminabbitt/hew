@@ -471,6 +471,38 @@ is what makes `#-` worth having — an append needs no such decision. `#t` is ne
 position (a member has at most one trailing comment); an `add` at `#t` where one already
 exists is `HEW014`, and `! upsert` replaces it.
 
+### 4.5c Content-hash fragments — `#hew:sha256=<hex>`
+
+`#` is the third and last of the fragment-locator forms (heading §4.5, comment §4.5b): the
+member of an unordered or by-value collection, addressed by a **hash of its value** rather
+than by the value itself.
+
+```
+/tags/#hew:sha256=1a2b…       the /tags member whose canonical value hashes to this digest
+```
+
+The text after `#` is a tag in the shared **tagma** grammar `(namespace ":")? key ("=" value)?`
+(the same grammar taskloom/ctxloom tags use). hew's own computed locators take the namespace
+`hew`; `#<ext>:…` is reserved for extension namespaces, the same separation §8.8 draws for
+segment shapes. The namespace is what tells a `#hew:…` fragment apart from a `#<n>`/`#t`
+comment (no namespace) and a `# Heading` (a heading marker, not a tag).
+
+Rules:
+
+- **The hash is of the canonical value, and it is cryptographically secure** (§6.3's
+  canonicalization). The digest decides where a write lands in content that is partly
+  attacker-influenceable, so a *findable collision is a targeted mislocation* — a fast
+  non-cryptographic hash is not acceptable. v0 defines `sha256`; another algorithm is another
+  key under the `hew` namespace.
+- **A member's VALUE is never in the address** — only its digest. This is the addressing half
+  of "values are no part of locating": an untouched set neighbour rides a `~ #hew:sha256=…`
+  hint (§3, §9.4-R2) that discloses nothing, and even a removed member is addressed by digest,
+  its value shown on the `-` line only because a removal states what it removes.
+- **A collision is ambiguity, not a match: refuse** (`HEW012`). Two members that hash alike
+  cannot be told apart, so hew names the collision rather than picking one — the addressing
+  half of loud staleness. (Where a member also has a position — a sequence element — that
+  position disambiguates; a keyless set has only the digest.)
+
 ### 4.6 Relative paths in annotations
 
 Inside a hunk, an annotation's path may begin with `.` meaning "relative to the enclosing
@@ -671,6 +703,13 @@ sequences it is semantic.
 Matching compares **values**, not bytes: `port: 8080`, `port:  8080`, and `"port": 8080` all
 match the number 8080. Quoting style, flow-vs-block YAML style, and whitespace inside a line
 are not matched.
+
+**A content-hash fragment (§4.5c) hashes this same canonical value**, so the digest is
+format-independent: a member is the canonical `<kind>:<value>` pair — `!!str:8080` and
+`!!int:8080` are distinct, so a numeric-looking string and the number hash differently, and a
+member found in JSON is found in YAML. (v0 hashes only scalar members, which is the whole of
+the by-value/set case; a canonical form for object members — key ordering and all — is defined
+when a keyless object set needs one.)
 
 Conversely, **application preserves the target's bytes everywhere it did not have to change
 them.** An unchanged sibling keeps its exact original bytes, comments, blank lines, and

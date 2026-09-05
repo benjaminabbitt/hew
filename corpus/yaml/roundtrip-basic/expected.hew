@@ -9,7 +9,7 @@ hew: 1
 + timeout: 60
 
 @@ /tags @@
-  - beta
+~ #hew:sha256=a5bdd2784405a5f75fddf09a07a373f3c8f1a4cdd5f463e28f74a44e1f4215ea
 + - gamma
 
 @@ /mcpServers @@

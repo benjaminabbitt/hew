@@ -20,6 +20,11 @@ func dscalar(tag, text string) *DiffNode {
 func dstr(s string) *DiffNode { return dscalar("!!str", s) }
 func dnum(s string) *DiffNode { return dscalar("!!int", s) }
 
+// hfrag is the content-hash fragment a scalar set member is addressed by
+// (satisfied-recoil): `#hew:sha256=<hex>`. Tests build expected paths with it so
+// the opaque digest stays computed, not transcribed.
+func hfrag(n *DiffNode) string { return hashSegment(n.Value).String() }
+
 func dmap(kv ...any) *DiffNode {
 	n := &DiffNode{Kind: KindMap}
 	y := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -160,16 +165,20 @@ func contextBody(t *testing.T, ctx int) string {
 }
 
 func TestDiffContextRadius(t *testing.T) {
+	hf := func(s string) string { return "/" + hfrag(dstr(s)) }
+	ha, hb, hc, hd, he := hf("a"), hf("b"), hf("c"), hf("d"), hf("e")
+	// A scalar set neighbour is a content-hash HINT, not a value test; the add
+	// anchors on the surviving sibling's hash even at ContextNone (satisfied-recoil).
 	cases := []struct {
 		name string
 		ctx  int
 		want string
 	}{
-		{"zero value is the default of one", 0, "test /=e =e\nadd / =f after:/=e\n"},
-		{"explicit one", 1, "test /=e =e\nadd / =f after:/=e\n"},
-		{"two", 2, "test /=d =d\ntest /=e =e\nadd / =f after:/=e\n"},
-		{"none", ContextNone, "add / =f after:/=e\n"},
-		{"all", ContextAll, "test /=a =a\ntest /=b =b\ntest /=c =c\ntest /=d =d\ntest /=e =e\nadd / =f after:/=e\n"},
+		{"zero value is the default of one", 0, "hint " + he + "\nadd / =f after:" + he + "\n"},
+		{"explicit one", 1, "hint " + he + "\nadd / =f after:" + he + "\n"},
+		{"two", 2, "hint " + hd + "\nhint " + he + "\nadd / =f after:" + he + "\n"},
+		{"none", ContextNone, "add / =f after:" + he + "\n"},
+		{"all", ContextAll, "hint " + ha + "\nhint " + hb + "\nhint " + hc + "\nhint " + hd + "\nhint " + he + "\nadd / =f after:" + he + "\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -320,11 +329,14 @@ func TestDiffIdentityFieldMustBeScalar(t *testing.T) {
 	}
 }
 
-func TestDiffScalarSequenceAddressesByValue(t *testing.T) {
+func TestDiffScalarSequenceAddressesByHash(t *testing.T) {
 	old := dseq(dstr("alpha"), dstr("beta"))
 	new := dseq(dstr("alpha"), dstr("beta"), dstr("gamma"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	want := "test /=beta =beta\nadd / =gamma after:/=beta\n"
+	// beta is the untouched neighbour: a content-hash HINT, not a value assertion.
+	// The add anchors on that same hash (satisfied-recoil).
+	beta := "/" + hfrag(dstr("beta"))
+	want := "hint " + beta + "\nadd / =gamma after:" + beta + "\n"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -345,7 +357,8 @@ func TestDiffPrependUsesBefore(t *testing.T) {
 	old := dseq(dstr("alpha"))
 	new := dseq(dstr("aardvark"), dstr("alpha"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	want := "test /=alpha =alpha\nadd / =aardvark before:/=alpha\n"
+	alpha := "/" + hfrag(dstr("alpha"))
+	want := "hint " + alpha + "\nadd / =aardvark before:" + alpha + "\n"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -358,10 +371,12 @@ func TestDiffPlacementNeverNamesALaterAdd(t *testing.T) {
 	old := dseq(dstr("alpha"))
 	new := dseq(dstr("a1"), dstr("a2"), dstr("alpha"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
+	alpha := "/" + hfrag(dstr("alpha"))
+	a1 := "/" + hfrag(dstr("a1"))
 	want := strings.Join([]string{
-		"test /=alpha =alpha",
-		"add / =a1 before:/=alpha",
-		"add / =a2 after:/=a1",
+		"hint " + alpha,
+		"add / =a1 before:" + alpha,
+		"add / =a2 after:" + a1,
 		"",
 	}, "\n")
 	if got != want {
@@ -574,8 +589,14 @@ func TestNumericLookingStringRoundTripsAsAnAddress(t *testing.T) {
 	old := dseq(dstr("8080"), dstr("x"))
 	new := dseq(dstr("8080"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	if !strings.Contains(got, `/="8080"`) {
-		t.Fatalf("want a quoted identity, got:\n%s", got)
+	// The string "8080" and the number 8080 canonicalize to different tokens
+	// (!!str vs !!int), so they hash differently — the content-hash address keeps
+	// the string/number distinction the old `="8080"` quoting made (satisfied-recoil).
+	if !strings.Contains(got, hfrag(dstr("8080"))) {
+		t.Fatalf("want the string's content hash, got:\n%s", got)
+	}
+	if hfrag(dstr("8080")) == hfrag(dnum("8080")) {
+		t.Fatal("a numeric-looking string must not share a content hash with the number")
 	}
 }
 

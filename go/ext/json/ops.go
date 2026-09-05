@@ -309,13 +309,18 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 				return removeObjMember(d.src, parent, i), nil
 			}
 		}
-	case parent.kind == jArr && (last.Kind == hew.SegMatch || last.Kind == hew.SegIndex):
+	case parent.kind == jArr && (last.Kind == hew.SegMatch || last.Kind == hew.SegIndex || last.Kind == hew.SegHash):
 		for i, e := range parent.elems {
 			if last.Kind == hew.SegIndex && i == last.Index {
 				return removeArrElem(d.src, parent, i), nil
 			}
 			if last.Kind == hew.SegMatch && d.matchesSegMatch(e.value, last) {
 				return removeArrElem(d.src, parent, i), nil
+			}
+			if last.Kind == hew.SegHash {
+				if v, err := d.nodeValue(e.value); err == nil && last.MatchesHash(v) {
+					return removeArrElem(d.src, parent, i), nil
+				}
 			}
 		}
 	}

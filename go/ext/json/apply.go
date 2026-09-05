@@ -201,6 +201,30 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 			return nil, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
 		}
 		return found, nil
+	case hew.SegHash:
+		if n.kind != jArr {
+			return nil, &resolveErr{detail: "not an array"}
+		}
+		var found *jNode
+		count := 0
+		for _, e := range n.elems {
+			v, err := d.nodeValue(e.value)
+			if err != nil {
+				continue
+			}
+			if seg.MatchesHash(v) {
+				found = e.value
+				count++
+			}
+		}
+		if count == 0 {
+			return nil, &resolveErr{detail: "no element matches " + seg.String()}
+		}
+		if count > 1 {
+			// A collision is ambiguity, not a match: refuse (satisfied-recoil).
+			return nil, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements collide on %s", count, seg.String())}
+		}
+		return found, nil
 	default:
 		return nil, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSON representation (§8.1)", seg.Kind)}
 	}

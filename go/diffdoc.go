@@ -1,11 +1,41 @@
 package hew
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// hashScalar is the content-hash identity of a scalar set/sequence member
+// (satisfied-recoil): the SHA-256, hex-encoded, of the member's canonical scalar
+// token. scalarToken is format-independent — a YAML `beta` and a JSON "beta" both
+// canonicalize to `!!str:beta` — so the differ hashing a DiffNode and an applier
+// hashing the element it reparsed produce the SAME digest. It is a cryptographic
+// hash on purpose: the digest decides WHERE a write lands in a file whose content
+// is partly attacker-influenceable, so a findable collision would be a targeted
+// mislocation, not a statistical curiosity.
+func hashScalar(v Value) string {
+	sum := sha256.Sum256([]byte(scalarToken(v)))
+	return hex.EncodeToString(sum[:])
+}
+
+// hashSegment builds the `#hew:sha256=<hex>` fragment segment that addresses a
+// scalar member by its content hash.
+func hashSegment(v Value) Segment {
+	return Segment{Kind: SegHash, Form: "hew", Name: "sha256", Hash: hashScalar(v)}
+}
+
+// MatchesHash reports whether the value v is the member this SegHash addresses:
+// its canonical hash equals the fragment's digest (satisfied-recoil). It is the
+// applier's side of set/sequence hash addressing — every binding calls it so the
+// hash agreement between differ and applier lives in one place. Only "sha256" is
+// defined in v0; any other algorithm never matches.
+func (s Segment) MatchesHash(v Value) bool {
+	return s.Kind == SegHash && s.Name == "sha256" && hashScalar(v) == s.Hash
+}
 
 // DiffNode is one node of the format-neutral document tree the differ walks
 // (§9.4). A format binding builds it from the SAME tree its applier parses —
