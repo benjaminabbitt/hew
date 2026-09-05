@@ -117,10 +117,14 @@ func TestDiffAnchorsAtTheDeepestContainer(t *testing.T) {
 func TestDiffMapRemoveReplaceAdd(t *testing.T) {
 	old := dmap("host", dstr("localhost"), "port", dnum("8080"), "timeout", dnum("30"))
 	new := dmap("port", dnum("8080"), "timeout", dnum("60"), "tls", dstr("on"))
-	got := summarize(diffOK(t, old, new, DiffOptions{}))
+	tl := diffOK(t, old, new, DiffOptions{})
+	got := summarize(tl)
+	// /port is the unchanged neighbour of the changed run: it rides the
+	// non-asserting hint channel (OpHint, `~ port`), not a value OpTest
+	// (satisfied-recoil), positioned in body order where the sibling sits.
 	want := strings.Join([]string{
 		"test /host =localhost",
-		"test /port =8080",
+		"hint /port",
 		"test /timeout =30",
 		"remove /host",
 		"replace /timeout =60",
@@ -182,8 +186,10 @@ func TestDiffCoalescesOverlappingWindows(t *testing.T) {
 	old := dmap("a", dnum("1"), "b", dnum("2"), "c", dnum("3"))
 	new := dmap("a", dnum("9"), "b", dnum("2"), "c", dnum("8"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	if strings.Count(got, "test /b =2") != 1 {
-		t.Fatalf("the shared context sibling must appear exactly once:\n%s", got)
+	// /b neighbours BOTH changed slots; the window coalesces so it is ONE hint,
+	// not one per changed slot (satisfied-recoil: context is a hint now).
+	if strings.Count(got, "hint /b") != 1 {
+		t.Fatalf("the shared context sibling must appear exactly once as a hint:\n%s", got)
 	}
 }
 

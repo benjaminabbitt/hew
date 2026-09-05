@@ -164,8 +164,8 @@ func toyApply(target []byte, tl TransformList) ([]byte, error) {
 		}
 	}
 	for _, t := range tl.Transform {
-		if t.Op == OpTest {
-			continue
+		if t.Op == OpTest || t.Op == OpHint {
+			continue // OpHint is the non-asserting hint channel (satisfied-recoil)
 		}
 		if err := toyMutate(root, t); err != nil {
 			return nil, err

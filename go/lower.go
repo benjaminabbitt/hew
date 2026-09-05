@@ -204,6 +204,8 @@ func (l *lowerer) emit(path Path, nodes []*mirrorEntry, surface Surface, q quals
 		switch {
 		case !e.node():
 			err = l.freeAssert(path, e)
+		case e.margin == marginHint:
+			err = l.hint(path, e)
 		case e.inBefore():
 			err = l.tests(path, e, q)
 		}
@@ -217,7 +219,7 @@ func (l *lowerer) emit(path Path, nodes []*mirrorEntry, surface Surface, q quals
 		return err
 	}
 	for i, e := range nodes {
-		if !e.node() || e.margin == marginContext {
+		if !e.node() || e.margin == marginContext || e.margin == marginHint {
 			continue
 		}
 		eq := q
@@ -410,6 +412,8 @@ func (l *lowerer) testsOnly(path Path, entries []*mirrorEntry, q quals) error {
 		switch {
 		case !e.node():
 			err = l.freeAssert(path, e)
+		case e.margin == marginHint:
+			err = l.hint(path, e)
 		case e.inBefore():
 			err = l.tests(path, e, q)
 		}
@@ -417,6 +421,18 @@ func (l *lowerer) testsOnly(path Path, entries []*mirrorEntry, q quals) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// hint emits the non-asserting OpHint for a `~` neighbour line: a keys-only
+// record naming a sibling by path, which positions a change and can NEVER fail a
+// match (satisfied-recoil). It carries no value and no qualifiers.
+func (l *lowerer) hint(path Path, e *mirrorEntry) error {
+	p, err := l.entryPath(path, e, true)
+	if err != nil {
+		return err
+	}
+	l.push(Transform{Op: OpHint, Path: p}, e, quals{})
 	return nil
 }
 

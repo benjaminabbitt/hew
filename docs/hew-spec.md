@@ -52,7 +52,7 @@ the later Rust port (P6) are conformant exactly insofar as they pass the same co
 
 1. [Why Hew exists, and the one property everything else serves](#1-why-hew-exists)
 2. [File format: preamble, file sections, hunks](#2-file-format)
-3. [Margins: the six column-1 characters](#3-margins)
+3. [Margins: the seven column-1 characters](#3-margins)
 4. [Hew paths: the address grammar](#4-hew-paths)
 5. [Hunk semantics: the two projections](#5-hunk-semantics-the-two-projections)
 6. [Context, position, exhaustiveness — and the tolerance model](#6-context-position-and-exhaustiveness)
@@ -242,6 +242,7 @@ Column 1 is the margin. Column 2 is a mandatory single space. The body text begi
 | `` ` ` `` (space) | **context** | This node must exist and be equal. It is not modified. It pins insertion position (§6.2). |
 | `-` | **remove** | This node must exist and be equal. It is deleted. |
 | `+` | **add** | This node is created. It must not already exist (unless `! idempotent`). |
+| `~` | **hint** | A neighbour named by **key only** — never a value. It **informs** where a change lands and pins insertion position like a context line, but it is **non-asserting**: it can never fail a match and is part of neither projection (§9.4-R2). |
 | `?` | **assert** | An annotation line carrying an assertion (§7.1, §7.4). Not part of either projection. |
 | `!` | **directive** | An annotation line changing how application works (§7.3, §7.5). Not part of either projection. |
 | `#` | **comment** | A hew comment. Ignored entirely. Not part of either projection. |
@@ -250,7 +251,7 @@ A completely blank line (zero characters, or whitespace only) is **insignificant
 visual separator and is ignored. To express a blank line in the *target*, see §8.6 — only
 Markdown has a body-line notion of blank, and there it is structural rather than written.
 
-A line whose column 1 is none of the six margin characters is `HEW001 parse-error`. There is
+A line whose column 1 is none of the seven margin characters is `HEW001 parse-error`. There is
 no "loose" mode.
 
 **Target comments are ordinary body text.** A `#` comment in a YAML/TOML target, or a
@@ -516,8 +517,10 @@ format instead of once per operation.
 - the **before-image** = every context and `-` line, margins stripped;
 - the **after-image** = every context and `+` line, margins stripped.
 
-Annotation and comment lines are in neither. Both images are parsed by the target format's
-**fragment parser** as a fragment of the same node kind as the anchor.
+Annotation, comment, and hint (`~`) lines are in neither. A `~` line carries a key with no
+value, so it has nothing to contribute to either image; it informs location only (§9.4-R2).
+Both images are parsed by the target format's **fragment parser** as a fragment of the same
+node kind as the anchor.
 
 Application is then defined in three steps:
 
@@ -600,7 +603,9 @@ And the derived op list (§9):
 
 Note what the `test` ops are: **every context line and every removal becomes an assertion.**
 That is where loud staleness lives in the lowered form, and it is why a hew patch is
-down-compilable to 6902 without losing its safety property.
+down-compilable to 6902 without losing its safety property. The one exception is a `~` hint
+line: it lowers to a non-asserting `hint` op (§9.4-R2), never a `test`, so it carries no
+staleness and adds nothing to either projection.
 
 ### 5.1 Partial elements in a match
 
@@ -632,12 +637,18 @@ purpose and cheaply.
 
 ### 6.2 Insertion position comes from surrounding context
 
-An added node is inserted **relative to the context lines around it in the hunk body**:
+An added node is inserted **relative to the surviving siblings around it in the hunk body** —
+context lines, `~` hint lines, and (looking back) `-` lines all count, since each names a
+sibling whose position is known:
 
-- If a context (or `-`) sibling precedes the `+` run, insert immediately after that sibling.
-- Otherwise, if a context sibling follows the `+` run, insert immediately before it.
-- Otherwise (no sibling context at all in this container), insert at the **end** of the
-  container.
+- If a context, `~` hint, or `-` sibling precedes the `+` run, insert immediately after that
+  sibling.
+- Otherwise, if a context or `~` hint sibling follows the `+` run, insert immediately before it.
+- Otherwise (no sibling at all in this container), insert at the **end** of the container.
+
+A `~` hint earns its keystrokes here exactly as a context line does — it pins position — but
+without asserting the neighbour's value, which is what lets an untouched sibling anchor a
+change without being copied into the patch (§9.4-R2).
 
 This is unified diff's rule, and it is the reason context lines earn their keystrokes:
 
@@ -1373,7 +1384,9 @@ Purely textual. No target is read. For each hunk, in file order:
 1. Take the anchor path verbatim. Emit no transform for this step.
 2. For each context and `-` line, in body order, emit a `test` transform at that node's Hew
    path with its before-image value. For a subset-matched object context line, emit one
-   `test` per listed field, not one for the object.
+   `test` per listed field, not one for the object. For each `~` hint line, emit a `hint`
+   transform at that node's Hew path — **no value, and never a `test`**: a hint asserts
+   nothing (§9.4-R2). It stays in body order so its position anchors an adjacent add (§6.2).
 3. For each `? ` assertion, emit the corresponding transform: `expect` → `test`; `absent` →
    `test` with `absent: true`; `exhaustive` → `test` with `exhaustive: true`; `count`/`kind` →
    `test` with the corresponding qualifier. (These qualifiers are Hew extensions to 6902's
@@ -1455,9 +1468,21 @@ each changed run. The unit is **siblings within the anchored container**, not li
 - Two changed runs whose context windows overlap or abut are coalesced into one hunk, exactly
   as unified diff coalesces hunks.
 
-Because context lines compile into assertions (§9.0), the radius is a **strictness dial, not
-a verbosity dial** — a fact the CLI's help text must state, since users will otherwise reach
-for `--context=0` to make patches smaller and quietly disable drift detection.
+**An unchanged mapping neighbour is emitted as a `~` hint, not a context assertion.** A patch
+that carried context *asserted* it, which had two costs: an edit to an untouched neighbour
+refused the whole patch (HEW010) for a node that was never the author's business, and the
+neighbour's **value was copied verbatim into the patch** — the disclosure that put a sibling's
+`Authorization: Bearer …` into a stored reversal. So the differ emits an unchanged
+mapping sibling within the radius as a keys-only `~` hint (§3): it names the neighbour to
+locate and position the change, asserts nothing, and never carries the value. Sequence and set
+neighbours keep value context lines for now, pending the hash-based locator that gives an
+unordered or positional member an identity without carrying it.
+
+Because the still-asserting context lines compile into assertions (§9.0), the radius remains a
+**strictness dial, not a verbosity dial** for them — a fact the CLI's help text must state,
+since users will otherwise reach for `--context=0` to make patches smaller and quietly disable
+drift detection. For mapping neighbours the radius is instead a **location dial**: more hints
+make a change easier to place, and — because a hint can never fail — never more brittle.
 
 **R3 — Anchor selection.** The anchor of a hunk is the deepest container that contains every
 changed node in that hunk. Deterministic, and it produces the shallowest bodies.
@@ -1566,8 +1591,9 @@ per target, applied in order under §10.5's per-file atomicity.
 The IR is **ASM**: few primitives, stable, composable. Richness lives in the notation and in
 the compiler (the parser), never in the IR. The derivation that produced this set is §11.10.
 
-**Five operations.** RFC 6902's six, minus `move`, which is a lossless composition
-(`copy` + `remove`) and therefore desugars.
+**Five operations, plus one non-asserting hint.** The five are RFC 6902's six minus `move`,
+which is a lossless composition (`copy` + `remove`) and therefore desugars. `hint` is a hew
+addition with no RFC 6902 analog: it is the only record that neither mutates nor asserts.
 
 | `op` | Meaning | Why it cannot be composed away |
 |---|---|---|
@@ -1576,16 +1602,17 @@ the compiler (the parser), never in the IR. The derivation that produced this se
 | `remove` | Delete a node. | The only deletion primitive. |
 | `replace` | Swap a node's value **in place**. | `remove` + `add` provably loses the node's attached comments (§8.2) and re-derives its position. Not the same operation. |
 | `copy` | Create a node from the value at another **path in the target**. | The only primitive that takes its value *by reference*. An `add` would have to restate the value, which requires reading the target and would break the IR's target-independence. |
+| `hint` | Name a neighbour by path to **locate** a change; never asserts, never mutates. | The only non-asserting record. A `test` would fail on drift and disclose the value; a `hint` does neither — that difference is the whole point (§9.4-R2). Carries `path` (and `before`/`after` for position); no `value`. |
 
 **Fields.**
 
 | Field | Applies to | Meaning |
 |---|---|---|
-| `op` | all | One of the five above. |
+| `op` | all | One of the five above, or `hint`. |
 | `path` | all | Hew path (§4), abstract form. **All addressing richness lives here** — key-match, `=value`, headings, blocks, comments, markers. |
 | `from` | `copy` | Source Hew path. |
-| `value` | `add`, `replace`, `test` | The value, in YAML. |
-| `before` / `after` | `add`, `copy` | Placement (§6.2). Mutually exclusive; absence means append at end. |
+| `value` | `add`, `replace`, `test` | The value, in YAML. Never on `hint`. |
+| `before` / `after` | `add`, `copy`, `hint` | Placement (§6.2). Mutually exclusive; absence means append at end. |
 | `on_conflict` | `add` | `fail` (default, OP-02) \| `keep` (OP-04) \| `replace` (OP-03). |
 | `absent` | `test` | Assert non-existence. |
 | `count` | `test` | Assert child count. |
@@ -2445,6 +2472,12 @@ parser that compiles it.
 **The promotion test.** A surveyed verb becomes a core op **only if** no composition of
 existing core ops plus addressing produces the same observable result. "Observable" includes
 byte preservation and attached comments, because those are contract in this format (§6.3).
+
+**`hint` is outside this count.** The 52→5 reduction is over *operations* — things that mutate
+or assert. `hint` (§9.6) does neither: it is the non-asserting location channel, and it exists
+because carrying a neighbour as an assertion has costs an operation-reduction cannot address
+(brittleness and value disclosure — §9.4-R2). It is not a 53rd surveyed verb that survived;
+it is a different kind of record, added on purpose alongside the five.
 
 **What survived, and what it displaced:**
 

@@ -343,7 +343,7 @@ func TestApplyFileOutputWithSeveralSectionsIsUsage(t *testing.T) {
 
 // --- the reversal patch (O40) -----------------------------------------------
 
-const undoYAML = "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n  port: 8080\n- timeout: 60\n+ timeout: 30\n"
+const undoYAML = "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n~ port\n- timeout: 60\n+ timeout: 30\n"
 
 func TestApplyFileReversalWritesTheUndoPatch(t *testing.T) {
 	fsys := memfs(t, map[string]string{"/w/config.yaml": targetYAML})

@@ -7,5 +7,5 @@ hew: 1
 + timeout = 60
 
 @@ /server @@
-  port = 8080
+~ port
 + tls = true

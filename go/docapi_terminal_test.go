@@ -90,10 +90,15 @@ func TestRenderPatchCarriesRealContext(t *testing.T) {
 	if !strings.Contains(got, "- host: localhost") || !strings.Contains(got, "+ host: example.com") {
 		t.Fatalf("patch does not show the change:\n%s", got)
 	}
-	// port is the sibling one position away: at radius 1 it is context, and a
-	// recorded-IR-only render would not know it exists.
-	if !strings.Contains(got, " port: 8080") {
-		t.Fatalf("patch carries no sibling context:\n%s", got)
+	// port is the sibling one position away: at radius 1 it is the changed run's
+	// neighbourhood, and a recorded-IR-only render would not know it exists. It
+	// now rides the non-asserting hint channel as a KEY (satisfied-recoil), so the
+	// patch names the neighbour but never copies its value.
+	if !strings.Contains(got, "~ port") {
+		t.Fatalf("patch carries no sibling hint:\n%s", got)
+	}
+	if strings.Contains(got, "8080") {
+		t.Fatalf("patch discloses the untouched neighbour's value:\n%s", got)
 	}
 	if !strings.Contains(got, "--- config.toy") {
 		t.Fatalf("patch does not name the target:\n%s", got)

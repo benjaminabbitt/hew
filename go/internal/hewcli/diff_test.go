@@ -49,7 +49,7 @@ func TestDiffWritesAPatchToStdout(t *testing.T) {
 	// The `--- ` line names the OLD side (§9.4-R7, Appendix B.2.1, ruling
 	// O39): the patch applies to old, so naming new would stamp a file the
 	// applier never opens.
-	want := "hew: 1\n\n--- old.yaml format=yaml\n\n@@ /server @@\n  port: 8080\n- timeout: 30\n+ timeout: 60\n"
+	want := "hew: 1\n\n--- old.yaml format=yaml\n\n@@ /server @@\n~ port\n- timeout: 30\n+ timeout: 60\n"
 	if stdout != want {
 		t.Fatalf("stdout:\n%q\nwant:\n%q", stdout, want)
 	}
@@ -183,15 +183,15 @@ func TestDiffContextFlag(t *testing.T) {
 	dir := twoSided(t)
 	for _, flag := range []string{"-U", "--context"} {
 		_, tight, _ := run(t, dir, "diff", flag, "0", "old.yaml", "new.yaml")
-		if strings.Contains(tight, "port: 8080") {
-			t.Fatalf("%s 0 must emit no context:\n%s", flag, tight)
+		if strings.Contains(tight, "~ ") {
+			t.Fatalf("%s 0 must emit no neighbour hints:\n%s", flag, tight)
 		}
 		_, all, _ := run(t, dir, "diff", flag, "all", "old.yaml", "new.yaml")
-		if !strings.Contains(all, "  host: localhost") {
-			t.Fatalf("%s all must emit every sibling:\n%s", flag, all)
+		if !strings.Contains(all, "~ host") {
+			t.Fatalf("%s all must hint every sibling:\n%s", flag, all)
 		}
 		_, two, _ := run(t, dir, "diff", flag, "2", "old.yaml", "new.yaml")
-		if !strings.Contains(two, "  host: localhost") {
+		if !strings.Contains(two, "~ host") {
 			t.Fatalf("%s 2 must reach the second sibling:\n%s", flag, two)
 		}
 	}
@@ -351,7 +351,7 @@ func TestDiffGitAnchorResolvesFromTheCommit(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit %d (%s)", exit, stderr)
 	}
-	want := "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n  port: 8080\n- timeout: 30\n+ timeout: 60\n"
+	want := "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n~ port\n- timeout: 30\n+ timeout: 60\n"
 	if stdout != want {
 		t.Fatalf("stdout:\n%q\nwant:\n%q", stdout, want)
 	}

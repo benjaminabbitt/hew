@@ -51,6 +51,9 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 			}
 			continue
 		}
+		if t.Op == hew.OpHint {
+			continue // the non-asserting hint channel (satisfied-recoil): no edit, no assertion
+		}
 		es, err := r.planOne(t)
 		if err != nil {
 			return nil, err

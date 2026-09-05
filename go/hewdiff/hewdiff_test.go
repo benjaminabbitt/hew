@@ -112,13 +112,13 @@ func TestDiffContextFlowsThrough(t *testing.T) {
 	old := "a: 1\nb: 2\nc: 3\nd: 4\n"
 	new := "a: 1\nb: 2\nc: 3\nd: 9\n"
 	tight := diffText(t, old, new, hew.FormatYAML, hew.DiffOptions{Context: hew.ContextNone})
-	if strings.Contains(tight, "  c: 3") {
-		t.Fatalf("radius 0 emits no context:\n%s", tight)
+	if strings.Contains(tight, "~ ") {
+		t.Fatalf("radius 0 emits no neighbour hints:\n%s", tight)
 	}
 	all := diffText(t, old, new, hew.FormatYAML, hew.DiffOptions{Context: hew.ContextAll})
-	for _, want := range []string{"  a: 1", "  b: 2", "  c: 3"} {
+	for _, want := range []string{"~ a", "~ b", "~ c"} {
 		if !strings.Contains(all, want) {
-			t.Fatalf("radius all must emit every sibling, missing %q:\n%s", want, all)
+			t.Fatalf("radius all must hint every sibling, missing %q:\n%s", want, all)
 		}
 	}
 }

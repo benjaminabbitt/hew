@@ -3,7 +3,7 @@ hew: 1
 --- old.json format=json
 
 @@ /server @@
-  "port": 8080
+~ "port"
 - "timeout": 30
 + "timeout": 60
 + "tls": true

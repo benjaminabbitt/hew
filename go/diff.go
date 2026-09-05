@@ -325,6 +325,21 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		if !show[i] {
 			continue
 		}
+		// A pure context sibling in a MAPPING rides the non-asserting hint channel
+		// (satisfied-recoil): a positioned OpHint (`~ key`) instead of a
+		// value-carrying OpTest. Asserting an untouched neighbour made the patch
+		// brittle — an edit to it refused the whole patch — and copied its value
+		// verbatim, which is how a neighbour's `Authorization: Bearer …` reached an
+		// audit record. A key path asserts nothing and carries no value; being
+		// positioned in body order, it still anchors an add's placement.
+		//
+		// Sequences and sets keep their current emission until the hash-based
+		// locator (slices 2-3): a by-value element path (/tags/=beta) would itself
+		// carry the value.
+		if slots[i].state == slotSame && !addr.seq && slots[i].old != nil && !slots[i].old.Comment {
+			d.out = append(d.out, Transform{Op: OpHint, Path: slots[i].ref})
+			continue
+		}
 		d.out = append(d.out, addr.tests(&slots[i])...)
 	}
 	for i := range slots {

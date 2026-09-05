@@ -74,6 +74,14 @@ const (
 	OpReplace OpKind = "replace"
 	OpCopy    OpKind = "copy"
 
+	// OpHint is the non-asserting HINT CHANNEL (satisfied-recoil): a positioned,
+	// keys-only body-line record (`~ key`) that INFORMS where a change lands and
+	// can NEVER fail a match. It names a neighbour by key path only — never its
+	// value — so a patch does not copy an untouched sibling's value, and an edit
+	// to that sibling cannot refuse the patch. It positions itself in body order
+	// like any other body line, which is what lets an add anchor on it.
+	OpHint OpKind = "hint"
+
 	// There is deliberately no OpMove. "move" is accepted on .hewt input as
 	// sugar and normalized to OpCopy + OpRemove (§11.10 reduction 1); it
 	// never appears in a Transform or in emitted output, which
@@ -85,7 +93,7 @@ const (
 // it is input sugar, not an operation.
 func (op OpKind) Valid() bool {
 	switch op {
-	case OpTest, OpAdd, OpRemove, OpReplace, OpCopy:
+	case OpTest, OpAdd, OpRemove, OpReplace, OpCopy, OpHint:
 		return true
 	}
 	return false

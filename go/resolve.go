@@ -95,6 +95,12 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 	r := &resolver{target: tl.Target, root: root}
 	out := make([]ResolvedOp, 0, len(tl.Transform))
 	for i := range tl.Transform {
+		// OpHint is the non-asserting hint channel (satisfied-recoil): it names a
+		// neighbour to help LOCATE a change and can never fail a match, so it
+		// resolves to no edit and no assertion — it is simply skipped here.
+		if tl.Transform[i].Op == OpHint {
+			continue
+		}
 		op, err := r.transform(tl.Transform[i])
 		if err != nil {
 			// OP-06: an OPTIONAL transform whose address is absent is a

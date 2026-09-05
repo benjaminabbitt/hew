@@ -3,6 +3,6 @@ hew: 1
 --- config.yaml format=yaml
 
 @@ /server @@
-  port: 8080
+~ port
 - timeout: 30
 + timeout: 60

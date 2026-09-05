@@ -52,6 +52,7 @@ const (
 	marginAssert  = '?'
 	marginDirect  = '!'
 	marginComment = '#'
+	marginHint    = '~' // satisfied-recoil: a keys-only, non-asserting neighbour line
 )
 
 // Preamble keys (§2.1). No others are defined in v0; an unknown key is
@@ -462,10 +463,10 @@ type bodyLine struct {
 func classify(ln srcLine) (bodyLine, error) {
 	m := ln.text[0]
 	switch m {
-	case marginContext, marginRemove, marginAdd, marginAssert, marginDirect, marginComment:
+	case marginContext, marginRemove, marginAdd, marginAssert, marginDirect, marginComment, marginHint:
 	default:
 		return bodyLine{}, parseErr(ln.num, "",
-			"%q is not a margin character; column 1 must be one of \" -+?!#\" (§3)", string(m))
+			"%q is not a margin character; column 1 must be one of \" -+?!#~\" (§3)", string(m))
 	}
 	if len(ln.text) > 1 && ln.text[1] != ' ' {
 		return bodyLine{}, parseErr(ln.num, "",

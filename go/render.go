@@ -288,6 +288,7 @@ type contentEntry struct {
 	remove     *Transform
 	replace    *Transform
 	add        *Transform
+	hint       *Transform // OpHint: a keys-only `~ key` neighbour line
 
 	// A free-standing assertion (§7.1) occupies a body slot of its own,
 	// keeping the position it holds in the transform stream: the parser
@@ -333,6 +334,12 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 	for i := range ts {
 		t := &ts[i]
 		switch t.Op {
+		case OpHint:
+			rel, ok := relSegs(anchor, t.Path)
+			if !ok || len(rel) != 1 {
+				return nil, fmt.Errorf("hew: render: hint at %s does not name a direct child of %s", t.Path, anchor)
+			}
+			getEntry(rel[0]).hint = t
 		case OpTest:
 			if t.Exhaustive || t.Absent || t.Count != nil || t.NodeKind != nil {
 				slot(t)
@@ -486,6 +493,8 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			// the union of their qualifiers.
 			lines = append(lines, qualLines(e.test(), e.remove)...)
 			lines = append(lines, dial.memberLines('-', e.seg, v)...)
+		case e.hint != nil:
+			lines = append(lines, dial.hintLine(e.seg))
 		case e.add != nil:
 			lines = append(lines, qualLines(e.add)...)
 			lines = append(lines, dial.memberLines('+', e.seg, e.add.Value)...)
@@ -760,6 +769,13 @@ func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
 		}
 		return d.marginate(margin, out)
 	}
+}
+
+// hintLine renders a keys-only neighbour hint (satisfied-recoil): `~ key`, the
+// key in the dialect's own spelling, never a value. The mirror grammar reads it
+// back the same way it reads a member key.
+func (d dialect) hintLine(seg Segment) string {
+	return "~ " + d.key(seg.Name)
 }
 
 func (d dialect) marginate(margin byte, lines []string) []string {

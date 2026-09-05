@@ -69,11 +69,11 @@ type mirrorEntry struct {
 // the entry belongs to: the before-image is every context and `-` line, the
 // after-image every context and `+` line (§5).
 func (e *mirrorEntry) inBefore() bool {
-	return e.margin == marginContext || e.margin == marginRemove
+	return e.margin == marginContext || e.margin == marginRemove || e.margin == marginHint
 }
 
 func (e *mirrorEntry) inAfter() bool {
-	return e.margin == marginContext || e.margin == marginAdd
+	return e.margin == marginContext || e.margin == marginAdd || e.margin == marginHint
 }
 
 // node reports whether the entry denotes a node of the mirrored document, as
@@ -127,6 +127,13 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 	}
 
 	text := trimSeparator(bl.text)
+	if bl.margin == marginHint {
+		// A `~` line names a neighbour by KEY only (satisfied-recoil): never a
+		// value, never children. Read as a bare mKV key so it addresses like any
+		// member; the lowerer emits it as OpHint, not a test.
+		e.kind, e.key = mKV, unquoteAttr(text)
+		return e, nil
+	}
 	if body, ok := targetCommentText(text); ok {
 		e.kind, e.comment = mComment, body
 		return e, nil
