@@ -325,7 +325,7 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 				matches = append(matches, i)
 			}
 		}
-		if idx, ok := hew.PositionPick(matches, len(parent.elems), d.posAt, d.posOf); ok {
+		if idx, ok := hew.PositionPick(matches, len(parent.elems), d.posAt, d.posLength); ok {
 			return removeArrElem(d.src, parent, idx), nil
 		}
 		if len(matches) > 1 {

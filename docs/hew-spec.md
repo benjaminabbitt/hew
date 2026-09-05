@@ -503,15 +503,15 @@ Rules:
   absent other signal hew names the collision rather than picking one — the addressing half of
   loud staleness.
 
-**Position advisory — `~hew:at=<front> ~hew:of=<length>`.** A sequence element carries a
+**Position advisory — `~hew:at=<front> ~hew:length=<length>`.** A sequence element carries a
 second, non-asserting signal alongside its hash: its index from the front and the list's
-length, as trailing `~`+tagma tags on the element's line (`- beta ~hew:at=2 ~hew:of=3`). The
+length, as trailing `~`+tagma tags on the element's line (`- beta ~hew:at=2 ~hew:length=3`). The
 hash is identity; the position disambiguates. When a value repeats, the digests collide and
 the position picks the meant element — but only when the list is still the recorded length, so
 a drifted list refuses rather than guesses (a scored locator will later weigh a drifted
 position instead). The advisory can never *fail* a match; it only chooses among hash matches,
 so a keyless set (no position) still refuses a collision, and a unique element (one match)
-ignores it. `at`/`of` are integers, never a path, so they carry no `/` to fight the pointer
+ignores it. `at`/`length` are integers, never a path, so they carry no `/` to fight the pointer
 splitter. `~` is the advisory margin's inline twin: `~ key`/`~ #hew:sha256=…` name a neighbour
 on their own line, `~hew:key=value` annotates the line it trails.
 

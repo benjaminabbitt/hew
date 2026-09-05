@@ -35,11 +35,11 @@ func hashSegment(v Value) Segment {
 // length `of`, so a drifted list refuses (ok=false) rather than guess; the
 // scored locator will later weigh a drifted position instead of refusing. ok is
 // false when the position cannot decide, which the caller reports as ambiguous.
-func PositionPick(matches []int, curLen int, at, of *int) (idx int, ok bool) {
+func PositionPick(matches []int, curLen int, at, length *int) (idx int, ok bool) {
 	if len(matches) == 1 {
 		return matches[0], true
 	}
-	if len(matches) == 0 || at == nil || of == nil || *of != curLen {
+	if len(matches) == 0 || at == nil || length == nil || *length != curLen {
 		return 0, false
 	}
 	for _, m := range matches {

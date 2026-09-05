@@ -523,7 +523,7 @@ func (l *lowerer) push(t Transform, e *mirrorEntry, q quals) {
 	// Fold the line's position advisory onto the transform (satisfied-recoil): it
 	// rides both the before-image test and the mutation that address the element.
 	t.At = adviceInt(e.advice, "hew", "at")
-	t.Of = adviceInt(e.advice, "hew", "of")
+	t.Length = adviceInt(e.advice, "hew", "length")
 	l.out = append(l.out, t)
 }
 

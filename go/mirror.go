@@ -158,7 +158,7 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 		e.kind, e.comment = mComment, body
 		return e, nil
 	}
-	// Trailing advisory tags (satisfied-recoil): `<value> ~hew:at=N ~hew:of=M`.
+	// Trailing advisory tags (satisfied-recoil): `<value> ~hew:at=N ~hew:length=M`.
 	// Split them off before the value is parsed; the lowerer folds them onto the
 	// mutation. They ride any value-bearing line (a `-`/`+`/context element).
 	var aerr error
@@ -217,7 +217,7 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 }
 
 // splitTrailingAdvice peels the trailing `~<ns>:key=value` advisory tags off a
-// body line's content (satisfied-recoil): `dup ~hew:at=2 ~hew:of=3` splits into
+// body line's content (satisfied-recoil): `dup ~hew:at=2 ~hew:length=3` splits into
 // the value `dup` and the two tags. A run begins at the first unquoted,
 // unbracketed space that is followed by `~` and a NAMESPACED tagma tag; a `~`
 // inside the value, or one not opening a namespaced tag, stays part of the value.

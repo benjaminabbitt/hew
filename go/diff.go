@@ -349,7 +349,7 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		tests := addr.tests(&slots[i])
 		if p, ok := pos[i]; ok {
 			for j := range tests {
-				tests[j].At, tests[j].Of = intPtr(p.at), intPtr(p.of)
+				tests[j].At, tests[j].Length = intPtr(p.at), intPtr(p.length)
 			}
 		}
 		d.out = append(d.out, tests...)
@@ -374,13 +374,13 @@ func (d *differ) emit(addr addressing, slots []slot) {
 			continue
 		}
 		if p, ok := pos[i]; ok {
-			t.At, t.Of = intPtr(p.at), intPtr(p.of)
+			t.At, t.Length = intPtr(p.at), intPtr(p.length)
 		}
 		d.out = append(d.out, t)
 	}
 }
 
-type elemPos struct{ at, of int }
+type elemPos struct{ at, length int }
 
 func intPtr(n int) *int { return &n }
 
@@ -534,7 +534,7 @@ func (d *differ) addressing(path Path, old, new *DiffNode) addressing {
 	if allOfKind(oldE, KindScalar) && allOfKind(newE, KindScalar) {
 		// A scalar array is addressed by content hash (satisfied-recoil). When a
 		// value repeats, the digests collide, so its elements also carry a
-		// position advisory (`~hew:at=`/`~hew:of=`) to stay resolvable.
+		// position advisory (`~hew:at=`/`~hew:length=`) to stay resolvable.
 		a.byValue = true
 		a.dups = !uniqueValues(oldE) || !uniqueValues(newE)
 	}

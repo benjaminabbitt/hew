@@ -38,7 +38,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
 				Target: tl.Target, Detail: "target does not parse as JSON: " + err.Error()}
 		}
-		d.posAt, d.posOf = t.At, t.Of
+		d.posAt, d.posLength = t.At, t.Length
 		if t.Op == hew.OpTest {
 			if err := d.evalTest(tl.Target, t); err != nil {
 				return nil, err
@@ -89,9 +89,9 @@ func (d *doc) planOne(target string, t hew.Transform) (*edit, error) {
 type doc struct {
 	src  []byte
 	root *jNode
-	// posAt/posOf are the current transform's position advisory (satisfied-recoil):
+	// posAt/posLength are the current transform's position advisory (satisfied-recoil):
 	// which of several hash-colliding elements it means. Set per transform.
-	posAt, posOf *int
+	posAt, posLength *int
 }
 
 func parseDoc(src []byte) (*doc, error) {
@@ -219,7 +219,7 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 			return nil, &resolveErr{detail: "no element matches " + seg.String()}
 		}
 		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-		idx, ok := hew.PositionPick(matches, len(n.elems), d.posAt, d.posOf)
+		idx, ok := hew.PositionPick(matches, len(n.elems), d.posAt, d.posLength)
 		if !ok {
 			return nil, &resolveErr{ambiguous: true,
 				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}

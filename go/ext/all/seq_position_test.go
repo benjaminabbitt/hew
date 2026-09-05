@@ -52,7 +52,7 @@ func TestDifferEmitsPositionForDuplicateArray(t *testing.T) {
 // POSITION (index-from-front + list length), so a DUPLICATE value — which hashes
 // alike and, in slice 2, collides into a refuse — becomes addressable: the hash
 // finds the candidates, the position picks one. Position rides as trailing
-// advisory tags `~hew:at=<front> ~hew:of=<length>` on the element's line; it can
+// advisory tags `~hew:at=<front> ~hew:length=<length>` on the element's line; it can
 // never fail a match, only disambiguate.
 //
 // Reduced from the confpatch case: an allowlist with a repeated entry, one of
@@ -84,7 +84,7 @@ func TestDuplicateSequenceElementResolvedByPosition(t *testing.T) {
 				line = "- dup"
 			}
 			patch := "hew: 1\n\n--- " + c.fname + " format=" + string(c.format) +
-				"\n\n@@ /tags @@\n- " + line + " ~hew:at=2 ~hew:of=3\n"
+				"\n\n@@ /tags @@\n- " + line + " ~hew:at=2 ~hew:length=3\n"
 			tl, err := hew.ParseSingle([]byte(patch))
 			if err != nil {
 				t.Fatalf("ParseSingle: %v\npatch=%s", err, patch)

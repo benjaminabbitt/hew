@@ -794,18 +794,18 @@ func (d dialect) hintLine(seg Segment) string {
 }
 
 // withAdvice appends a transform's trailing position advisory (satisfied-recoil:
-// `~hew:at=N ~hew:of=M`) to the element's line — the last of the lines its value
+// `~hew:at=N ~hew:length=M`) to the element's line — the last of the lines its value
 // rendered to. A transform without position leaves the lines untouched.
 func withAdvice(lines []string, t *Transform) []string {
-	if t == nil || len(lines) == 0 || (t.At == nil && t.Of == nil) {
+	if t == nil || len(lines) == 0 || (t.At == nil && t.Length == nil) {
 		return lines
 	}
 	var b strings.Builder
 	if t.At != nil {
 		fmt.Fprintf(&b, " ~hew:at=%d", *t.At)
 	}
-	if t.Of != nil {
-		fmt.Fprintf(&b, " ~hew:of=%d", *t.Of)
+	if t.Length != nil {
+		fmt.Fprintf(&b, " ~hew:length=%d", *t.Length)
 	}
 	lines[len(lines)-1] += b.String()
 	return lines

@@ -163,13 +163,13 @@ type Transform struct {
 	Optional   bool // §7.6
 	Idempotent bool // §7.5
 
-	// At and Of are the non-asserting POSITION advisory (satisfied-recoil): the
-	// addressed sequence element's index from the front (At) within a list of
-	// length Of, spelled as trailing `~hew:at=`/`~hew:of=` tags. They never fail
-	// a match — they disambiguate a value-hash COLLISION (a duplicate scalar) and
-	// measure displacement. Both nil = no position advisory.
-	At *int
-	Of *int
+	// At and Length are the non-asserting POSITION advisory (satisfied-recoil):
+	// the addressed sequence element's index from the front (At) within a
+	// collection of this Length, spelled as trailing `~hew:at=`/`~hew:length=`
+	// tags. They never fail a match — they disambiguate a value-hash COLLISION (a
+	// duplicate scalar) and measure displacement. Both nil = no position advisory.
+	At     *int
+	Length *int
 
 	// PatchLine is provenance into the .hew file, for diagnostics. It does
 	// not survive .hewt serialization: §9.6 declares `line` emitted and
@@ -224,7 +224,7 @@ func (t Transform) Equal(o Transform) bool {
 	if !t.Value.Equal(o.Value) {
 		return false
 	}
-	if !eqIntPtr(t.Count, o.Count) || !eqIntPtr(t.At, o.At) || !eqIntPtr(t.Of, o.Of) {
+	if !eqIntPtr(t.Count, o.Count) || !eqIntPtr(t.At, o.At) || !eqIntPtr(t.Length, o.Length) {
 		return false
 	}
 	if (t.NodeKind == nil) != (o.NodeKind == nil) {

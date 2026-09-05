@@ -118,7 +118,7 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 			return ref{}, &resolveErr{detail: "no element matches " + seg.String()}
 		}
 		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-		idx, ok := hew.PositionPick(matches, len(cur.node.elems), d.posAt, d.posOf)
+		idx, ok := hew.PositionPick(matches, len(cur.node.elems), d.posAt, d.posLength)
 		if !ok {
 			return ref{}, &resolveErr{ambiguous: true,
 				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}

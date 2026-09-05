@@ -101,7 +101,7 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 		if tl.Transform[i].Op == OpHint {
 			continue
 		}
-		r.posAt, r.posOf = tl.Transform[i].At, tl.Transform[i].Of
+		r.posAt, r.posLength = tl.Transform[i].At, tl.Transform[i].Length
 		op, err := r.transform(tl.Transform[i])
 		if err != nil {
 			// OP-06: an OPTIONAL transform whose address is absent is a
@@ -131,9 +131,9 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 type resolver struct {
 	target string
 	root   Node
-	// posAt/posOf are the current transform's position advisory (satisfied-recoil):
+	// posAt/posLength are the current transform's position advisory (satisfied-recoil):
 	// which of several hash-colliding elements it addresses. Set per transform.
-	posAt, posOf *int
+	posAt, posLength *int
 }
 
 func resolveErr(code hewerr.Code, target, path string, line int, format string, args ...any) error {
@@ -469,7 +469,7 @@ func (r *resolver) stepHash(n Node, seg Segment) (string, Node, *stepErr) {
 		return "", nil, &stepErr{detail: "no element matches " + seg.String()}
 	}
 	// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-	idx, ok := PositionPick(matches, n.Len(), r.posAt, r.posOf)
+	idx, ok := PositionPick(matches, n.Len(), r.posAt, r.posLength)
 	if !ok {
 		return "", nil, &stepErr{ambiguous: true,
 			detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}

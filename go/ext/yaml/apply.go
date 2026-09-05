@@ -44,7 +44,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
 				Target: tl.Target, Detail: "target does not parse as YAML: " + err.Error()}
 		}
-		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged, posAt: t.At, posOf: t.Of}
+		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged, posAt: t.At, posLength: t.Length}
 		if t.Op == hew.OpTest {
 			if err := r.evalTest(t); err != nil {
 				return nil, err
@@ -97,8 +97,8 @@ type run struct {
 	target    string
 	all       []hew.Transform
 	converged map[string]bool
-	// posAt/posOf: the current transform's position advisory (satisfied-recoil).
-	posAt, posOf *int
+	// posAt/posLength: the current transform's position advisory (satisfied-recoil).
+	posAt, posLength *int
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
@@ -276,7 +276,7 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 			return nil, noMatch("no element matches %s", seg.String())
 		}
 		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-		idx, ok := hew.PositionPick(matches, len(n.elems), r.posAt, r.posOf)
+		idx, ok := hew.PositionPick(matches, len(n.elems), r.posAt, r.posLength)
 		if !ok {
 			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
 				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
