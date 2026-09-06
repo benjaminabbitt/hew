@@ -28,28 +28,6 @@ func hashSegment(v Value) Segment {
 	return Segment{Kind: SegHash, Form: "hew", Name: "sha256", Hash: hashScalar(v)}
 }
 
-// PositionPick chooses among the element indices a value-hash matched, using the
-// recorded position advisory (satisfied-recoil, §4.5c). One match is that match.
-// Several (a duplicate value that collides on its digest) resolve to the match at
-// the recorded front index `at` — but only when the list is still the recorded
-// length `of`, so a drifted list refuses (ok=false) rather than guess; the
-// scored locator will later weigh a drifted position instead of refusing. ok is
-// false when the position cannot decide, which the caller reports as ambiguous.
-func PositionPick(matches []int, curLen int, at, length *int) (idx int, ok bool) {
-	if len(matches) == 1 {
-		return matches[0], true
-	}
-	if len(matches) == 0 || at == nil || length == nil || *length != curLen {
-		return 0, false
-	}
-	for _, m := range matches {
-		if m == *at {
-			return m, true
-		}
-	}
-	return 0, false
-}
-
 // MatchesHash reports whether the value v is the member this SegHash addresses:
 // its canonical hash equals the fragment's digest (satisfied-recoil). It is the
 // applier's side of set/sequence hash addressing — every binding calls it so the

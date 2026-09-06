@@ -38,13 +38,15 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 	// above the per-transform reparse rather than inside run.
 	converged := map[string]bool{}
 	cur := target
-	for _, t := range tl.Transform {
+	// §4.5e: compensate the patch's own earlier edits before reading advisories.
+	migrated := hew.Migrate(tl.Transform)
+	for i, t := range tl.Transform {
 		d, err := parseDoc(cur)
 		if err != nil {
 			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
 				Target: tl.Target, Detail: "target does not parse as TOML: " + err.Error()}
 		}
-		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged, posAt: t.At, posLength: t.Length}
+		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged, adv: migrated[i]}
 		if t.Op == hew.OpTest {
 			if err := r.evalTest(t); err != nil {
 				return nil, err
@@ -97,8 +99,9 @@ type run struct {
 	target    string
 	all       []hew.Transform
 	converged map[string]bool
-	// posAt/posLength: the current transform's position advisory (satisfied-recoil).
-	posAt, posLength *int
+	// adv: the current transform's position advisory (satisfied-recoil),
+	// already migrated into the frame this transform meets (§4.5e).
+	adv hew.Advisory
 }
 
 // unsupported refuses a transform carrying a qualifier this binding cannot
@@ -266,22 +269,21 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		if n.kind != nSeq {
 			return nil, noMatch("not an array")
 		}
-		var matches []int
+		var cands []hew.Candidate
 		for i, el := range n.elems {
 			if v, has := comparedValue(el.val, hew.Segment{}); has && seg.MatchesHash(v) {
-				matches = append(matches, i)
+				cands = append(cands, hew.Candidate{Index: i})
 			}
 		}
-		if len(matches) == 0 {
+		if len(cands) == 0 {
 			return nil, noMatch("no element matches %s", seg.String())
 		}
-		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-		idx, ok := hew.PositionPick(matches, len(n.elems), r.posAt, r.posLength)
-		if !ok {
-			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
-				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+		// A collision is decided by the scored locator, shared with every binding.
+		pick := hew.Locate(cands, len(n.elems), r.adv)
+		if !pick.OK {
+			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true, detail: pick.Explain(seg)}
 		}
-		return &ref{node: n.elems[idx].val, parent: n, elem: n.elems[idx]}, nil
+		return &ref{node: n.elems[pick.Index].val, parent: n, elem: n.elems[pick.Index]}, nil
 	}
 	return nil, noMatch("segment kind %v has no TOML representation (§8.4)", seg.Kind)
 }

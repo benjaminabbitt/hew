@@ -1,0 +1,37 @@
+name: json/duplicate-run-sequential-removes
+seams: [e2e]
+kind: ok
+format: json
+ops: [OP-15]
+why: |
+  THREE removals from one run of identical elements — the case that makes
+  advisory migration (§4.5e) load-bearing rather than theoretical.
+
+  All three members share one digest, so no removal can be located by identity:
+  only the position advisory says which element is meant. All three advisories
+  are written in the patch's single before-image frame (§4.5c), where the run is
+  3 long and the targets sit at indices 0, 1 and 2. But an applier RE-PARSES
+  between transforms, so by the time the second removal runs the first has
+  already happened and the collection is 2 long — the coordinate `at=1` of a
+  3-long list no longer describes what stands in front of it.
+
+  Read without adjustment that is a refusal, and a correct one on the evidence:
+  counting from the front names one survivor and counting from the end names the
+  other, which is §4.5d's *conflicted* tier. The patch would fail against the very
+  document it was computed from.
+
+  Verified: with migration disabled this fixture fails exactly there, reporting
+  "the position signals disagree: counting from the front names element 1,
+  counting from the end names element 0".
+
+  What rescues it is that this drift is not foreign. The transform list states
+  what it did and in what order, so the shift is arithmetic: one earlier removal
+  below index 1 migrates the second advisory to `at=0` of a 2-long collection,
+  which anchors from both ends and locates exactly. Self-inflicted drift is
+  COMPENSATED; only foreign drift is SCORED.
+
+  The expected bytes cannot say WHICH elements went — they are identical, so
+  every choice yields the same array. What this case pins is that the patch
+  APPLIES AT ALL, emptying the run, rather than removing one and then refusing
+  against the document it was itself computed from.
+spec: "§4.5c, §4.5d, §4.5e, §11 OP-15"

@@ -34,10 +34,12 @@ import (
 // literal form and every comment outside the edit survive exactly.
 func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 	cur := target
-	for _, t := range tl.Transform {
+	// §4.5e: compensate the patch's own earlier edits before reading advisories.
+	migrated := hew.Migrate(tl.Transform)
+	for i, t := range tl.Transform {
 		d, err := parseDoc(cur)
 		if d != nil {
-			d.posAt, d.posLength = t.At, t.Length
+			d.adv = migrated[i]
 		}
 		if err != nil {
 			return nil, targetParseErr(tl.Target, err)

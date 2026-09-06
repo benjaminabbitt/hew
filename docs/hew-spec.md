@@ -507,13 +507,170 @@ Rules:
 second, non-asserting signal alongside its hash: its index from the front and the list's
 length, as trailing `~`+tagma tags on the element's line (`- beta ~hew:at=2 ~hew:length=3`). The
 hash is identity; the position disambiguates. When a value repeats, the digests collide and
-the position picks the meant element — but only when the list is still the recorded length, so
-a drifted list refuses rather than guesses (a scored locator will later weigh a drifted
-position instead). The advisory can never *fail* a match; it only chooses among hash matches,
-so a keyless set (no position) still refuses a collision, and a unique element (one match)
-ignores it. `at`/`length` are integers, never a path, so they carry no `/` to fight the pointer
-splitter. `~` is the advisory margin's inline twin: `~ key`/`~ #hew:sha256=…` name a neighbour
-on their own line, `~hew:key=value` annotates the line it trails.
+the position picks the meant element. The advisory can never *fail* a match; it only chooses
+among hash matches, so a keyless set (no position) still refuses a collision, and a unique
+element (one match) ignores it. `at`/`length` are integers, never a path, so they carry no `/`
+to fight the pointer splitter. `~` is the advisory margin's inline twin: `~ key`/`~
+#hew:sha256=…` name a neighbour on their own line, `~hew:key=value` annotates the line it
+trails.
+
+**One frame of reference: the before-image.** Every position advisory in a patch is indexed
+against a single document — the BEFORE-IMAGE, the state the patch is applied to. `at` is the
+element's zero-based index from the front of that collection, `length` is that collection's
+length there. `at` is therefore always less than `length`; an advisory where it is not
+describes a collection that never existed, and is malformed rather than merely stale.
+
+The single frame is a requirement, not a convenience. An applier RE-PARSES between transforms,
+so by the time the *n*th transform resolves, *n−1* edits have already changed the collection.
+Indexing each advisory against the document as *that* transform would find it — the obvious
+alternative — makes every advisory depend on every earlier one having applied, so one
+`optional` that legitimately no-ops, one reordered list, or one partially applied patch
+silently mislocates every later write. It also cannot survive REVERSAL: reversing a patch
+inverts the transform order, which invalidates every apply-time index at once, whereas
+before-image coordinates stay coherent because a reversal is simply a patch whose before-image
+is this patch's after-image. One rule serves both directions.
+
+Drift away from that frame is therefore expected, not exceptional, and it is what `length` is
+for: comparing the recorded length against the collection in hand is how a reader of the patch
+measures how far the document has moved since the advisory was written. Resolving a collision
+under drift is the scored locator's job (§4.5d).
+
+**An added element has no position of its own.** It does not exist in the before-image, which
+is precisely why §9.1 step 5 places an add RELATIVE to a sibling rather than at an index. An
+add therefore carries its ANCHOR's advisory — the before-image coordinates of the element it
+is placed after or before — and never coordinates of its own in the after-image. Without them
+an anchor naming a repeated value names several positions at once: "after the element hashing
+to X" is two different documents when X appears twice.
+
+### 4.5d Scored location — choosing among colliding candidates
+
+A content hash addresses a member by identity. When two members hold the same value they hash
+alike, and at that point the digest has said everything it can: as far as identity goes the
+candidates *are* the same member. Choosing between them is **scored location**, and four
+properties are required of the choice.
+
+- **Deterministic.** The verdict is a total function of the candidates, the collection's
+  current length, and the advisory; no map is iterated in reaching it. Two implementations —
+  or two format bindings of one implementation — that disagreed about which duplicate a patch
+  meant would corrupt a document rather than refuse, and a corpus catches that only by luck.
+- **A tie refuses.** Equal evidence is not a faint preference for one candidate.
+- **A floor with a stated reason.** Below it the answer is "cannot locate", and the reason is
+  derived from what the signals mean rather than tuned until a test suite passes.
+- **Explainable.** A refusal says which signals were consulted and how they disagreed. The
+  address is a digest: it cannot be shown to a reader or searched for in the file, so a refusal
+  that says only "ambiguous" leaves nothing to act on.
+
+The model is **ordinal, not a weighted sum**. Among colliding candidates the positions are
+unique — one element per index — so there is never a numeric tie for a weight to break, and any
+weight would have to be invented and then tuned, which the third property forbids. Each tier is
+instead a statement about the document, and the tier is also the explanation.
+
+| tier | the statement it makes | |
+|---|---|---|
+| identity | the digest matches exactly one member | locate |
+| neighbours | the members AROUND exactly one candidate still hash as recorded (§3) | locate |
+| anchored | the collection is still its recorded length and one candidate sits at `at`, so the indices from the front and from the end agree | locate |
+| one-sided | the collection resized, and exactly one candidate still sits at its recorded distance from ONE end | locate |
+| displaced | no anchor holds, and exactly one candidate is strictly nearest the recorded position | locate |
+| conflicted | the front and back anchors name DIFFERENT candidates | refuse |
+| equidistant | no anchor holds and two candidates sit equally far from the recorded position | refuse |
+| faulted | the advisory contradicts itself (`at` outside `0…length−1`) | refuse |
+| none | no positional evidence survived into this collection | refuse |
+
+**The floor: positional evidence must exist and be unanimous.** The refusals differ in kind,
+and the difference is load-bearing. *Conflicted* and *equidistant* are CONTRADICTIONS — hew has
+evidence and the evidence disagrees with itself — and they refuse under "a tie refuses".
+*None* is an ABSENCE. *Faulted* is neither: it is a statement about the PATCH, not the
+document, and a malformed advisory outranks even a unique digest, because locating past it
+quietly would hide a broken patch where mere staleness deserves no such attention.
+
+Note that *displaced* sits below *conflicted* in confidence and still locates. This is
+deliberate: **contradiction is not weakness.** A weak but unanimous signal is worth acting on;
+two strong signals pointing at different elements are not, however confident each sounds alone.
+
+**Deriving the two anchors.** From the advisory, the front-anchored position is `at`, and the
+back-anchored position is `curLen − (length − at)` — where the element would now sit if it kept
+its distance from the end. Each is **range-checked against the collection as it stands** and
+DISCOUNTED when it falls outside; a stale index is never clamped into range. The back anchor
+routinely survives a discount of the front one, and correctly so: element 9 of 10 was the last
+one, and in a collection that has shrunk to 2 the last one is index 1.
+
+Neighbour digests outrank every index-derived signal because they identify a position by
+CONTENT, so they still agree after an unrelated insertion elsewhere in the collection — which
+is exactly the edit that shifts every index. Agreement is counted outward from the element and
+STOPS at the first disagreement on each side, since neighbours beyond a change say nothing
+about this position; a run of three broken at the first is worth one, not three. A candidate
+wins on a strict unique maximum only: equal agreement is uninformative rather than
+contradictory, so it defers to the position signals instead of refusing.
+
+Scoring buys robustness against IRRELEVANT edits. It does not buy permission to guess: an
+unrecognised neighbourhood still refuses.
+
+### 4.5e Advisory migration — compensating a patch's own edits
+
+§4.5c fixes every advisory in one frame, the before-image. An applier RE-PARSES
+between transforms, so the *n*th transform meets a collection the patch's own
+earlier transforms have already changed, and reading a before-image coordinate
+against that collection without adjustment reads it in the wrong frame.
+
+Two kinds of drift separate the patch from the document, and they are **not** to
+be handled alike:
+
+- **Self-inflicted** drift — the patch's own earlier edits — is EXACTLY KNOWN.
+  The transform list states what it does and in what order, so the shift is
+  arithmetic. It MUST be computed, not scored.
+- **Foreign** drift — edits made by anyone else since the patch was written — is
+  unknowable, and is what §4.5d scores.
+
+Conflating them costs one or the other. Score the self-inflicted part and a patch
+cannot remove three identical elements from one array — its own second transform
+refuses as conflicted. Compensate the foreign part and hew invents a position it
+has no evidence for.
+
+**Migration is a pure function of the transform list.** No document is read, so
+every implementation and every format binding derives the same numbers, and the
+whole translation may be computed before the first edit is applied. That is what
+lets an applier stay stateless between transforms.
+
+A displacement reaches only inside ONE COLLECTION: an edit to `/other` never
+moves a coordinate in `/tags`. An implementation that let it would land a write
+on the wrong element rather than refuse.
+
+For a transform *t* addressing collection *C* with advisory `at`/`length`, each
+EARLIER transform in the list that touches *C* contributes:
+
+| earlier transform | `length` | `at` |
+|---|---|---|
+| `remove` carrying `at`=*a* | −1 | −1 when *a* < `at` |
+| `remove` carrying no advisory | −1 | unchanged |
+| `add`, anchor at *a*, placed `after` | +1 | +1 when *a* < `at` |
+| `add`, anchor at *a*, placed `before` | +1 | +1 when *a* ≤ `at` |
+| `replace`, `test`, `~` hint | 0 | unchanged |
+
+A collection is identified by the parent of the address being resolved; for an
+`add`, which addresses the container and carries its ANCHOR's coordinates
+(§4.5c), that is the anchor's parent — the same collection reached from the other
+side. Edits to any OTHER collection contribute nothing, and a binding that let
+them would land a write on the wrong element rather than refuse.
+
+Note the deliberate asymmetry in the second row. A removal that carries no
+advisory is a PARTIAL fact and its halves are treated differently, because only
+one of them is in doubt: that it shortened the collection is certain, so the
+length moves; WHERE it removed from is unknown, so the index must not. Leaving
+the index alone is what hands the question to §4.5d, which reads the resulting
+mismatch as drift, tries both anchors, and refuses if they disagree. Inventing a
+shift instead would be exactly the guess this design forbids.
+
+Two invariants follow, and an implementation MUST hold both:
+
+- **Migration never manufactures a fault.** A patch that was well-formed when it
+  was written must not be turned into a malformed one (§4.5d's *faulted* tier) by
+  arithmetic hew performed on it. `at` stays within `0…length−1`.
+- **An `add` in a collection that contains duplicates always carries its anchor's
+  advisory**, even when that anchor's own value is unique and needs no advisory
+  to be located. The anchor index is what LATER transforms in that collection
+  migrate against, so omitting it as redundant would silently un-position every
+  edit that follows.
 
 ### 4.6 Relative paths in annotations
 

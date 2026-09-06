@@ -32,13 +32,16 @@ import (
 // splices against bytes the step before it already produced.
 func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 	cur := target
-	for _, t := range tl.Transform {
+	// §4.5e: the patch's own earlier edits are compensated exactly before any
+	// advisory is read; only foreign drift is left for the scorer.
+	migrated := hew.Migrate(tl.Transform)
+	for i, t := range tl.Transform {
 		d, err := parseDoc(cur)
 		if err != nil {
 			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
 				Target: tl.Target, Detail: "target does not parse as JSON: " + err.Error()}
 		}
-		d.posAt, d.posLength = t.At, t.Length
+		d.adv = migrated[i]
 		if t.Op == hew.OpTest {
 			if err := d.evalTest(tl.Target, t); err != nil {
 				return nil, err
@@ -89,9 +92,10 @@ func (d *doc) planOne(target string, t hew.Transform) (*edit, error) {
 type doc struct {
 	src  []byte
 	root *jNode
-	// posAt/posLength are the current transform's position advisory (satisfied-recoil):
+	// adv is the current transform's position advisory (satisfied-recoil),
+	// already migrated into the frame this transform meets:
 	// which of several hash-colliding elements it means. Set per transform.
-	posAt, posLength *int
+	adv hew.Advisory
 }
 
 func parseDoc(src []byte) (*doc, error) {
@@ -209,22 +213,21 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 		if n.kind != jArr {
 			return nil, &resolveErr{detail: "not an array"}
 		}
-		var matches []int
+		var cands []hew.Candidate
 		for i, e := range n.elems {
 			if v, err := d.nodeValue(e.value); err == nil && seg.MatchesHash(v) {
-				matches = append(matches, i)
+				cands = append(cands, hew.Candidate{Index: i})
 			}
 		}
-		if len(matches) == 0 {
+		if len(cands) == 0 {
 			return nil, &resolveErr{detail: "no element matches " + seg.String()}
 		}
-		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-		idx, ok := hew.PositionPick(matches, len(n.elems), d.posAt, d.posLength)
-		if !ok {
-			return nil, &resolveErr{ambiguous: true,
-				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+		// A collision is decided by the scored locator, shared with every binding.
+		pick := hew.Locate(cands, len(n.elems), d.adv)
+		if !pick.OK {
+			return nil, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
 		}
-		return n.elems[idx].value, nil
+		return n.elems[pick.Index].value, nil
 	default:
 		return nil, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSON representation (§8.1)", seg.Kind)}
 	}

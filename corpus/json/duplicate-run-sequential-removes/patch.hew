@@ -1,0 +1,8 @@
+hew: 1
+
+--- target.json format=json
+
+@@ /tags @@
+- "dup" ~hew:at=0 ~hew:length=3
+- "dup" ~hew:at=1 ~hew:length=3
+- "dup" ~hew:at=2 ~hew:length=3

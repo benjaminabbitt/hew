@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+
+	hew "github.com/benjaminabbitt/hew/go"
 )
 
 type kind int
@@ -96,8 +98,9 @@ func (e *parseError) Error() string { return fmt.Sprintf("offset %d: %s", e.pos,
 type doc struct {
 	src  []byte
 	root *node
-	// posAt/posLength: the current transform's position advisory (satisfied-recoil).
-	posAt, posLength *int
+	// adv: the current transform's position advisory (satisfied-recoil), already
+	// migrated into the frame this transform meets (§4.5e).
+	adv hew.Advisory
 }
 
 // parseDoc parses a complete JSONC document: one value, optionally wrapped in

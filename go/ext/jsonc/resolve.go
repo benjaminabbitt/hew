@@ -108,22 +108,21 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 		if cur.node.kind != kArr {
 			return ref{}, &resolveErr{detail: "not an array"}
 		}
-		var matches []int
+		var cands []hew.Candidate
 		for i, e := range cur.node.elems {
 			if v, has := d.comparedValue(e.value, hew.Segment{}); has && seg.MatchesHash(v) {
-				matches = append(matches, i)
+				cands = append(cands, hew.Candidate{Index: i})
 			}
 		}
-		if len(matches) == 0 {
+		if len(cands) == 0 {
 			return ref{}, &resolveErr{detail: "no element matches " + seg.String()}
 		}
-		// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-		idx, ok := hew.PositionPick(matches, len(cur.node.elems), d.posAt, d.posLength)
-		if !ok {
-			return ref{}, &resolveErr{ambiguous: true,
-				detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+		// A collision is decided by the scored locator, shared with every binding.
+		pick := hew.Locate(cands, len(cur.node.elems), d.adv)
+		if !pick.OK {
+			return ref{}, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
 		}
-		return ref{node: cur.node.elems[idx].value, parent: cur.node, elem: cur.node.elems[idx]}, nil
+		return ref{node: cur.node.elems[pick.Index].value, parent: cur.node, elem: cur.node.elems[pick.Index]}, nil
 	default:
 		return ref{}, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSONC representation (§8.2)", seg.Kind)}
 	}

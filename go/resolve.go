@@ -93,6 +93,10 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 		return nil, resolveErr(hewerr.CodeTargetParse, tl.Target, "", 0, "resolve: document has no root node")
 	}
 	r := &resolver{target: tl.Target, root: root}
+	// Self-inflicted drift is compensated exactly, foreign drift is scored
+	// (§4.5e): translate every advisory out of the patch's before-image frame
+	// before any of them is read.
+	migrated := Migrate(tl.Transform)
 	out := make([]ResolvedOp, 0, len(tl.Transform))
 	for i := range tl.Transform {
 		// OpHint is the non-asserting hint channel (satisfied-recoil): it names a
@@ -101,7 +105,7 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 		if tl.Transform[i].Op == OpHint {
 			continue
 		}
-		r.posAt, r.posLength = tl.Transform[i].At, tl.Transform[i].Length
+		r.adv = migrated[i]
 		op, err := r.transform(tl.Transform[i])
 		if err != nil {
 			// OP-06: an OPTIONAL transform whose address is absent is a
@@ -131,9 +135,9 @@ func Resolve(tl TransformList, doc Document) ([]ResolvedOp, error) {
 type resolver struct {
 	target string
 	root   Node
-	// posAt/posLength are the current transform's position advisory (satisfied-recoil):
-	// which of several hash-colliding elements it addresses. Set per transform.
-	posAt, posLength *int
+	// adv is the current transform's position advisory (satisfied-recoil),
+	// already migrated into the frame this transform meets. Set per transform.
+	adv Advisory
 }
 
 func resolveErr(code hewerr.Code, target, path string, line int, format string, args ...any) error {
@@ -446,35 +450,39 @@ func (r *resolver) stepMatch(n Node, seg Segment) (string, Node, *stepErr) {
 }
 
 // stepHash resolves a SegHash element address (satisfied-recoil): the element
-// whose canonical value hashes to the fragment's digest. A digest matching more
-// than one element is a collision — AMBIGUITY, not a match — and refuses, exactly
-// as a duplicate key-match does; matching zero refuses as a no-match.
+// whose canonical value hashes to the fragment's digest. Matching zero refuses as
+// a no-match. A digest matching more than one element is a collision, and the
+// scored locator decides it — see Locate, which is shared with every binding so
+// that a duplicate is resolved to the SAME element whatever the format.
 func (r *resolver) stepHash(n Node, seg Segment) (string, Node, *stepErr) {
 	if n.Kind() != KindSeq {
 		return "", nil, &stepErr{detail: "not a sequence"}
 	}
-	var matches []int
-	byIndex := map[int]Node{}
+	var cands []Candidate
+	var nodes []Node
 	for i := 0; i < n.Len(); i++ {
 		e, ok := n.Elem(i)
 		if !ok {
 			continue
 		}
 		if hashScalar(e.Value()) == seg.Hash {
-			matches = append(matches, i)
-			byIndex[i] = e
+			cands = append(cands, Candidate{Index: i})
+			nodes = append(nodes, e)
 		}
 	}
-	if len(matches) == 0 {
+	if len(cands) == 0 {
 		return "", nil, &stepErr{detail: "no element matches " + seg.String()}
 	}
-	// A collision resolves by the position advisory, or refuses (satisfied-recoil).
-	idx, ok := PositionPick(matches, n.Len(), r.posAt, r.posLength)
-	if !ok {
-		return "", nil, &stepErr{ambiguous: true,
-			detail: fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), seg.String())}
+	pick := Locate(cands, n.Len(), r.adv)
+	if !pick.OK {
+		return "", nil, &stepErr{ambiguous: true, detail: pick.Explain(seg)}
 	}
-	return strconv.Itoa(idx), byIndex[idx], nil
+	for i, c := range cands {
+		if c.Index == pick.Index {
+			return strconv.Itoa(pick.Index), nodes[i], nil
+		}
+	}
+	return "", nil, &stepErr{ambiguous: true, detail: pick.Explain(seg)}
 }
 
 // --- the no-match diagnostic (§10.3, O46) ------------------------------------

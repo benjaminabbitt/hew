@@ -319,18 +319,21 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 			}
 		}
 	case parent.kind == jArr && last.Kind == hew.SegHash:
-		var matches []int
+		var cands []hew.Candidate
 		for i, e := range parent.elems {
 			if v, err := d.nodeValue(e.value); err == nil && last.MatchesHash(v) {
-				matches = append(matches, i)
+				cands = append(cands, hew.Candidate{Index: i})
 			}
 		}
-		if idx, ok := hew.PositionPick(matches, len(parent.elems), d.posAt, d.posLength); ok {
-			return removeArrElem(d.src, parent, idx), nil
-		}
-		if len(matches) > 1 {
-			return nil, appErr(hewerr.CodeAmbiguousMatch, target, t.Path.String(), t.PatchLine,
-				fmt.Sprintf("%d elements collide on %s and the position does not disambiguate", len(matches), last.String()))
+		// Matching nothing falls through to the no-match report below, which can
+		// still be excused by `optional`; matching something the scored locator
+		// cannot resolve is a refusal, and says which signals disagreed.
+		if len(cands) > 0 {
+			pick := hew.Locate(cands, len(parent.elems), d.adv)
+			if pick.OK {
+				return removeArrElem(d.src, parent, pick.Index), nil
+			}
+			return nil, appErr(hewerr.CodeAmbiguousMatch, target, t.Path.String(), t.PatchLine, pick.Explain(last))
 		}
 	}
 	if t.Optional {
