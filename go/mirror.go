@@ -144,6 +144,15 @@ func (r *bodyReader) entry() (*mirrorEntry, error) {
 		// A `~` line names a neighbour to locate, never a value (satisfied-recoil):
 		// a MAPPING neighbour by its key, a SET neighbour by a `#hew:sha256=<hex>`
 		// content-hash fragment. Either way the lowerer emits OpHint, not a test.
+		//
+		// It takes the trailing advisory like any other body line, and needs it for
+		// the same reason a `-` line does: in a collection with duplicates the
+		// address alone names several elements, and a neighbour that cannot say
+		// WHICH one it is cannot anchor an add's placement.
+		var aerr error
+		if text, e.advice, aerr = splitTrailingAdvice(text); aerr != nil {
+			return nil, parseErr(bl.num, "", "%v", aerr)
+		}
 		e.kind = mKV
 		if strings.HasPrefix(text, "#") {
 			if hs, ok := segHashFromTag(text[1:]); ok {

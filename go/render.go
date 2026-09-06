@@ -298,6 +298,23 @@ type contentEntry struct {
 	assert *Transform
 }
 
+// slotKey identifies one BODY SLOT. Ordinarily a child's ADDRESS identifies it,
+// and one address means one line. A content hash breaks that assumption: it
+// addresses a VALUE, and a repeated value has SEVERAL elements wearing the same
+// address. The position advisory is what tells them apart (satisfied-recoil), so
+// it joins the key here — without it, two removals of the same repeated value
+// share one slot, the second overwrites the first, and the rendered patch
+// silently drops a removal that the transform list contained.
+//
+// The separator is a NUL so a key can never be forged by an address that happens
+// to end in the same text.
+func slotKey(seg Segment, at *int) string {
+	if seg.Kind == SegHash && at != nil {
+		return seg.String() + "\x00at=" + strconv.Itoa(*at)
+	}
+	return seg.String()
+}
+
 // renderGroup renders one hunk's body lines for the transforms sharing one
 // anchor (§9.1's lowering, inverted).
 func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
@@ -310,8 +327,8 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 	// both placed "after timeout").
 	chainAfter := map[string]string{}
 	chainBefore := map[string]string{}
-	getEntry := func(seg Segment) *contentEntry {
-		key := seg.String()
+	getEntry := func(seg Segment, at *int) *contentEntry {
+		key := slotKey(seg, at)
 		e, ok := bySeg[key]
 		if !ok {
 			e = &contentEntry{seg: seg}
@@ -339,7 +356,7 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			if !ok || len(rel) != 1 {
 				return nil, fmt.Errorf("hew: render: hint at %s does not name a direct child of %s", t.Path, anchor)
 			}
-			getEntry(rel[0]).hint = t
+			getEntry(rel[0], t.At).hint = t
 		case OpTest:
 			if t.Exhaustive || t.Absent || t.Count != nil || t.NodeKind != nil {
 				slot(t)
@@ -350,9 +367,9 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 				return nil, fmt.Errorf("hew: render: test at %s does not descend from anchor %s", t.Path, anchor)
 			}
 			if len(rel) == 1 {
-				getEntry(rel[0]).plainTest = t
+				getEntry(rel[0], t.At).plainTest = t
 			} else {
-				e := getEntry(rel[0])
+				e := getEntry(rel[0], t.At)
 				e.fieldTests = append(e.fieldTests, t)
 			}
 		case OpRemove:
@@ -360,13 +377,13 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			if !ok || len(rel) != 1 {
 				return nil, fmt.Errorf("hew: render: remove at %s does not address a direct child of %s", t.Path, anchor)
 			}
-			getEntry(rel[0]).remove = t
+			getEntry(rel[0], t.At).remove = t
 		case OpReplace:
 			rel, ok := relSegs(anchor, t.Path)
 			if !ok || len(rel) != 1 {
 				return nil, fmt.Errorf("hew: render: replace at %s does not address a direct child of %s", t.Path, anchor)
 			}
-			getEntry(rel[0]).replace = t
+			getEntry(rel[0], t.At).replace = t
 		case OpAdd:
 			var key string
 			var seg Segment
@@ -398,7 +415,9 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 				if !ok || len(rel) != 1 {
 					return "", false
 				}
-				return resolveSlot(order, bySeg, rel[0]), true
+				// The anchor's advisory rides the ADD (§4.5c), which is what
+				// tells a repeated value's several slots apart.
+				return resolveSlot(order, bySeg, rel[0], t.At), true
 			}
 			e := &contentEntry{seg: seg, add: t}
 			bySeg[key] = e
@@ -494,7 +513,9 @@ func renderGroup(anchor Path, ts []Transform, dial dialect) ([]string, error) {
 			lines = append(lines, qualLines(e.test(), e.remove)...)
 			lines = append(lines, withAdvice(dial.memberLines('-', e.seg, v), e.remove)...)
 		case e.hint != nil:
-			lines = append(lines, dial.hintLine(e.seg))
+			// A hint carries the advisory too: it is a placement ANCHOR, and one
+			// that cannot say which duplicate it is cannot anchor anything.
+			lines = append(lines, withAdvice([]string{dial.hintLine(e.seg)}, e.hint)...)
 		case e.add != nil:
 			lines = append(lines, qualLines(e.add)...)
 			lines = append(lines, dial.memberLines('+', e.seg, e.add.Value)...)
@@ -602,8 +623,8 @@ const syntheticKind SegmentKind = 250
 // key-match is matched against the added VALUE — the same §4.2 comparison the
 // applier will make, and the same one the parser makes when it re-derives
 // placements from the rendered body.
-func resolveSlot(order []string, bySeg map[string]*contentEntry, seg Segment) string {
-	key := seg.String()
+func resolveSlot(order []string, bySeg map[string]*contentEntry, seg Segment, at *int) string {
+	key := slotKey(seg, at)
 	if _, ok := bySeg[key]; ok || (seg.Kind != SegMatch && seg.Kind != SegHash) {
 		return key
 	}

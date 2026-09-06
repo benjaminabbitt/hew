@@ -86,6 +86,28 @@ func TestRenderRoundTripScalarSeqElement(t *testing.T) {
 	rt2(t, tl)
 }
 
+// Two elements of a duplicate array share ONE content-hash address, so the
+// address alone cannot say which is which — the position advisory is the only
+// discriminator, and it is why slice 3 exists. Render keys its body slots by
+// address, so both removals land in the same slot and the second overwrites the
+// first: a rendered patch that silently drops a removal. RT2 catches it as a
+// transform list that came back shorter than it went in, and a user would catch
+// it as `hew diff` producing a patch that under-removes.
+func TestRenderKeepsEveryRemoveOfADuplicateElement(t *testing.T) {
+	dup := "/tags/" + hfrag(dstr("dup"))
+	first, second, length := 1, 2, 3
+	tl := TransformList{
+		Target: "target.json", Format: FormatJSON,
+		Transform: []Transform{
+			{Op: OpTest, Path: MustParsePath(dup), Value: mustValNoT("dup"), At: &first, Length: &length},
+			{Op: OpTest, Path: MustParsePath(dup), Value: mustValNoT("dup"), At: &second, Length: &length},
+			{Op: OpRemove, Path: MustParsePath(dup), At: &first, Length: &length},
+			{Op: OpRemove, Path: MustParsePath(dup), At: &second, Length: &length},
+		},
+	}
+	rt2(t, tl)
+}
+
 func TestRenderRoundTripKeyedElementAdd(t *testing.T) {
 	tl := TransformList{
 		Target: "target.json", Format: FormatJSON,

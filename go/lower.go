@@ -302,11 +302,17 @@ func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i, pairedWith int, q 
 		// element it lands beside carries the position (§9.6 placement).
 		t.Path = path
 	}
-	before, after, err := l.placement(path, nodes, i)
+	before, after, anchor, err := l.placement(path, nodes, i)
 	if err != nil {
 		return err
 	}
 	t.Before, t.After = before, after
+	if anchor != nil {
+		// The anchor's coordinates, not the add's: "after the element hashing to
+		// X" names several positions when X repeats, and this is what picks one.
+		t.At = adviceInt(anchor.advice, "hew", "at")
+		t.Length = adviceInt(anchor.advice, "hew", "length")
+	}
 	l.push(t, e, q)
 	return nil
 }
@@ -324,22 +330,25 @@ func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i, pairedWith int, q 
 // happened yet, so the BEFORE-image is the right test and the before-image
 // address is the one that resolves — naming a `+` line further down would
 // hand the applier a path to a node it has not created (HEW013).
-func (l *lowerer) placement(path Path, nodes []*mirrorEntry, i int) (before, after Path, err error) {
+// It also returns the ANCHOR ENTRY, because an add has no before-image position
+// of its own (§4.5c) and carries the anchor's instead — and the notation writes
+// that advisory exactly once, on the anchor's own body line.
+func (l *lowerer) placement(path Path, nodes []*mirrorEntry, i int) (before, after Path, anchor *mirrorEntry, err error) {
 	for j := i - 1; j >= 0; j-- {
 		if !nodes[j].node() || !nodes[j].inAfter() {
 			continue
 		}
 		p, perr := l.entryPath(path, nodes[j], false)
-		return Path{}, p, perr
+		return Path{}, p, nodes[j], perr
 	}
 	for j := i + 1; j < len(nodes); j++ {
 		if !nodes[j].node() || !nodes[j].inBefore() {
 			continue
 		}
 		p, perr := l.entryPath(path, nodes[j], true)
-		return p, Path{}, perr
+		return p, Path{}, nodes[j], perr
 	}
-	return Path{}, Path{}, nil
+	return Path{}, Path{}, nil, nil
 }
 
 // tests emits the before-image assertions for one entry (§9.1 step 2). A
@@ -428,17 +437,25 @@ func (l *lowerer) testsOnly(path Path, entries []*mirrorEntry, q quals) error {
 // record naming a sibling by path, which positions a change and can NEVER fail a
 // match (satisfied-recoil). It carries no value and no qualifiers.
 func (l *lowerer) hint(path Path, e *mirrorEntry) error {
+	// A hint reads its position advisory like any other body line: a neighbour in
+	// a collection with duplicates is a placement anchor, and one that cannot say
+	// WHICH duplicate it is names two places at once.
+	t := Transform{Op: OpHint,
+		At:     adviceInt(e.advice, "hew", "at"),
+		Length: adviceInt(e.advice, "hew", "length")}
 	// A set neighbour carries its address as a pre-parsed #hew:sha256 segment; a
 	// mapping neighbour addresses by its key like any member.
 	if e.hintSeg != nil {
-		l.push(Transform{Op: OpHint, Path: path.Append(*e.hintSeg)}, e, quals{})
+		t.Path = path.Append(*e.hintSeg)
+		l.push(t, e, quals{})
 		return nil
 	}
 	p, err := l.entryPath(path, e, true)
 	if err != nil {
 		return err
 	}
-	l.push(Transform{Op: OpHint, Path: p}, e, quals{})
+	t.Path = p
+	l.push(t, e, quals{})
 	return nil
 }
 
@@ -522,8 +539,13 @@ func (l *lowerer) push(t Transform, e *mirrorEntry, q quals) {
 	t.PatchLine = e.line
 	// Fold the line's position advisory onto the transform (satisfied-recoil): it
 	// rides both the before-image test and the mutation that address the element.
-	t.At = adviceInt(e.advice, "hew", "at")
-	t.Length = adviceInt(e.advice, "hew", "length")
+	// An ADD is the exception — it has no before-image position and carries its
+	// anchor's (§4.5c), which its caller has already set — so an advisory that is
+	// already present is never overwritten from this line.
+	if t.At == nil && t.Length == nil {
+		t.At = adviceInt(e.advice, "hew", "at")
+		t.Length = adviceInt(e.advice, "hew", "length")
+	}
 	l.out = append(l.out, t)
 }
 

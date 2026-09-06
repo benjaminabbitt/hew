@@ -321,7 +321,7 @@ func commentOrdinals(children []DiffChild) []int {
 // are the same list.
 func (d *differ) emit(addr addressing, slots []slot) {
 	show := d.window(slots)
-	pos := positions(addr, slots)
+	pos, dup := positions(addr, slots)
 	for i := range slots {
 		if !show[i] {
 			continue
@@ -343,11 +343,18 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		// and an index carries no value in the address.
 		if slots[i].state == slotSame && slots[i].old != nil && !slots[i].old.Comment &&
 			(!addr.seq || addr.byValue) {
-			d.out = append(d.out, Transform{Op: OpHint, Path: slots[i].ref})
+			h := Transform{Op: OpHint, Path: slots[i].ref}
+			if p, ok := pos[i]; ok && dup[i] {
+				// Without this two context duplicates are byte-identical records:
+				// indistinguishable in the IR, collapsed into one body line by the
+				// renderer, and useless as the anchor an add is placed against.
+				h.At, h.Length = intPtr(p.at), intPtr(p.length)
+			}
+			d.out = append(d.out, h)
 			continue
 		}
 		tests := addr.tests(&slots[i])
-		if p, ok := pos[i]; ok {
+		if p, ok := pos[i]; ok && dup[i] {
 			for j := range tests {
 				tests[j].At, tests[j].Length = intPtr(p.at), intPtr(p.length)
 			}
@@ -356,6 +363,11 @@ func (d *differ) emit(addr addressing, slots []slot) {
 	}
 	for i := range slots {
 		var t Transform
+		// Which slot's advisory this transform carries. Ordinarily its own: the
+		// address it resolves is its own element. An add is the exception (§4.5c)
+		// — it has no before-image position, so the address that must resolve is
+		// its ANCHOR's, and the anchor's coordinates are what it carries.
+		advisorySlot := i
 		switch slots[i].state {
 		case slotRemoved:
 			t = Transform{Op: OpRemove, Path: slots[i].ref}
@@ -363,17 +375,24 @@ func (d *differ) emit(addr addressing, slots []slot) {
 			t = Transform{Op: OpReplace, Path: slots[i].ref, Value: addr.valueOf(slots[i].new)}
 		case slotAdded:
 			t = Transform{Op: OpAdd, Path: slots[i].addPath, Value: addr.valueOf(slots[i].new)}
+			advisorySlot = -1
 			if ref, ok := placement(slots, i); ok {
 				if ref.before {
 					t.Before = ref.path
 				} else {
 					t.After = ref.path
 				}
+				advisorySlot = ref.slot
 			}
 		default:
 			continue
 		}
-		if p, ok := pos[i]; ok {
+		// Written where it DECIDES something: on an element whose value repeats
+		// (so its digest alone cannot say which element is meant), and ALWAYS on
+		// an add, whose anchor index is what later transforms in this collection
+		// migrate their own coordinates against (§4.5e) even when that anchor is
+		// itself unique.
+		if p, ok := pos[advisorySlot]; ok && (dup[advisorySlot] || slots[i].state == slotAdded) {
 			t.At, t.Length = intPtr(p.at), intPtr(p.length)
 		}
 		d.out = append(d.out, t)
@@ -389,36 +408,49 @@ func intPtr(n int) *int { return &n }
 // among the OLD elements, an added element its index among the NEW ones, each
 // with that side's length, so a value that collides on its digest stays
 // resolvable. Nil for every other addressing — unique arrays need no position.
-func positions(addr addressing, slots []slot) map[int]elemPos {
+func positions(addr addressing, slots []slot) (map[int]elemPos, map[int]bool) {
 	if !addr.byValue || !addr.dups {
-		return nil
+		return nil, nil
 	}
-	oldLen, newLen := 0, 0
+	// Only a value that actually REPEATS needs a position. A unique digest
+	// already identifies its element on its own (the advisory would change no
+	// decision the locator makes), so putting one on every element of a
+	// collection that merely CONTAINS a duplicate is noise in the patch.
+	repeats := map[string]int{}
+	oldLen := 0
 	for i := range slots {
-		if slots[i].state.survives() { // present in new
-			newLen++
-		}
 		if slots[i].state != slotAdded { // present in old
 			oldLen++
+			if c := slots[i].old; c != nil && !c.Comment && c.Node != nil {
+				repeats[scalarToken(c.Node.Value)]++
+			}
 		}
 	}
 	out := map[int]elemPos{}
-	oldIdx, newIdx := 0, 0
+	oldIdx := 0
 	for i := range slots {
 		switch slots[i].state {
 		case slotRemoved, slotReplaced:
 			out[i] = elemPos{oldIdx, oldLen}
-		case slotAdded:
-			out[i] = elemPos{newIdx, newLen}
+		case slotSame:
+			// An UNTOUCHED element still needs to say which duplicate it is,
+			// because it is a placement ANCHOR: an add writes its position
+			// relative to a sibling, and "after the element hashing to X" names
+			// two different places when X appears twice. Its index is the OLD
+			// one, since that is the document the anchor is resolved against.
+			out[i] = elemPos{oldIdx, oldLen}
 		}
 		if slots[i].state != slotAdded {
 			oldIdx++
 		}
-		if slots[i].state.survives() {
-			newIdx++
+	}
+	dup := map[int]bool{}
+	for i := range slots {
+		if c := slots[i].old; c != nil && !c.Comment && c.Node != nil && repeats[scalarToken(c.Node.Value)] > 1 {
+			dup[i] = true
 		}
 	}
-	return out
+	return out, dup
 }
 
 // window marks which slots the hunk body shows: every changed slot, and every
@@ -457,6 +489,10 @@ func (d *differ) window(slots []slot) []bool {
 type placementRef struct {
 	path   Path
 	before bool
+	// slot is the anchor's slot index. An add has no before-image position of
+	// its own (§4.5c), so it carries the ANCHOR's — the coordinates its
+	// Before/After address has to be resolved against.
+	slot int
 }
 
 // placement derives §9.1 step 5's relative position for an added slot: the
@@ -473,12 +509,12 @@ type placementRef struct {
 func placement(slots []slot, i int) (placementRef, bool) {
 	for j := i - 1; j >= 0; j-- {
 		if slots[j].state.survives() {
-			return placementRef{path: slots[j].ref}, true
+			return placementRef{path: slots[j].ref, slot: j}, true
 		}
 	}
 	for j := i + 1; j < len(slots); j++ {
 		if slots[j].state.survives() && slots[j].state != slotAdded {
-			return placementRef{path: slots[j].ref, before: true}, true
+			return placementRef{path: slots[j].ref, before: true, slot: j}, true
 		}
 	}
 	return placementRef{}, false
@@ -531,7 +567,7 @@ func (d *differ) addressing(path Path, old, new *DiffNode) addressing {
 		}
 		return a
 	}
-	if allOfKind(oldE, KindScalar) && allOfKind(newE, KindScalar) {
+	if bothOfKind(oldE, newE, KindScalar) {
 		// A scalar array is addressed by content hash (satisfied-recoil). When a
 		// value repeats, the digests collide, so its elements also carry a
 		// position advisory (`~hew:at=`/`~hew:length=`) to stay resolvable.
@@ -670,6 +706,25 @@ func allOfKind(ns []*DiffNode, k NodeKind) bool {
 		}
 	}
 	return len(ns) > 0
+}
+
+// bothOfKind asks the ADDRESSING question, which is not allOfKind's: can these
+// elements be addressed by kind k, given a before side and an after side. An
+// EMPTY side agrees vacuously, because a sequence emptied out is still made of
+// whatever the side that HAS elements is made of, and the addresses being
+// written name elements on that side. allOfKind answers the narrower question
+// "do these nodes agree on a kind", where nothing cannot agree — asking it of an
+// absent side made an emptied scalar array fall back to INDEX addressing while
+// the notation still wrote its elements as values, so the differ and a re-parse
+// of its own patch disagreed about how the elements were addressed.
+func bothOfKind(oldE, newE []*DiffNode, k NodeKind) bool {
+	switch {
+	case len(oldE) == 0:
+		return allOfKind(newE, k)
+	case len(newE) == 0:
+		return allOfKind(oldE, k)
+	}
+	return allOfKind(oldE, k) && allOfKind(newE, k)
 }
 
 func uniqueValues(ns []*DiffNode) bool {
