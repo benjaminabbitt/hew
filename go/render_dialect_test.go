@@ -53,14 +53,14 @@ func TestRenderNativeJSONCollections(t *testing.T) {
 func TestRenderNativeJSONCComments(t *testing.T) {
 	got := renderNative(t, FormatJSONC,
 		Transform{Op: OpTest, Path: MustParsePath("/a/k"), Value: mustYAML(t, "1")},
-		Transform{Op: OpAdd, Path: MustParsePath("/a/#0"), Value: CommentValue("slow upstream"), After: MustParsePath("/a/k")},
+		Transform{Op: OpAdd, Path: MustParsePath("/a"), Value: CommentValue("slow upstream"), After: MustParsePath("/a/k")},
 	)
 	if !strings.Contains(got, "+ // slow upstream") {
 		t.Fatalf("JSONC comments are // comments:\n%s", got)
 	}
 	yamlOut := renderNative(t, FormatYAML,
 		Transform{Op: OpTest, Path: MustParsePath("/a/k"), Value: mustYAML(t, "1")},
-		Transform{Op: OpAdd, Path: MustParsePath("/a/#0"), Value: CommentValue("note"), After: MustParsePath("/a/k")},
+		Transform{Op: OpAdd, Path: MustParsePath("/a"), Value: CommentValue("note"), After: MustParsePath("/a/k")},
 	)
 	if !strings.Contains(yamlOut, "+ # note") {
 		t.Fatalf("YAML comments are # comments:\n%s", yamlOut)
@@ -309,7 +309,7 @@ func TestRenderChainsSeveralAddsAtOneSibling(t *testing.T) {
 // printing the wrapper.
 func TestRenderCommentWithABareValue(t *testing.T) {
 	got := renderNative(t, FormatYAML,
-		Transform{Op: OpTest, Path: MustParsePath("/a/#0"), Value: mustYAML(t, "bare text")},
+		Transform{Op: OpTest, Path: MustParsePath("/a/" + cfrag("bare text")), Value: mustYAML(t, "bare text")},
 	)
 	if !strings.Contains(got, "  # bare text") {
 		t.Fatalf("got:\n%s", got)

@@ -49,8 +49,13 @@ const (
 	// SegMatch is a key-match segment (§4.2): Name is the field name, empty
 	// for the `=value` form, and Value is the format-natively decoded value.
 	SegMatch
-	// SegComment is a comment address (§4.5b): Index is the kind-scoped
-	// ordinal, or Trailing marks the `#t` form.
+	// SegComment is a comment address (§4.5b). A comment is a KEYLESS member,
+	// so it is identified the way a set member is: Hash carries the digest of
+	// its text, spelled `#hew:comment=<hex>`, with Form and Name holding the
+	// tag's namespace and key. Trailing instead marks the `#t` form, the one
+	// comment attached to a member's own line. There is no ordinal — §4 has no
+	// position-based segment, and the `#<n>` that used to sit here resolved
+	// against the patch body rather than the target.
 	SegComment
 	// SegExtension is a segment shape an extension claims (§8.8): a Markdown
 	// heading, block ordinal or marker, and whatever a future family adds.
@@ -142,7 +147,7 @@ func (s Scalar) equal(o Scalar) bool { return s.Kind == o.Kind && s.Text == o.Te
 type Segment struct {
 	Kind  SegmentKind
 	Name  string // SegKey, SegMatch (field)
-	Index int    // SegIndex, SegComment
+	Index int    // SegIndex
 	Value Scalar // SegMatch
 
 	// Quoted spells Name in the literal form of §4.1 — `/deps/"@scope/pkg"`,
@@ -235,15 +240,15 @@ func (s Segment) String() string {
 		b.WriteString(s.Raw)
 	case SegComment:
 		b.WriteByte('#')
-		switch {
-		case s.Trailing:
+		if s.Trailing {
 			// `#t` is IDENTITY, not an ordinal: it names the comment attached to
 			// the preceding member, of which there is at most one. It stays.
 			b.WriteByte('t')
-		case s.Hash != "":
+		} else {
+			// The only other spelling is the digest. There is no ordinal to
+			// fall back to, so a zero Hash renders as `#hew:comment=` and
+			// fails to reparse rather than quietly naming comment 0.
 			b.WriteString(fragmentTag(s))
-		default:
-			b.WriteString(strconv.Itoa(s.Index))
 		}
 	case SegHash:
 		b.WriteByte('#')
@@ -789,18 +794,24 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 		return seg, segErr("segment " + strconv.Quote(raw) +
 			`: a bare "*" segment is reserved in v0 for a wildcard (§4.7); write the literal key as "*"`)
 
-	case isComment(body):
-		seg.Kind = SegComment
-		if body == "#t" {
-			seg.Trailing = true
-			return seg, nil
-		}
-		n, err := strconv.Atoi(body[1:])
-		if err != nil {
-			return seg, segErr("segment " + strconv.Quote(raw) + ": comment ordinal out of range")
-		}
-		seg.Index = n
+	case body == "#t":
+		// `#t` is IDENTITY: a member carries at most one trailing comment, so
+		// naming it names exactly one node. It is not an ordinal and it stays.
+		seg.Kind, seg.Trailing = SegComment, true
 		return seg, nil
+
+	case isCommentOrdinal(body):
+		// The bare `#<n>` ordinal is GONE (§4.5b). It was the only
+		// position-based address in a design whose §4 says it has none, and it
+		// resolved from the comment's position in the PATCH BODY rather than in
+		// the target, so a patch naming one comment silently edited another.
+		// Refusing it here is what makes that spelling impossible rather than
+		// merely discouraged; the message has to carry the replacement, because
+		// the writer of a `#0` knows which comment they meant and needs to be
+		// told how to say it.
+		return seg, segErr("segment " + strconv.Quote(raw) +
+			": the comment ordinal " + body + " is not an address — a comment is addressed by " +
+			"the digest of its text, `#hew:comment=<hex>` (§4.5b)")
 
 	case body == "-":
 		seg.Kind = SegAppend
@@ -871,10 +882,6 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 	return seg, nil
 }
 
-// isComment matches "#t" or "#" followed by digits (§4.5b). A segment
-// starting with "#" that matches neither this nor an extension's shape — a
-// Markdown heading is `#`s and a SPACE — is an ordinary key, which is why
-// "#foo" and "##0" address keys.
 // segHashFromTag parses the text after a `#` fragment marker (a tagma tag) into
 // a SegHash segment (satisfied-recoil). It reports ok only when the tag carries
 // a NAMESPACE, which is what distinguishes `#hew:sha256=<hex>` from a
@@ -898,12 +905,18 @@ func segHashFromTag(tagText string) (Segment, bool) {
 	return seg, true
 }
 
-func isComment(body string) bool {
+// isCommentOrdinal matches the RETIRED `#<n>` spelling: a "#" followed by one
+// or more digits (§4.5b). It exists only so the parser can REFUSE that shape
+// with a message naming the digest form. Without it `#0` would fall through to
+// the key fallback and silently address a key literally spelled "#0", which is
+// a worse failure than the ordinal was.
+//
+// A segment starting with "#" that matches neither this, nor "#t", nor an
+// extension's shape — a Markdown heading is `#`s and a SPACE — is an ordinary
+// key, which is why "#foo" and "##0" address keys.
+func isCommentOrdinal(body string) bool {
 	if len(body) < 2 || body[0] != '#' {
 		return false
-	}
-	if body == "#t" {
-		return true
 	}
 	for i := 1; i < len(body); i++ {
 		if body[i] < '0' || body[i] > '9' {

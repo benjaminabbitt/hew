@@ -137,7 +137,7 @@ func TestAtIsAtPathOfParsePath(t *testing.T) {
 	d := atDoc(t)
 	for _, s := range []string{
 		"/", "/port", "/a/b/c", "/servers/0", "/servers/-", `/servers/name="x"`,
-		"/servers/port=8080", `/provider/"google"`, "/list/#1", "/list/#t",
+		"/servers/port=8080", `/provider/"google"`, "/list/" + cfrag("note"), "/list/#t",
 		"/deps/@scope~1pkg", "/a/b?", "/a~0b/c~1d",
 	} {
 		want, err := ParsePath(s)

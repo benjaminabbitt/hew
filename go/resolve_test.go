@@ -306,7 +306,7 @@ func TestResolveInexpressibleSegments(t *testing.T) {
 	// The extension-claimed forms (a Markdown heading, block or marker) are
 	// inexpressible for exactly the same reason and are covered in
 	// ext/markdown's suite, which is the build that has that grammar (§8.8).
-	for _, p := range []string{"/#0", "/server/#t"} {
+	for _, p := range []string{"/" + cfrag("note"), "/server/#t"} {
 		err := resolveErrOf(t, tlOf(Transform{Op: OpRemove, Path: MustParsePath(p)}), doc)
 		mustCode(t, err, hewerr.CodeInexpressible)
 		if !strings.Contains(err.Error(), "no RFC 6901 representation") {
@@ -525,7 +525,7 @@ func TestResolveAbsentTestOnUnmatchableKeyMatch(t *testing.T) {
 
 func TestResolveAbsentTestOnInexpressibleSegment(t *testing.T) {
 	doc := mustDoc(t, servers)
-	err := resolveErrOf(t, tlOf(Transform{Op: OpTest, Path: MustParsePath("/server/#0"), Absent: true}), doc)
+	err := resolveErrOf(t, tlOf(Transform{Op: OpTest, Path: MustParsePath("/server/" + cfrag("note")), Absent: true}), doc)
 	mustCode(t, err, hewerr.CodeInexpressible)
 }
 

@@ -298,9 +298,9 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 	return nil, noMatch("segment kind %v has no TOML representation (§8.4)", seg.Kind)
 }
 
-// stepComment resolves a comment address (§4.5b): "#n" selects the n'th
-// standalone comment of the current table, "#t" the trailing comment on the
-// current node's line.
+// stepComment resolves a comment address (§4.5b): a `#hew:comment=<hex>`
+// fragment selects the standalone comment of the current table whose text
+// hashes to that digest, "#t" the trailing comment on the current node's line.
 func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 	if cur.node == nil {
 		return nil, noMatch("no node to attach a comment address to")
@@ -316,32 +316,30 @@ func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		}
 		return &ref{comment: c, parent: cur.parent}, nil
 	}
+	if seg.Hash == "" {
+		// The ordinal is gone (§4.5b) and the parser refuses it, so this is
+		// only reachable from a Segment built in code. Refusing beats falling
+		// back to Index, which would resolve position 0 for every such segment.
+		return nil, noMatch("a comment is addressed by the digest of its text, `#hew:comment=<hex>`")
+	}
+	// Addressed by the digest of its TEXT. Identical comments collide just as
+	// identical set members do, and are resolved by the same scored locator
+	// rather than by a private rule.
 	comments := r.d.commentChildren(cur.node)
-	if seg.Hash != "" {
-		// Addressed by the digest of its TEXT. Identical comments collide just as
-		// identical set members do, and are resolved by the same scored locator
-		// rather than by a private rule.
-		var cands []hew.Candidate
-		for i, c := range comments {
-			if seg.MatchesComment(c.text) {
-				cands = append(cands, hew.Candidate{Index: i})
-			}
+	var cands []hew.Candidate
+	for i, c := range comments {
+		if seg.MatchesComment(c.text) {
+			cands = append(cands, hew.Candidate{Index: i})
 		}
-		if len(cands) == 0 {
-			return nil, noMatch("no comment matches %s", seg.String())
-		}
-		pick := hew.Locate(cands, len(comments), r.adv)
-		if !pick.OK {
-			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true, detail: pick.Explain(seg)}
-		}
-		return &ref{comment: comments[pick.Index], parent: cur.node}, nil
 	}
-	// A bare ordinal is no longer produced by anything; it resolves only for a
-	// hand-authored patch that still carries one.
-	if seg.Index < 0 || seg.Index >= len(comments) {
-		return nil, noMatch("no comment #%d in this container (found %d)", seg.Index, len(comments))
+	if len(cands) == 0 {
+		return nil, noMatch("no comment matches %s", seg.String())
 	}
-	return &ref{comment: comments[seg.Index], parent: cur.node}, nil
+	pick := hew.Locate(cands, len(comments), r.adv)
+	if !pick.OK {
+		return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true, detail: pick.Explain(seg)}
+	}
+	return &ref{comment: comments[pick.Index], parent: cur.node}, nil
 }
 
 // commentAnchor is the offset a "#t" address scans forward from: the end of

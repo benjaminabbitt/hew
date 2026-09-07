@@ -451,25 +451,29 @@ func TestCommentLineWithoutPlacementLandsInTheContainer(t *testing.T) {
 
 func TestStandaloneCommentIsTestedReplacedAndRemoved(t *testing.T) {
 	target := "[a]\n# one\n\nx = 1\n"
-	mustApply(t, target, "  - op: test\n    path: /a/#0\n    value:\n      comment: one\n"+
-		"  - op: replace\n    path: /a/#0\n    value:\n      comment: two\n", "[a]\n# two\n\nx = 1\n")
-	mustApply(t, target, "  - op: remove\n    path: /a/#0\n", "[a]\n\nx = 1\n")
+	mustApply(t, target, "  - op: test\n    path: /a/"+cfrag("one")+"\n    value:\n      comment: one\n"+
+		"  - op: replace\n    path: /a/"+cfrag("one")+"\n    value:\n      comment: two\n", "[a]\n# two\n\nx = 1\n")
+	mustApply(t, target, "  - op: remove\n    path: /a/"+cfrag("one")+"\n", "[a]\n\nx = 1\n")
 }
 
 // A missing node under a `test` is drift (HEW010), the same as any other
 // before-image assert that cannot be satisfied; under a write it is HEW013.
-func TestCommentAddressOutOfRangeIsMissing(t *testing.T) {
-	he := mustFail(t, "[a]\nx = 1\n", "  - op: test\n    path: /a/#0\n    value:\n      comment: q\n",
-		hewerr.CodeStaleTarget, "/a/#0")
-	mustContain(t, he, "no comment #0")
-	he = mustFail(t, "[a]\nx = 1\n", "  - op: remove\n    path: /a/#0\n", hewerr.CodeNoMatch, "/a/#0")
+func TestCommentAddressMatchingNothingIsMissing(t *testing.T) {
+	he := mustFail(t, "[a]\nx = 1\n",
+		"  - op: test\n    path: /a/"+cfrag("q")+"\n    value:\n      comment: q\n",
+		hewerr.CodeStaleTarget, "/a/"+cfrag("q"))
+	mustContain(t, he, "no comment matches")
+	he = mustFail(t, "[a]\nx = 1\n", "  - op: remove\n    path: /a/"+cfrag("q")+"\n",
+		hewerr.CodeNoMatch, "/a/"+cfrag("q"))
 	mustContain(t, he, "remove: node does not exist")
 }
 
+// Naming a comment by one text and asserting another is DRIFT, not a miss: the
+// address found a node and the before-image disagreed with it.
 func TestCommentTextDrifted(t *testing.T) {
 	he := mustFail(t, "[a]\n# one\n\nx = 1\n",
-		"  - op: test\n    path: /a/#0\n    value:\n      comment: two\n",
-		hewerr.CodeStaleTarget, "/a/#0")
+		"  - op: test\n    path: /a/"+cfrag("one")+"\n    value:\n      comment: two\n",
+		hewerr.CodeStaleTarget, "/a/"+cfrag("one"))
 	mustContain(t, he, "comment text differs", "expected two", "found one")
 }
 
@@ -492,14 +496,14 @@ func TestTrailingCommentAbsentOrImpossible(t *testing.T) {
 
 func TestCommentAddressNeedsACommentValue(t *testing.T) {
 	target := "[a]\n# one\n\nx = 1\n"
-	he := mustFail(t, target, "  - op: test\n    path: /a/#0\n    value: 5\n",
-		hewerr.CodeInexpressible, "/a/#0")
+	he := mustFail(t, target, "  - op: test\n    path: /a/"+cfrag("one")+"\n    value: 5\n",
+		hewerr.CodeInexpressible, "/a/"+cfrag("one"))
 	mustContain(t, he, "§4.5b")
-	he = mustFail(t, target, "  - op: replace\n    path: /a/#0\n    value: 5\n",
-		hewerr.CodeInexpressible, "/a/#0")
+	he = mustFail(t, target, "  - op: replace\n    path: /a/"+cfrag("one")+"\n    value: 5\n",
+		hewerr.CodeInexpressible, "/a/"+cfrag("one"))
 	mustContain(t, he, "§4.5b")
-	he = mustFail(t, "[a]\nx = 1\n", "  - op: add\n    path: /a/#0\n    value: 5\n",
-		hewerr.CodeInexpressible, "/a/#0")
+	he = mustFail(t, "[a]\nx = 1\n", "  - op: add\n    path: /a/"+cfrag("one")+"\n    value: 5\n",
+		hewerr.CodeInexpressible, "/a/"+cfrag("one"))
 	mustContain(t, he, "§4.5b")
 }
 
@@ -510,18 +514,21 @@ func TestCommentCannotBeAddedToATableWithNoBody(t *testing.T) {
 }
 
 func TestDescendingIntoACommentIsRefused(t *testing.T) {
-	he := mustFail(t, "[a]\n# one\n\nx = 1\n", "  - op: test\n    path: /a/#0/x\n    value: 1\n",
-		hewerr.CodeStaleTarget, "/a/#0/x")
+	he := mustFail(t, "[a]\n# one\n\nx = 1\n",
+		"  - op: test\n    path: /a/"+cfrag("one")+"/x\n    value: 1\n",
+		hewerr.CodeStaleTarget, "/a/"+cfrag("one")+"/x")
 	mustContain(t, he, "cannot descend into a comment node")
 }
 
 // A comment glued to the member below it is that member's leading comment, not
 // a free comment of the container (§8.2's rule, which §8.4 inherits); only the
-// one with a blank line under it is addressable as /#0.
+// one with a blank line under it is addressable as a comment of the root.
 func TestCommentAtTheRootIsAddressable(t *testing.T) {
-	mustApply(t, "# hello\n\nx = 1\n", "  - op: replace\n    path: /#0\n    value:\n      comment: bye\n",
+	mustApply(t, "# hello\n\nx = 1\n",
+		"  - op: replace\n    path: /"+cfrag("hello")+"\n    value:\n      comment: bye\n",
 		"# bye\n\nx = 1\n")
-	mustFail(t, "# hello\nx = 1\n", "  - op: remove\n    path: /#0\n", hewerr.CodeNoMatch, "/#0")
+	mustFail(t, "# hello\nx = 1\n", "  - op: remove\n    path: /"+cfrag("hello")+"\n",
+		hewerr.CodeNoMatch, "/"+cfrag("hello"))
 }
 
 // --- tests, §7.1 -------------------------------------------------------------
@@ -981,21 +988,25 @@ func TestCommentChildrenSkipMemberOwnedComments(t *testing.T) {
 	}
 }
 
-// A table's comments stop where the next table begins: a free comment under
-// [b] is not addressable as /a/#1.
+// A table's comments stop where the next table begins: the free comment under
+// [b] is not reachable from /a, even by its own text.
 func TestCommentChildrenStopAtTheNextTable(t *testing.T) {
 	target := "[a]\n# free\n\nx = 1\n\n[b]\n# other\n\ny = 2\n"
-	mustApply(t, target, "  - op: test\n    path: /a/#0\n    value:\n      comment: free\n"+
-		"  - op: test\n    path: /b/#0\n    value:\n      comment: other\n"+
+	mustApply(t, target, "  - op: test\n    path: /a/"+cfrag("free")+"\n    value:\n      comment: free\n"+
+		"  - op: test\n    path: /b/"+cfrag("other")+"\n    value:\n      comment: other\n"+
 		"  - op: replace\n    path: /a/x\n    value: 2\n",
 		"[a]\n# free\n\nx = 2\n\n[b]\n# other\n\ny = 2\n")
-	mustFail(t, target, "  - op: remove\n    path: /a/#1\n", hewerr.CodeNoMatch, "/a/#1")
+	// "other" exists in the document, but not among /a's comments — which is
+	// the containment this test is about, now stated by text instead of index.
+	mustFail(t, target, "  - op: remove\n    path: /a/"+cfrag("other")+"\n",
+		hewerr.CodeNoMatch, "/a/"+cfrag("other"))
 }
 
 // The comment scan walks to the end of the file, including a last line that is
 // nothing but blanks and never terminated.
 func TestCommentScanSurvivesATrailingBlankLine(t *testing.T) {
-	mustApply(t, "# c\n\nx = 1\n\n   ", "  - op: replace\n    path: /#0\n    value:\n      comment: d\n",
+	mustApply(t, "# c\n\nx = 1\n\n   ",
+		"  - op: replace\n    path: /"+cfrag("c")+"\n    value:\n      comment: d\n",
 		"# d\n\nx = 1\n\n   ")
 }
 
@@ -1095,8 +1106,8 @@ func TestTrailingBlanksAndBareCommentsParse(t *testing.T) {
 	mustApply(t, "x = 1\n\n   ", "  - op: replace\n    path: /x\n    value: 2\n", "x = 2\n\n   ")
 	// An indented free comment, and a "#" with nothing after it at end of file.
 	mustApply(t, "[a]\n   # spaced\n\nx = 1\n#",
-		"  - op: test\n    path: /a/#0\n    value:\n      comment: spaced\n"+
-			"  - op: replace\n    path: /a/#1\n    value:\n      comment: tail\n",
+		"  - op: test\n    path: /a/"+cfrag("spaced")+"\n    value:\n      comment: spaced\n"+
+			"  - op: replace\n    path: /a/"+cfrag("")+"\n    value:\n      comment: tail\n",
 		"[a]\n   # spaced\n\nx = 1\n#tail")
 }
 
@@ -1210,8 +1221,8 @@ func TestAddingAtACommentAddressIsRefused(t *testing.T) {
 
 func TestACommentAddressCannotBeChainedOntoAComment(t *testing.T) {
 	he := mustFail(t, "[a]\n# one\n\nx = 1\n",
-		"  - op: test\n    path: /a/#0/#0\n    value:\n      comment: q\n",
-		hewerr.CodeStaleTarget, "/a/#0/#0")
+		"  - op: test\n    path: /a/"+cfrag("one")+"/"+cfrag("one")+"\n    value:\n      comment: q\n",
+		hewerr.CodeStaleTarget, "/a/"+cfrag("one")+"/"+cfrag("one"))
 	mustContain(t, he, "no node to attach a comment address to")
 }
 

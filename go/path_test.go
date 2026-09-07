@@ -34,10 +34,10 @@ func TestParsePathHashFragmentRoundTrips(t *testing.T) {
 	}
 }
 
-// The hash fragment must not swallow the native `#` forms: a comment ordinal and
-// a trailing comment carry no namespace, so they stay SegComment.
+// The hash fragment must not swallow the native `#` forms: `#t` carries no
+// namespace, and the comment digest carries one, and both stay SegComment.
 func TestHashFragmentDoesNotCaptureComments(t *testing.T) {
-	for _, s := range []string{"/server/#0", "/server/timeout/#t"} {
+	for _, s := range []string{"/server/" + cfrag("note"), "/server/timeout/#t"} {
 		p, err := ParsePath(s)
 		if err != nil {
 			t.Fatalf("ParsePath(%q): %v", s, err)
@@ -45,6 +45,37 @@ func TestHashFragmentDoesNotCaptureComments(t *testing.T) {
 		segs := p.Segments()
 		if k := segs[len(segs)-1].Kind; k != SegComment {
 			t.Fatalf("%q last segment kind = %v, want SegComment", s, k)
+		}
+	}
+}
+
+// The bare `#<n>` comment ordinal is GONE, not merely deprecated. It was the
+// one position-based address in a design whose §4 says it has none, and it
+// mislocated silently: the ordinal came from the comment's position in the
+// patch body, so a patch naming one comment resolved to another and the
+// before-image assertion agreed with the wrong node. Parsing it must fail, and
+// the message must name the replacement — a reader who wrote `#0` needs to be
+// told what to write instead, not merely that `#0` is not a path.
+func TestCommentOrdinalIsAParseError(t *testing.T) {
+	for _, s := range []string{"/#0", "/server/#1", "/a/#12", "/#0/x"} {
+		_, err := ParsePath(s)
+		if err == nil {
+			t.Fatalf("ParsePath(%q) should fail: the comment ordinal is gone (§4.5b)", s)
+		}
+		if !strings.Contains(err.Error(), "#hew:comment=") {
+			t.Fatalf("ParsePath(%q) must name the digest form as the replacement, got: %v", s, err)
+		}
+	}
+	// `#t` is NOT an ordinal: it names the trailing comment of a member, of
+	// which there is at most one, so it is an identity and it survives.
+	if _, err := ParsePath("/a/#t"); err != nil {
+		t.Fatalf("#t is identity, not an ordinal, and stays legal: %v", err)
+	}
+	// A `#` followed by anything that is not digits or `t` is still an
+	// ordinary key, which is what keeps `#foo` and `##0` addressable.
+	for _, s := range []string{"/#foo", "/##0"} {
+		if _, err := ParsePath(s); err != nil {
+			t.Fatalf("ParsePath(%q) is a key, not a comment address: %v", s, err)
 		}
 	}
 }
@@ -178,7 +209,7 @@ func TestSegmentSpellability(t *testing.T) {
 		{"boolean match value", Segment{Kind: SegMatch, Name: "enabled", Value: Scalar{Kind: ScalarBool, Text: "true"}}, true},
 		{"null match value", Segment{Kind: SegMatch, Name: "x", Value: Scalar{Kind: ScalarNull, Text: "null"}}, true},
 		{"match field containing =", Segment{Kind: SegMatch, Name: "a=b", Value: Scalar{Kind: ScalarString, Text: "c"}}, true},
-		{"comment ordinal", Segment{Kind: SegComment, Index: 0}, true},
+		{"comment digest", commentSegment("note"), true},
 		{"trailing comment", Segment{Kind: SegComment, Trailing: true}, true},
 
 		// --- the classes the quoted form rescued (O41) -----------------------
@@ -203,7 +234,10 @@ func TestSegmentSpellability(t *testing.T) {
 
 		// --- the residue: data no address can carry --------------------------
 		{"negative index reads back as a key", Segment{Kind: SegIndex, Index: -1}, false},
-		{"negative comment ordinal reads back as a key", Segment{Kind: SegComment, Index: -1}, false},
+		// A comment segment carrying neither a digest nor the `#t` flag has no
+		// spelling left now that the ordinal is gone: it renders as a
+		// value-less `#hew:comment=` tag, which does not read back.
+		{"comment with no digest has no spelling", Segment{Kind: SegComment}, false},
 		// An extension-claimed segment no linked extension claims: the token
 		// re-reads as whatever the core makes of it, here an ordinary key.
 		{"unclaimed extension token reads back as a key", Segment{Kind: SegExtension, Form: "heading", Raw: "# Setup"}, false},

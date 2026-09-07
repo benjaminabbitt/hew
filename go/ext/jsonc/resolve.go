@@ -139,8 +139,8 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 }
 
 // stepComment resolves a §4.5b comment address: `#t` is the trailing comment
-// of the member or element just stepped through, `#n` the n'th standalone
-// comment node of the container just stepped to.
+// of the member or element just stepped through, `#hew:comment=<hex>` the
+// standalone comment of the container just stepped to whose text hashes to it.
 func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
 	if seg.Trailing {
 		switch {
@@ -152,34 +152,32 @@ func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
 		return ref{}, &resolveErr{detail: "no trailing comment here"}
 	}
 	if cur.node == nil || !cur.node.container() {
-		return ref{}, &resolveErr{detail: "comment ordinals address a container's comments"}
+		return ref{}, &resolveErr{detail: "a comment address names a container's comments"}
 	}
+	if seg.Hash == "" {
+		// The ordinal is gone (§4.5b) and the parser refuses it, so this is
+		// only reachable from a Segment built in code. Refusing beats falling
+		// back to Index, which would resolve position 0 for every such segment.
+		return ref{}, &resolveErr{detail: "a comment is addressed by the digest of its text, `#hew:comment=<hex>`"}
+	}
+	// Addressed by the digest of its TEXT. Identical comments collide just as
+	// identical set members do, and are resolved by the same scored locator
+	// rather than by a private rule.
 	all := cur.node.standalone()
-	if seg.Hash != "" {
-		// Addressed by the digest of its TEXT. Identical comments collide just as
-		// identical set members do, and are resolved by the same scored locator
-		// rather than by a private rule.
-		var cands []hew.Candidate
-		for i, c := range all {
-			if seg.MatchesComment(c.text) {
-				cands = append(cands, hew.Candidate{Index: i})
-			}
+	var cands []hew.Candidate
+	for i, c := range all {
+		if seg.MatchesComment(c.text) {
+			cands = append(cands, hew.Candidate{Index: i})
 		}
-		if len(cands) == 0 {
-			return ref{}, &resolveErr{detail: "no comment matches " + seg.String()}
-		}
-		pick := hew.Locate(cands, len(all), d.adv)
-		if !pick.OK {
-			return ref{}, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
-		}
-		return ref{cmt: all[pick.Index], parent: cur.node}, nil
 	}
-	// A bare ordinal is no longer produced by anything; it resolves only for a
-	// hand-authored patch that still carries one.
-	if seg.Index < 0 || seg.Index >= len(all) {
-		return ref{}, &resolveErr{detail: fmt.Sprintf("no comment node #%d in this container", seg.Index)}
+	if len(cands) == 0 {
+		return ref{}, &resolveErr{detail: "no comment matches " + seg.String()}
 	}
-	return ref{cmt: all[seg.Index], parent: cur.node}, nil
+	pick := hew.Locate(cands, len(all), d.adv)
+	if !pick.OK {
+		return ref{}, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
+	}
+	return ref{cmt: all[pick.Index], parent: cur.node}, nil
 }
 
 // comparedValue is the value a key-match compares this element against (§4.2).

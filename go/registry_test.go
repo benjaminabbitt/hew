@@ -425,7 +425,10 @@ func TestCoreShapesOutrankAClaim(t *testing.T) {
 	}{
 		{`"aws"`, SegKey}, // the LITERAL form; what it means is the container's (§4.1, O41)
 		{"-", SegAppend},
-		{"#0", SegComment},
+		// `#t` only: the `#hew:comment=<hex>` digest is read AFTER an
+		// extension's claim (§8.8 puts a claim ahead of the fragment
+		// fallbacks), exactly as `#hew:sha256=` already is, so a form that
+		// claims everything does take it.
 		{"#t", SegComment},
 		// These two the extension DOES take, because §8.8 puts the claim ahead
 		// of index, key-match and key — the shapes a claimed spelling has
@@ -443,6 +446,13 @@ func TestCoreShapesOutrankAClaim(t *testing.T) {
 	}
 	if p, _ := ParsePath(`/"aws"`); !p.Segment(0).IsQuoted() {
 		t.Error(`a greedy claim must not take the quoted form's literal spelling either`)
+	}
+	// The RETIRED `#<n>` ordinal is still a shape the core owns: it is refused
+	// with the digest form named, not quietly handed to an extension that
+	// claims everything. Ownership is what makes the refusal reachable.
+	_, err := ParsePath("/#0")
+	if err == nil || !strings.Contains(err.Error(), "#hew:comment=") {
+		t.Errorf("a greedy claim must not take the retired comment ordinal either: %v", err)
 	}
 }
 

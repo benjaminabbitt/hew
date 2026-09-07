@@ -259,19 +259,17 @@ func (d *differ) container(path Path, old, new *DiffNode) error {
 func (d *differ) match(path Path, addr addressing, old, new *DiffNode) []slot {
 	oldIDs := addr.identities(old.Children)
 	newIDs := addr.identities(new.Children)
-	oldCmt := commentOrdinals(old.Children)
-	newCmt := commentOrdinals(new.Children)
 
 	var out []slot
 	for _, step := range myers(oldIDs, newIDs) {
 		switch step.Kind {
 		case editDelete:
 			c := &old.Children[step.A]
-			ref := addr.childPath(path, *c, step.A, oldCmt[step.A])
+			ref := addr.childPath(path, *c, step.A)
 			out = append(out, slot{state: slotRemoved, old: c, ref: ref, addPath: ref})
 		case editInsert:
 			c := &new.Children[step.B]
-			ref := addr.childPath(path, *c, step.B, newCmt[step.B])
+			ref := addr.childPath(path, *c, step.B)
 			add := ref
 			// A sequence element and a COMMENT are both keyless, so an add
 			// names the CONTAINER and the slot's placement carries the
@@ -285,7 +283,7 @@ func (d *differ) match(path Path, addr addressing, old, new *DiffNode) []slot {
 			out = append(out, slot{state: slotAdded, new: c, ref: ref, addPath: add})
 		default:
 			o, n := &old.Children[step.A], &new.Children[step.B]
-			ref := addr.childPath(path, *o, step.A, oldCmt[step.A])
+			ref := addr.childPath(path, *o, step.A)
 			out = append(out, slot{state: pairState(o, n), old: o, new: n, ref: ref, addPath: ref})
 		}
 	}
@@ -301,22 +299,6 @@ func pairState(o, n *DiffChild) slotState {
 		return slotNested
 	}
 	return slotReplaced
-}
-
-// commentOrdinals numbers a container's comment children, which is what the
-// `#<n>` address counts (§4.5b: kind-scoped within the container).
-func commentOrdinals(children []DiffChild) []int {
-	out := make([]int, len(children))
-	n := 0
-	for i, c := range children {
-		if c.Comment {
-			out[i] = n
-			n++
-		} else {
-			out[i] = -1
-		}
-	}
-	return out
 }
 
 // --- context radius and emission --------------------------------------------
@@ -627,7 +609,7 @@ func identityToken(n *DiffNode, field string) string {
 }
 
 // childPath addresses one child of the container at path.
-func (a addressing) childPath(path Path, c DiffChild, index, commentIndex int) Path {
+func (a addressing) childPath(path Path, c DiffChild, index int) Path {
 	switch {
 	case c.Comment:
 		return path.Append(commentSegment(c.Text))

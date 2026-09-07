@@ -8,6 +8,12 @@ import (
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
+// cfrag is a comment's address (§4.5b): `#hew:comment=<hex>` over the digest of
+// its text. Computed from the text so the opaque digest is never transcribed.
+func cfrag(text string) string {
+	return strings.TrimPrefix(hew.NewPath(hew.Comment(text)).String(), "/")
+}
+
 // hewt wraps transform records in a .hewt document for the "t.yaml" target.
 func hewtDoc(records string) string {
 	return "hew-transforms: 1\ntarget: t.yaml\nformat: yaml\ntransforms:\n" + records
@@ -295,20 +301,25 @@ func TestCommentAddressing(t *testing.T) {
 		"  port: 8080 # trailing\n" +
 		"  # second\n" +
 		"  timeout: 30\n"
-	t.Run("test by ordinal", func(t *testing.T) {
+	t.Run("test by text", func(t *testing.T) {
 		records := "" +
-			"  - op: test\n    path: /server/#0\n    value:\n      comment: first\n" +
-			"  - op: test\n    path: /server/#1\n    value:\n      comment: second\n" +
+			"  - op: test\n    path: /server/" + cfrag("first") + "\n    value:\n      comment: first\n" +
+			"  - op: test\n    path: /server/" + cfrag("second") + "\n    value:\n      comment: second\n" +
 			"  - op: test\n    path: /server/port/#t\n    value:\n      comment: trailing\n"
 		mustApply(t, target, records, target)
 	})
 	t.Run("stale comment text", func(t *testing.T) {
-		he := mustFail(t, target, "  - op: test\n    path: /server/#0\n    value:\n      comment: nope\n",
-			hewerr.CodeStaleTarget, "/server/#0")
+		// The address selects the comment reading "first"; the assertion says
+		// "nope". The node is found and the VALUE disagrees, which is a stale
+		// target — distinct from naming a comment that is not there at all.
+		he := mustFail(t, target,
+			"  - op: test\n    path: /server/"+cfrag("first")+"\n    value:\n      comment: nope\n",
+			hewerr.CodeStaleTarget, "/server/"+cfrag("first"))
 		mustContain(t, he, "first")
 	})
 	t.Run("replace", func(t *testing.T) {
-		mustApply(t, target, "  - op: replace\n    path: /server/#1\n    value:\n      comment: rewritten\n",
+		mustApply(t, target,
+			"  - op: replace\n    path: /server/"+cfrag("second")+"\n    value:\n      comment: rewritten\n",
 			strings.Replace(target, "# second", "# rewritten", 1))
 	})
 	t.Run("replace trailing", func(t *testing.T) {
@@ -316,7 +327,7 @@ func TestCommentAddressing(t *testing.T) {
 			strings.Replace(target, "# trailing", "# tail", 1))
 	})
 	t.Run("remove", func(t *testing.T) {
-		mustApply(t, target, "  - op: remove\n    path: /server/#0\n",
+		mustApply(t, target, "  - op: remove\n    path: /server/"+cfrag("first")+"\n",
 			strings.Replace(target, "  # first\n", "", 1))
 	})
 	t.Run("add", func(t *testing.T) {
@@ -325,37 +336,44 @@ func TestCommentAddressing(t *testing.T) {
 		mustApply(t, target, "  - op: add\n    path: /server\n    after: /server/port\n    value:\n      comment: added\n",
 			strings.Replace(target, "  # second", "  # added\n  # second", 1))
 	})
-	t.Run("out of range", func(t *testing.T) {
-		// #2 is one past the last comment: the boundary, not merely far away.
-		mustFail(t, target, "  - op: replace\n    path: /server/#2\n    value:\n      comment: x\n",
-			hewerr.CodeNoMatch, "/server/#2")
-		mustFail(t, target, "  - op: replace\n    path: /server/#9\n    value:\n      comment: x\n",
-			hewerr.CodeNoMatch, "/server/#9")
+	t.Run("no comment with that text", func(t *testing.T) {
+		// The digest replaces the ordinal's whole failure mode: there is no
+		// "out of range" any more, only a digest nothing in the container
+		// hashes to. A near miss fails exactly as a far one does.
+		mustFail(t, target,
+			"  - op: replace\n    path: /server/"+cfrag("firs")+"\n    value:\n      comment: x\n",
+			hewerr.CodeNoMatch, "/server/"+cfrag("firs"))
+		mustFail(t, target,
+			"  - op: replace\n    path: /server/"+cfrag("nothing like it")+"\n    value:\n      comment: x\n",
+			hewerr.CodeNoMatch, "/server/"+cfrag("nothing like it"))
 	})
 	t.Run("no trailing comment", func(t *testing.T) {
 		mustFail(t, target, "  - op: replace\n    path: /server/timeout/#t\n    value:\n      comment: x\n",
 			hewerr.CodeNoMatch, "/server/timeout/#t")
 	})
 	t.Run("a comment address needs a comment value", func(t *testing.T) {
-		mustFail(t, target, "  - op: replace\n    path: /server/#0\n    value: plain\n",
-			hewerr.CodeInexpressible, "/server/#0")
-		mustFail(t, target, "  - op: test\n    path: /server/#0\n    value: plain\n",
-			hewerr.CodeInexpressible, "/server/#0")
-		mustFail(t, target, "  - op: add\n    path: /server/#3\n    value: plain\n",
-			hewerr.CodeInexpressible, "/server/#3")
+		mustFail(t, target, "  - op: replace\n    path: /server/"+cfrag("first")+"\n    value: plain\n",
+			hewerr.CodeInexpressible, "/server/"+cfrag("first"))
+		mustFail(t, target, "  - op: test\n    path: /server/"+cfrag("first")+"\n    value: plain\n",
+			hewerr.CodeInexpressible, "/server/"+cfrag("first"))
+		// An ADD at a comment address is refused whatever the value: the
+		// address names a comment that already exists, which an add has not.
+		mustFail(t, target, "  - op: add\n    path: /server/"+cfrag("first")+"\n    value: plain\n",
+			hewerr.CodeInexpressible, "/server/"+cfrag("first"))
 	})
 	t.Run("a comment is neither a container nor a kind", func(t *testing.T) {
-		mustFail(t, target, "  - op: test\n    path: /server/#0\n    count: 0\n",
-			hewerr.CodeAssertionFailed, "/server/#0")
-		mustFail(t, target, "  - op: test\n    path: /server/#0\n    kind: scalar\n",
-			hewerr.CodeAssertionFailed, "/server/#0")
-		mustApply(t, target, "  - op: test\n    path: /server/#9\n    absent: true\n", target)
+		mustFail(t, target, "  - op: test\n    path: /server/"+cfrag("first")+"\n    count: 0\n",
+			hewerr.CodeAssertionFailed, "/server/"+cfrag("first"))
+		mustFail(t, target, "  - op: test\n    path: /server/"+cfrag("first")+"\n    kind: scalar\n",
+			hewerr.CodeAssertionFailed, "/server/"+cfrag("first"))
+		mustApply(t, target,
+			"  - op: test\n    path: /server/"+cfrag("no such comment")+"\n    absent: true\n", target)
 	})
 	t.Run("cannot descend through a comment", func(t *testing.T) {
-		mustFail(t, target, "  - op: test\n    path: /server/#0/x\n    value: 1\n",
-			hewerr.CodeStaleTarget, "/server/#0/x")
-		mustFail(t, target, "  - op: remove\n    path: /server/#0/x\n",
-			hewerr.CodeNoMatch, "/server/#0/x")
+		mustFail(t, target, "  - op: test\n    path: /server/"+cfrag("first")+"/x\n    value: 1\n",
+			hewerr.CodeStaleTarget, "/server/"+cfrag("first")+"/x")
+		mustFail(t, target, "  - op: remove\n    path: /server/"+cfrag("first")+"/x\n",
+			hewerr.CodeNoMatch, "/server/"+cfrag("first")+"/x")
 	})
 }
 

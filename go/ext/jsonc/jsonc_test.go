@@ -231,7 +231,7 @@ func TestAnchoringClassification(t *testing.T) {
 		t.Errorf("b should carry no comments: %+v", b)
 	}
 	// Standalone ordinals count free AND leading comments in source order,
-	// which is what corpus yaml/set-scalar's /server/#0 pins.
+	// which is what corpus yaml/set-scalar's comment assertion pins.
 	all := d.root.standalone()
 	if len(all) != 2 || all[0].text != "free, blank line below" || all[1].text != "leading for a" {
 		t.Fatalf("standalone ordinals wrong: %v", texts(all))
@@ -285,11 +285,11 @@ func TestRemovingLastMemberDropsThePrecedingComma(t *testing.T) {
 }
 
 func TestCommentAddressesResolve(t *testing.T) {
-	// #0 is the free comment, #1 the leading one, /a/#t the trailing one.
+	// Each comment is named by its own text; /a/#t is the trailing one.
 	wantApply(t, anchorDoc, strings.Replace(anchorDoc, "// free, blank line below", "// rewritten", 1),
-		hew.Transform{Op: hew.OpReplace, Path: p("/#0"), Value: cval("rewritten")})
+		hew.Transform{Op: hew.OpReplace, Path: p("/" + cfrag("free, blank line below")), Value: cval("rewritten")})
 	wantApply(t, anchorDoc, strings.Replace(anchorDoc, "// leading for a", "// rewritten", 1),
-		hew.Transform{Op: hew.OpReplace, Path: p("/#1"), Value: cval("rewritten")})
+		hew.Transform{Op: hew.OpReplace, Path: p("/" + cfrag("leading for a")), Value: cval("rewritten")})
 	wantApply(t, anchorDoc, strings.Replace(anchorDoc, "// trailing on a", "// rewritten", 1),
 		hew.Transform{Op: hew.OpReplace, Path: p("/a/#t"), Value: cval("rewritten")})
 }
@@ -302,7 +302,7 @@ func TestRemoveCommentNodes(t *testing.T) {
   "a": 1, // trailing on a
   "b": 2
 }
-`, hew.Transform{Op: hew.OpRemove, Path: p("/#0")})
+`, hew.Transform{Op: hew.OpRemove, Path: p("/" + cfrag("free, blank line below"))})
 
 	// A leading comment can be removed on its own, leaving its member behind.
 	wantApply(t, anchorDoc, `{
@@ -311,7 +311,7 @@ func TestRemoveCommentNodes(t *testing.T) {
   "a": 1, // trailing on a
   "b": 2
 }
-`, hew.Transform{Op: hew.OpRemove, Path: p("/#1")})
+`, hew.Transform{Op: hew.OpRemove, Path: p("/" + cfrag("leading for a"))})
 
 	// A trailing comment is removed with the space that separated it.
 	wantApply(t, anchorDoc, `{
@@ -374,7 +374,7 @@ func TestAddBeforeAMemberTakesItsLeadingComment(t *testing.T) {
 func TestAddAfterALeadingCommentLandsBetweenItAndItsMember(t *testing.T) {
 	src := "{\n  // leads b\n  \"b\": 2\n}\n"
 	wantApply(t, src, "{\n  // leads b\n  \"a\": 1,\n  \"b\": 2\n}\n",
-		hew.Transform{Op: hew.OpAdd, Path: p("/a"), Value: val(t, "1"), After: p("/#0")})
+		hew.Transform{Op: hew.OpAdd, Path: p("/a"), Value: val(t, "1"), After: p("/" + cfrag("leads b"))})
 }
 
 func TestAddAfterAMemberWithATrailingCommentClearsTheComment(t *testing.T) {
@@ -527,27 +527,29 @@ func TestKindAssertion(t *testing.T) {
 }
 
 func TestCommentAssertionsAreTextMatched(t *testing.T) {
-	mustApply(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/#0"), Value: cval("free, blank line below")})
+	mustApply(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/" + cfrag("free, blank line below")), Value: cval("free, blank line below")})
 	// The ordinal a lowered hunk carries counts only the comments the patch
 	// listed, so an assertion that states the text finds it wherever it sits
 	// — the tolerance corpus/jsonc/delete-key-with-comment needs.
-	mustApply(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/#0"), Value: cval("leading for a")})
+	mustApply(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/" + cfrag("leading for a")), Value: cval("leading for a")})
 	mustApply(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/a/#t"), Value: cval("trailing on a")})
-	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/#0"), Value: cval("not there")})
-	wantCode(t, he, hewerr.CodeStaleTarget, "/#0")
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/" + cfrag("free, blank line below")), Value: cval("not there")})
+	wantCode(t, he, hewerr.CodeStaleTarget, "/"+cfrag("free, blank line below"))
 	if he.Got != "free, blank line below" {
 		t.Errorf("got should name the comment actually found: %q", he.Got)
 	}
 }
 
 func TestCommentAssertionWithoutACommentValue(t *testing.T) {
-	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/#0"), Value: val(t, "[1]")})
-	wantCode(t, he, hewerr.CodeStaleTarget, "/#0")
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpTest, Path: p("/" + cfrag("free, blank line below")), Value: val(t, "[1]")})
+	wantCode(t, he, hewerr.CodeStaleTarget, "/"+cfrag("free, blank line below"))
 }
 
-func TestCommentOrdinalOutOfRange(t *testing.T) {
-	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpRemove, Path: p("/#7")})
-	wantCode(t, he, hewerr.CodeNoMatch, "/#7")
+// The digest replaces the ordinal's whole failure mode: there is no "out of
+// range" left, only a digest that nothing in the container hashes to.
+func TestCommentAddressMatchingNothing(t *testing.T) {
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpRemove, Path: p("/" + cfrag("no such comment"))})
+	wantCode(t, he, hewerr.CodeNoMatch, "/"+cfrag("no such comment"))
 }
 
 func TestTrailingCommentAddressMissing(t *testing.T) {
@@ -556,13 +558,13 @@ func TestTrailingCommentAddressMissing(t *testing.T) {
 }
 
 func TestCommentAddressNeedsAContainer(t *testing.T) {
-	he := mustFail(t, testDoc, hew.Transform{Op: hew.OpRemove, Path: p("/n/#0")})
-	wantCode(t, he, hewerr.CodeNoMatch, "/n/#0")
+	he := mustFail(t, testDoc, hew.Transform{Op: hew.OpRemove, Path: p("/n/" + cfrag("x"))})
+	wantCode(t, he, hewerr.CodeNoMatch, "/n/"+cfrag("x"))
 }
 
 func TestCommentNodeHasNoChildren(t *testing.T) {
-	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpRemove, Path: p("/#0/x")})
-	wantCode(t, he, hewerr.CodeNoMatch, "/#0/x")
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpRemove, Path: p("/" + cfrag("free, blank line below") + "/x")})
+	wantCode(t, he, hewerr.CodeNoMatch, "/"+cfrag("free, blank line below")+"/x")
 }
 
 // --- add semantics ----------------------------------------------------------
@@ -604,9 +606,23 @@ func TestAddIntoAnArrayRootAppends(t *testing.T) {
 	wantApply(t, "[\n  1\n]\n", "[\n  1,\n  2\n]\n", hew.Transform{Op: hew.OpAdd, Path: p("/"), Value: val(t, "2")})
 }
 
+// An add may not name a comment ADDRESS: the digest identifies a comment that
+// is already in the document, which is exactly what an add does not have. The
+// container spelling is what an add uses, and the refusal says so.
+func TestAddAtACommentAddressIsRefused(t *testing.T) {
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpAdd,
+		Path: p("/" + cfrag("free, blank line below")), Value: cval("another")})
+	wantCode(t, he, hewerr.CodeInexpressible, "/"+cfrag("free, blank line below"))
+	if !strings.Contains(he.Error(), "before:/after:") {
+		t.Errorf("the refusal must name the container spelling: %v", he)
+	}
+}
+
+// A comment ADD is recognised by its value, so a non-comment value at a
+// container is an ordinary add and not a comment at all.
 func TestCommentAddNeedsACommentValue(t *testing.T) {
-	he := mustFail(t, testDoc, hew.Transform{Op: hew.OpAdd, Path: p("/#0"), Value: val(t, "[1, 2]")})
-	wantCode(t, he, hewerr.CodeInexpressible, "/#0")
+	he := mustFail(t, testDoc, hew.Transform{Op: hew.OpAdd, Path: p("/n"), Value: val(t, "[1, 2]")})
+	wantCode(t, he, hewerr.CodeAlreadyExists, "/n")
 }
 
 func TestTrailingCommentAddNeedsAMember(t *testing.T) {
@@ -636,8 +652,8 @@ func TestReplaceRequiresTheNode(t *testing.T) {
 }
 
 func TestReplaceCommentNeedsACommentValue(t *testing.T) {
-	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpReplace, Path: p("/#0"), Value: val(t, "[1]")})
-	wantCode(t, he, hewerr.CodeInexpressible, "/#0")
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpReplace, Path: p("/" + cfrag("free, blank line below")), Value: val(t, "[1]")})
+	wantCode(t, he, hewerr.CodeInexpressible, "/"+cfrag("free, blank line below"))
 }
 
 func TestCopyTakesSourceBytesVerbatim(t *testing.T) {
@@ -647,8 +663,8 @@ func TestCopyTakesSourceBytesVerbatim(t *testing.T) {
 }
 
 func TestCopyOfACommentIsRefused(t *testing.T) {
-	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpCopy, Path: p("/x"), From: p("/#0")})
-	wantCode(t, he, hewerr.CodeInexpressible, "/#0")
+	he := mustFail(t, anchorDoc, hew.Transform{Op: hew.OpCopy, Path: p("/x"), From: p("/" + cfrag("free, blank line below"))})
+	wantCode(t, he, hewerr.CodeInexpressible, "/"+cfrag("free, blank line below"))
 }
 
 func TestCopyFromAMissingNode(t *testing.T) {
