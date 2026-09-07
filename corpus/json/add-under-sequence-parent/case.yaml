@@ -1,0 +1,27 @@
+name: json/add-under-sequence-parent
+seams: [e2e]
+kind: error
+format: json
+error: HEW020
+error_seam: applier
+error_path: /items/nope
+patch_line: 6
+message_contains: ["inexpressible", "add"]
+ops: [OP-11]
+why: |
+  An add whose path does NOT resolve and whose PARENT is a sequence is refused,
+  in every format alike. yaml and jsonc used to append into the parent instead,
+  so the same abstract transform against structurally equivalent documents
+  either silently grew a sequence or failed loud, decided only by the target's
+  format — and hew's premise is that a transform means the same thing across
+  formats.
+
+  Refusing is the side chosen because the path matched nothing. Creation on a
+  failed match is opted into through the annotation vocabulary (`! default` =
+  OP-04, `! upsert` = OP-03); nothing in a bare path authorises it, and growing
+  a sequence at an address that resolved to nothing is the failure class hew
+  exists to prevent.
+
+  NOT the sequence-style append, which stays legal: there the path resolves TO
+  the sequence, so the container is what was addressed.
+spec: "§7.7, §9.1, §11 OP-11"

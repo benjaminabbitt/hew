@@ -1,0 +1,4 @@
+{
+  // the array below is not an object
+  "items": [1, 2]
+}

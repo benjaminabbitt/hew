@@ -224,7 +224,18 @@ func (d *doc) planInsert(target string, path, before, after hew.Path, v hew.Valu
 		text := jsonQuote(last.Name) + ": " + d.insertText(v, raw)
 		return d.planChildInsert(target, parent.node, before, after, text, true, line)
 	case parent.node.kind == kArr:
-		return d.planChildInsert(target, parent.node, before, after, d.insertText(v, raw), true, line)
+		// Refused, matching json, yaml and toml for the same shape
+		// (cupped-trowel). The path did NOT resolve, so nothing here was
+		// addressed; appending into the parent anyway grows an array on an
+		// address that did not match, which is the failure class hew exists to
+		// prevent. Creation is opted into through the annotation vocabulary —
+		// `! default` (OP-04) and `! upsert` (OP-03) — never by a bare path.
+		//
+		// NOT the array-style append: that is the resolveFull branch above,
+		// where the path RESOLVES to the array, so the container is what the
+		// transform addressed. That branch is correct and untouched.
+		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line,
+			"add: parent is not an object")
 	default:
 		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line, "add: unsupported address shape")
 	}

@@ -1,0 +1,6 @@
+hew: 1
+
+--- target.jsonc format=jsonc
+
+@@ /items @@
++ nope: 9

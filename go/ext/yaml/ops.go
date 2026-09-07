@@ -229,8 +229,20 @@ func (r *run) planAdd(t hew.Transform) ([]edit, error) {
 	if prf.node.kind == nMap && last.Kind == hew.SegKey {
 		return r.insert(prf.node, r.memberPayload(last.Name, t.Value.Node()), t.Before, t.After, t)
 	}
+	// A parent that is a SEQUENCE is refused, matching json and toml for the
+	// same shape (cupped-trowel). The path did NOT resolve, so nothing here was
+	// addressed; appending into the parent anyway grows a sequence on an
+	// address that did not match, which is the failure class hew exists to
+	// prevent. Creation is opted into through the annotation vocabulary —
+	// `! default` (OP-04) and `! upsert` (OP-03) — never by a bare path.
+	//
+	// NOT to be confused with the sequence-style append, which is the FIRST
+	// branch of this function: there the path RESOLVES to the sequence, so the
+	// container is what the transform addressed and appending is what it asked
+	// for. That branch is correct and untouched.
 	if prf.node.kind == nSeq {
-		return r.insert(prf.node, r.elemPayload(t.Value.Node()), t.Before, t.After, t)
+		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
+			"add: parent is not an object")
 	}
 	return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, "add: unsupported address shape")
 }
