@@ -320,7 +320,9 @@ func TestCommentAddressing(t *testing.T) {
 			strings.Replace(target, "  # first\n", "", 1))
 	})
 	t.Run("add", func(t *testing.T) {
-		mustApply(t, target, "  - op: add\n    path: /server/#2\n    after: /server/port\n    value:\n      comment: added\n",
+		// An add names the CONTAINER: the comment being added has no text in
+		// the target to be identified by, so before:/after: is what places it.
+		mustApply(t, target, "  - op: add\n    path: /server\n    after: /server/port\n    value:\n      comment: added\n",
 			strings.Replace(target, "  # second", "  # added\n  # second", 1))
 	})
 	t.Run("out of range", func(t *testing.T) {

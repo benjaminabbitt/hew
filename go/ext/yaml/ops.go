@@ -172,6 +172,25 @@ func (r *run) elemPayload(v *yaml.Node) payload {
 // with zero ops (`! default` over an existing key, or `! idempotent` over an
 // equal one — §7.5, §7.7).
 func (r *run) planAdd(t hew.Transform) ([]edit, error) {
+	// A comment is a KEYLESS member (§4.5b), so it is added the way a sequence
+	// element is: the add names the CONTAINER, before/after place it (§9.1 step
+	// 5), and the VALUE is what says the new node is a comment. Both questions
+	// are asked before the resolve below — the address one so a stale digest
+	// cannot be mistaken for a key, the value one so a comment added to a
+	// sequence becomes a comment line rather than a scalar element appended.
+	// `#t` is exempt: it names the trailing comment of a member, of which there
+	// is at most one, so it is an identity rather than a stand-in for a
+	// position and stays addressable.
+	if n := t.Path.Len(); n > 0 {
+		if last := t.Path.Segment(n - 1); last.Kind == hew.SegComment && !last.Trailing {
+			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
+				"add: "+last.String()+" identifies a comment that already exists; "+
+					"add one by addressing its container and placing it with before:/after: (§4.5b)")
+		}
+	}
+	if text, ok := commentText(t.Value); ok {
+		return r.addComment(t, text)
+	}
 	rf, he, final := r.resolve(t.Path, t.Anchor, t.PatchLine)
 	if he == nil {
 		// A path that resolves to a SEQUENCE is the sequence-style add: the
@@ -207,20 +226,28 @@ func (r *run) planAdd(t hew.Transform) ([]edit, error) {
 		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, "add: parent is not a container")
 	}
 	last := t.Path.Segment(t.Path.Len() - 1)
-	switch {
-	case last.Kind == hew.SegComment:
-		text, ok := commentText(t.Value)
-		if !ok {
-			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
-				"add: a comment address takes a {comment: \"…\"} value (§4.5b)")
-		}
-		return r.insert(prf.node, payload{lines: []string{"# " + text}}, t.Before, t.After, t)
-	case prf.node.kind == nMap && last.Kind == hew.SegKey:
+	if prf.node.kind == nMap && last.Kind == hew.SegKey {
 		return r.insert(prf.node, r.memberPayload(last.Name, t.Value.Node()), t.Before, t.After, t)
-	case prf.node.kind == nSeq:
+	}
+	if prf.node.kind == nSeq {
 		return r.insert(prf.node, r.elemPayload(t.Value.Node()), t.Before, t.After, t)
 	}
 	return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, "add: unsupported address shape")
+}
+
+// addComment inserts a standalone comment line into the container the add
+// ADDRESSES, positioned by its before/after — the same shape a sequence element
+// add has, because a comment is keyless in the same way (§4.5b, §9.1 step 5).
+func (r *run) addComment(t hew.Transform, text string) ([]edit, error) {
+	rf, he, _ := r.resolve(t.Path, t.Anchor, t.PatchLine)
+	if he != nil {
+		return nil, he
+	}
+	if rf.node == nil || (rf.node.kind != nMap && rf.node.kind != nSeq) {
+		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
+			"add: a comment is added to a container (§4.5b)")
+	}
+	return r.insert(rf.node, payload{lines: []string{"# " + text}}, t.Before, t.After, t)
 }
 
 // conflict implements the add-semantics variants (OP-02/03/04, §7.7) for a

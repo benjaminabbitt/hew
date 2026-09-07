@@ -763,6 +763,15 @@ func (d dialect) sep() string {
 // collection: an added node keeps the new document's own shape (§9.4-R5), and
 // every continuation line carries the same margin.
 func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
+	// A comment is recognised by its VALUE, before any question about its
+	// address: a comment ADD names the CONTAINER it goes into (§9.1 step 5), so
+	// there is no comment segment left to switch on, and rendering it by its
+	// segment kind would print the `{comment: <text>}` wrapper as a literal
+	// mapping. The strict CommentText, not mirror.go's lenient commentTextOf —
+	// as a discriminator this must not read every bare scalar as a comment.
+	if body, ok := CommentText(v); ok {
+		return d.marginate(margin, []string{strings.TrimRight(d.marker+body, " ")})
+	}
 	switch seg.Kind {
 	case SegKey:
 		body := d.valueLines(v)

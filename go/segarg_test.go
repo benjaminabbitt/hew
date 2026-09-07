@@ -43,7 +43,10 @@ func TestSegmentArgConstructors(t *testing.T) {
 		{"match value number", MatchValueNumber("3"),
 			Segment{Kind: SegMatch, Value: Scalar{Kind: ScalarNumber, Text: "3"}}},
 		{"quoted", Quoted("google"), Segment{Kind: SegKey, Name: "google", Quoted: true}},
-		{"comment", Comment(1), Segment{Kind: SegComment, Index: 1}},
+		// Comment takes the comment's TEXT and digests it: the caller hands hew
+		// opaque data, never a digest (O43), exactly as MatchValue does.
+		{"comment", Comment("note"),
+			Segment{Kind: SegComment, Form: "hew", Name: "comment", Hash: hashScalar(CommentValue("note"))}},
 		{"trailing comment", TrailingComment(), Segment{Kind: SegComment, Trailing: true}},
 		{"optional", Optional(Key("tls")), Segment{Kind: SegKey, Name: "tls", Optional: true}},
 		{"optional over a match", Optional(MatchKey("name", "x")),

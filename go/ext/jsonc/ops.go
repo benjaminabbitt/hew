@@ -177,7 +177,19 @@ func (d *doc) planInsert(target string, path, before, after hew.Path, v hew.Valu
 	onConflict hew.OnConflict, idempotent bool, line int) ([]edit, error) {
 	last, hasLast := lastSegment(path)
 	if hasLast && last.Kind == hew.SegComment {
-		return d.planCommentAdd(target, path, before, after, v, last, line)
+		return d.planCommentAdd(target, path, v, last, line)
+	}
+	// A comment is a KEYLESS member, so an add names its container and the
+	// before/after place it (§4.5b, §9.1 step 5); the VALUE is what says the
+	// added node is a comment. Asked before the resolve below, so that a
+	// comment added to an array becomes a comment line rather than a JSON
+	// string element appended to it.
+	// hew.CommentText, not the lenient commentTextOf: as a DISCRIMINATOR this
+	// must accept only the explicit `{comment: <text>}` spelling. commentTextOf
+	// also reads a bare scalar as a comment, which is safe once the path has
+	// already said "comment" but would make every scalar add a comment here.
+	if text, ok := hew.CommentText(v); ok {
+		return d.planContainerCommentAdd(target, path, before, after, text, line)
 	}
 
 	if existing, err := d.resolveFull(target, path, line); err == nil {
@@ -232,15 +244,23 @@ func lastSegment(p hew.Path) (hew.Segment, bool) {
 	return p.Segment(p.Len() - 1), true
 }
 
-// planCommentAdd adds a comment node. A comment ordinal is positional, not an
-// identity: `add /#0` means "a comment node here", placed by the transform's
-// before/after, so an already-occupied ordinal is not HEW014 the way an
-// already-occupied key is.
-func (d *doc) planCommentAdd(target string, path, before, after hew.Path, v hew.Value, last hew.Segment, line int) ([]edit, error) {
+// planCommentAdd handles the one comment ADDRESS an add may still name: `#t`,
+// the trailing comment of the member the path stepped through. A member has at
+// most one, so `#t` is an identity and naming it is meaningful even before it
+// exists. The standalone `#hew:comment=<hex>` form is not: it identifies a
+// comment by the digest of text that is already in the document, which is
+// exactly what an add does not have — so it is refused and pointed at the
+// container spelling.
+func (d *doc) planCommentAdd(target string, path hew.Path, v hew.Value, last hew.Segment, line int) ([]edit, error) {
 	text, ok := commentTextOf(v)
 	if !ok {
 		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line,
 			"add: a comment node's value must be a comment (§9.6: {comment: <text>})")
+	}
+	if !last.Trailing {
+		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line,
+			"add: "+last.String()+" identifies a comment that already exists; "+
+				"add one by addressing its container and placing it with before:/after: (§4.5b)")
 	}
 	parentPath, ok2 := path.Parent()
 	if !ok2 {
@@ -250,14 +270,22 @@ func (d *doc) planCommentAdd(target string, path, before, after hew.Path, v hew.
 	if err != nil {
 		return nil, err
 	}
-	if last.Trailing {
-		return d.planTrailingCommentAdd(target, path, parent, text, line)
+	return d.planTrailingCommentAdd(target, path, parent, text, line)
+}
+
+// planContainerCommentAdd inserts a standalone comment into the container the
+// add addresses, positioned by its before/after — the same shape a sequence
+// element add has, because a comment is keyless in the same way (§9.1 step 5).
+func (d *doc) planContainerCommentAdd(target string, path, before, after hew.Path, text string, line int) ([]edit, error) {
+	c, err := d.resolveFull(target, path, line)
+	if err != nil {
+		return nil, err
 	}
-	if parent.node == nil || !parent.node.container() {
+	if c.node == nil || !c.node.container() {
 		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line,
-			"add: comment ordinals address a container's comments (§4.5b)")
+			"add: a comment is added to a container (§4.5b)")
 	}
-	return d.planChildInsert(target, parent.node, before, after, renderComment(text), false, line)
+	return d.planChildInsert(target, c.node, before, after, renderComment(text), false, line)
 }
 
 // planTrailingCommentAdd hangs a `#t` comment off the member the path stepped

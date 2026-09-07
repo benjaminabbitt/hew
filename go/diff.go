@@ -273,7 +273,13 @@ func (d *differ) match(path Path, addr addressing, old, new *DiffNode) []slot {
 			c := &new.Children[step.B]
 			ref := addr.childPath(path, *c, step.B, newCmt[step.B])
 			add := ref
-			if addr.seq && !c.Comment {
+			// A sequence element and a COMMENT are both keyless, so an add
+			// names the CONTAINER and the slot's placement carries the
+			// position (§9.1 step 5). A comment is not gated on addr.seq: it
+			// is keyless in a MAP too, and its `#hew:comment=<hex>` address
+			// identifies a comment that is already in the document — which is
+			// exactly what an add does not have.
+			if c.Comment || addr.seq {
 				add = path
 			}
 			out = append(out, slot{state: slotAdded, new: c, ref: ref, addPath: add})

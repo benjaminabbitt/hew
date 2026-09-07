@@ -101,8 +101,12 @@ func MatchValueNumber(literal string) SegmentArg {
 // `/deps/"@scope/pkg"`, a digit-only key, the empty key.
 func Quoted(s string) SegmentArg { return Segment{Kind: SegKey, Name: s, Quoted: true} }
 
-// Comment addresses a container's n'th comment child (§4.5b).
-func Comment(ord int) SegmentArg { return Segment{Kind: SegComment, Index: ord} }
+// Comment addresses a container's comment child by its TEXT (§4.5b). The
+// caller supplies the comparison form — the comment's content with the marker
+// and one leading space stripped, exactly as §6.3's equality table defines it —
+// and hew digests it: a caller passes opaque data, never a digest (O43), the
+// same way MatchValue takes a value rather than an encoding of one.
+func Comment(text string) SegmentArg { return commentSegment(text) }
 
 // TrailingComment is §4.5b's "#t", the comment on a node's own line.
 func TrailingComment() SegmentArg { return Segment{Kind: SegComment, Trailing: true} }

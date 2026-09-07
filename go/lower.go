@@ -298,8 +298,11 @@ func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i, pairedWith int, q 
 	}
 	t := Transform{Op: OpAdd, Value: val, Path: target}
 	if positional(e) {
-		// A sequence element is added to its container; the address of the
-		// element it lands beside carries the position (§9.6 placement).
+		// A sequence element — or a comment, which is keyless in the same way —
+		// is added to its container; the address of the element it lands beside
+		// carries the position (§9.6 placement). There is nothing else it COULD
+		// name: the digest address of §4.5b identifies a comment that already
+		// exists, and an add is precisely the case where none does.
 		t.Path = path
 	}
 	before, after, anchor, err := l.placement(path, nodes, i)
@@ -656,9 +659,17 @@ func matchesTail(segs []Segment, comps []string) bool {
 
 // positional reports an entry addressed by identity within a sequence rather
 // than by a key of its own.
+//
+// A COMMENT is one of these. It has no key, its address is a digest of its own
+// text (§4.5b), and so it behaves like a set element everywhere this is asked:
+// an add names the CONTAINER and is placed by before:/after' (§9.1 step 5),
+// because an added comment has no identity in the target yet to name; and a
+// `-`/`+` pair matches by position within the run rather than by address,
+// because the two texts hash differently and a changed comment would otherwise
+// lower to a remove plus an unrelated add.
 func positional(e *mirrorEntry) bool {
 	switch e.kind {
-	case mSeqItem, mScalar:
+	case mSeqItem, mScalar, mComment:
 		return true
 	case mTable:
 		return e.array

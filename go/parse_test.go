@@ -265,36 +265,42 @@ func TestParseLowering(t *testing.T) {
 	}, {
 		name: "a comment is a node with an address in each projection",
 		body: "@@ /server @@\n  # ports below 1024 need CAP_NET_BIND_SERVICE\n  port: 8080\n- # TODO\n+ # done\n",
+		// Each comment is named by the digest of its OWN text, in whichever
+		// image it appears; the replace carries the BEFORE-image text, because
+		// that is the node it replaces.
 		want: `  - op: test
-    path: /server/#0
+    path: /server/` + cfrag("ports below 1024 need CAP_NET_BIND_SERVICE") + `
     value:
       comment: ports below 1024 need CAP_NET_BIND_SERVICE
   - op: test
     path: /server/port
     value: 8080
   - op: test
-    path: /server/#1
+    path: /server/` + cfrag("TODO") + `
     value:
       comment: TODO
   - op: replace
-    path: /server/#1
+    path: /server/` + cfrag("TODO") + `
     value:
       comment: done
 `,
 	}, {
 		name: "an added comment and the member it documents are two adds",
 		body: "@@ / @@\n  \"port\": 8080\n+ // added by taskloom\n+ \"telemetry\": false\n",
+		// The comment add names its CONTAINER and is placed by after:; the
+		// member below it refers back to the comment by digest, which is the
+		// address of a comment that exists by the time that add runs.
 		want: `  - op: test
     path: /port
     value: 8080
   - op: add
-    path: /#0
+    path: /
     after: /port
     value:
       comment: added by taskloom
   - op: add
     path: /telemetry
-    after: /#0
+    after: /` + cfrag("added by taskloom") + `
     value: false
 `,
 	}, {
@@ -932,14 +938,28 @@ func TestParseCommentAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse should succeed for a comment add (the applier refuses it, not the parser): %v", err)
 	}
+	// The add names its CONTAINER and carries `{comment: <text>}` as its value
+	// (§9.1 step 5) — the value, not the address, is what makes it a comment,
+	// and it is the value json refuses at apply time.
 	var found bool
 	for _, tr := range tls[0].Transform {
-		if tr.Op == OpAdd && tr.Path.Len() > 0 && tr.Path.Segment(tr.Path.Len()-1).Kind == SegComment {
-			found = true
+		if tr.Op != OpAdd {
+			continue
 		}
+		text, ok := CommentText(tr.Value)
+		if !ok {
+			continue
+		}
+		if text != "bumped by ctxloom" {
+			t.Fatalf("comment text: %q", text)
+		}
+		if tr.Path.String() != "/server" {
+			t.Fatalf("a comment add addresses its container: got %s", tr.Path)
+		}
+		found = true
 	}
 	if !found {
-		t.Fatal("expected an add transform addressing a comment node")
+		t.Fatal("expected an add transform carrying a comment value")
 	}
 }
 
@@ -1030,13 +1050,16 @@ func TestAddedCommentAnchorsTheMemberBelowIt(t *testing.T) {
 	if len(ts) != 3 {
 		t.Fatalf("want 3 transforms, got %d: %+v", len(ts), ts)
 	}
-	if ts[1].Op != OpAdd || ts[1].Path.String() != "/#0" || ts[1].After.String() != "/port" {
+	// The comment add names the container; only after it exists is there a
+	// digest for the member below to be anchored to.
+	if ts[1].Op != OpAdd || ts[1].Path.String() != "/" || ts[1].After.String() != "/port" {
 		t.Fatalf("comment add: %+v", ts[1])
 	}
 	if got, ok := commentTextOf(ts[1].Value); !ok || got != "added by taskloom" {
 		t.Fatalf("comment value: %q,%v", got, ok)
 	}
-	if ts[2].Op != OpAdd || ts[2].Path.String() != "/telemetry" || ts[2].After.String() != "/#0" {
+	if ts[2].Op != OpAdd || ts[2].Path.String() != "/telemetry" ||
+		ts[2].After.String() != "/"+cfrag("added by taskloom") {
 		t.Fatalf("member add: %+v", ts[2])
 	}
 }
@@ -1056,7 +1079,7 @@ func TestRemovedLeadingCommentNeedsNoRemoveRecord(t *testing.T) {
 	if len(removes) != 1 || removes[0] != "/telemetry" {
 		t.Fatalf("want exactly the member removed, got %v", removes)
 	}
-	if ts[0].Op != OpTest || ts[0].Path.String() != "/#0" {
+	if ts[0].Op != OpTest || ts[0].Path.String() != "/"+cfrag("the old opt-out") {
 		t.Fatalf("the comment line still asserts: %+v", ts[0])
 	}
 }
@@ -1072,7 +1095,7 @@ func TestStandaloneCommentRemovalKeepsItsRecord(t *testing.T) {
 			removes = append(removes, tr.Path.String())
 		}
 	}
-	if len(removes) != 1 || removes[0] != "/#0" {
+	if len(removes) != 1 || removes[0] != "/"+cfrag("stale note") {
 		t.Fatalf("want the comment node removed, got %v", removes)
 	}
 }
@@ -1088,7 +1111,7 @@ func TestLeadingCommentAboveAReplacedMemberIsNotAbsorbed(t *testing.T) {
 			ops = append(ops, string(tr.Op)+" "+tr.Path.String())
 		}
 	}
-	if len(ops) != 2 || ops[0] != "remove /#0" || ops[1] != "replace /timeout" {
+	if len(ops) != 2 || ops[0] != "remove /"+cfrag("stale note") || ops[1] != "replace /timeout" {
 		t.Fatalf("want the comment removed and the member replaced, got %v", ops)
 	}
 }

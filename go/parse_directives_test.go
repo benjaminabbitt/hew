@@ -175,13 +175,18 @@ func TestParseGroupsIndentedBodyLines(t *testing.T) {
 	})
 }
 
-// TestParseCommentOrdinalsArePerImage pins §4.5b's ordinals against §5's two
-// images: a removed comment and the comment replacing it are both #0.
-func TestParseCommentOrdinalsArePerImage(t *testing.T) {
+// TestParseCommentIdentityAddressesTheTextNotThePosition pins §4.5b's comment
+// addressing: a comment is a keyless member, so an EXISTING one is named by the
+// digest of its text, and an ADDED one — which has no identity in the target yet
+// — names its CONTAINER and is placed by before:/after', exactly as a sequence
+// element add is (§9.1 step 5).
+func TestParseCommentIdentityAddressesTheTextNotThePosition(t *testing.T) {
 	tl := parseOneDirective(t, "", "@@ /s @@\n- # old\n+ # new\n  timeout: 30\n")
 	rep := opAt(t, tl, OpReplace)
-	if rep.Path.String() != "/s/#0" {
-		t.Fatalf("want a replace at /s/#0, got %s", rep.Path)
+	// A replace names the node it replaces, so it carries the BEFORE-image
+	// text's digest — not the after-image's, and not a position.
+	if want := "/s/" + cfrag("old"); rep.Path.String() != want {
+		t.Fatalf("want a replace at %s, got %s", want, rep.Path)
 	}
 	if text, ok := CommentText(rep.Value); !ok || text != "new" {
 		t.Fatalf("comment value: got %q (%v)", text, ok)
@@ -190,20 +195,39 @@ func TestParseCommentOrdinalsArePerImage(t *testing.T) {
 		t.Fatalf("before-image comment: got %q (%v)", text, ok)
 	}
 
-	// Two added comments number 0 and 1 in the after-image.
+	// Two added comments BOTH address the container: an add has nothing in the
+	// target to identify, so there is no digest to name and no ordinal left to
+	// stand in for one. Their order is carried by placement, not by the path.
 	tl = parseOneDirective(t, "", "@@ /s @@\n+ # one\n+ # two\n")
-	var paths []string
+	var paths, texts []string
 	for _, tr := range tl.Transform {
+		if tr.Op != OpAdd {
+			t.Fatalf("want only adds, got a %v at %s", tr.Op, tr.Path)
+		}
 		paths = append(paths, tr.Path.String())
+		text, ok := CommentText(tr.Value)
+		if !ok {
+			t.Fatalf("add at %s does not carry a comment value: %v", tr.Path, tr.Value)
+		}
+		texts = append(texts, text)
 	}
-	if len(paths) != 2 || paths[0] != "/s/#0" || paths[1] != "/s/#1" {
-		t.Fatalf("comment ordinals: %v", paths)
+	if len(paths) != 2 || paths[0] != "/s" || paths[1] != "/s" {
+		t.Fatalf("a comment add addresses its container: %v", paths)
+	}
+	if texts[0] != "one" || texts[1] != "two" {
+		t.Fatalf("comment values: %v", texts)
+	}
+	// The SECOND comment is placed relative to the first, which is the only
+	// thing that orders them now that the path does not.
+	if got, want := tl.Transform[1].After.String(), "/s/"+cfrag("one"); got != want {
+		t.Fatalf("want the second comment placed after the first (%s), got %q", want, got)
 	}
 
-	// A context comment is in both images, so the next removed comment is #1.
+	// A context comment shares both images; the removed one below it is named
+	// by ITS OWN text, so the two cannot be confused the way ordinals allowed.
 	tl = parseOneDirective(t, "", "@@ /s @@\n  # kept\n- # dropped\n")
-	if rm := opAt(t, tl, OpRemove); rm.Path.String() != "/s/#1" {
-		t.Fatalf("want a remove at /s/#1, got %s", rm.Path)
+	if rm, want := opAt(t, tl, OpRemove), "/s/"+cfrag("dropped"); rm.Path.String() != want {
+		t.Fatalf("want a remove at %s, got %s", want, rm.Path)
 	}
 }
 

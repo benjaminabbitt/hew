@@ -6,11 +6,11 @@ transforms:
     path: /port
     value: 8080
   - op: add
-    path: /#0
+    path: /
     after: /port
     value:
       comment: added by taskloom manage install
   - op: add
     path: /telemetry
-    after: /#0
+    after: /#hew:comment=2bebf0cd56fabc7b147ea9596555f3a9c6e1b02d88b47e826c295c3f171edbb8
     value: false

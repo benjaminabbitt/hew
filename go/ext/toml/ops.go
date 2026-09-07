@@ -149,6 +149,25 @@ func (r *run) converge(t hew.Transform, w hew.Transform) error {
 // with zero ops (`! default` over an existing key, or `! idempotent` over an
 // equal one — §7.5, §7.7).
 func (r *run) planAdd(t hew.Transform) ([]edit, error) {
+	// A comment is a KEYLESS member (§4.5b), so it is added the way an array
+	// element is: the add names the CONTAINER, before/after place it (§9.1 step
+	// 5), and the VALUE is what says the new node is a comment. Both questions
+	// are asked before the resolve below — the address one so a stale digest
+	// cannot be mistaken for a key, the value one so a comment added to an
+	// array becomes a comment line rather than an element appended to it.
+	// `#t` is exempt: it names the trailing comment of a member, of which there
+	// is at most one, so it is an identity rather than a stand-in for a
+	// position and stays addressable.
+	if n := t.Path.Len(); n > 0 {
+		if last := t.Path.Segment(n - 1); last.Kind == hew.SegComment && !last.Trailing {
+			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
+				"add: "+last.String()+" identifies a comment that already exists; "+
+					"add one by addressing its container and placing it with before:/after: (§4.5b)")
+		}
+	}
+	if text, ok := commentText(t.Value); ok {
+		return r.addComment(t, text)
+	}
 	rf, he, final := r.resolve(t.Path, t.PatchLine)
 	if he == nil {
 		// A path that resolves to an ARRAY is the sequence-style add: the
@@ -210,9 +229,6 @@ func (r *run) planCreate(t hew.Transform) ([]edit, error) {
 	segs := t.Path.Segments()
 	if len(segs) == 0 {
 		return nil, r.err(hewerr.CodeNoMatch, t.Path.String(), t.PatchLine, "add: no container to insert into")
-	}
-	if segs[len(segs)-1].Kind == hew.SegComment {
-		return r.addComment(t)
 	}
 	anc, rest, he := r.nearestAncestor(t.Path, t.PatchLine)
 	if he != nil {
@@ -300,27 +316,19 @@ func (r *run) nearestAncestor(p hew.Path, line int) (*ref, []hew.Segment, *hewer
 	return &ref{node: r.d.root}, segs, nil
 }
 
-// addComment inserts a standalone comment line (OP-30) into the table its
-// address names.
-func (r *run) addComment(t hew.Transform) ([]edit, error) {
-	parentPath, ok := t.Path.Parent()
-	if !ok {
-		return nil, r.err(hewerr.CodeNoMatch, t.Path.String(), t.PatchLine, "add: no container to insert into")
+// addComment inserts a standalone comment line (OP-30) into the table the add
+// ADDRESSES. The address is the container itself, not a child slot: a comment
+// has no key, so there is nothing else for an add to name (§9.1 step 5).
+func (r *run) addComment(t hew.Transform, text string) ([]edit, error) {
+	rf, he, _ := r.resolve(t.Path, t.PatchLine)
+	if he != nil {
+		return nil, he
 	}
-	prf, phe, _ := r.resolve(parentPath, t.PatchLine)
-	if phe != nil {
-		return nil, phe
-	}
-	if prf.node == nil || !prf.node.physical {
+	if rf.node == nil || !rf.node.physical {
 		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 			"add: a comment line needs a table with a body of its own to live in (§4.5b)")
 	}
-	text, ok := commentText(t.Value)
-	if !ok {
-		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
-			"add: a comment address takes a {comment: \"…\"} value (§4.5b)")
-	}
-	return r.insertLines(prf.node, []string{"# " + text}, t)
+	return r.insertLines(rf.node, []string{"# " + text}, t)
 }
 
 // insertElement adds one element to an array. An array-of-tables gains a

@@ -8,6 +8,13 @@ import (
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
+// cfrag is a comment's address (§4.5b): `#hew:comment=<hex>` over the digest of
+// its text. Computed from the text so the opaque digest is never transcribed
+// into a test, the way hfrag already serves a set member's `#hew:sha256=`.
+func cfrag(text string) string {
+	return strings.TrimPrefix(hew.NewPath(hew.Comment(text)).String(), "/")
+}
+
 // hewtDoc wraps transform records in a .hewt document for the "t.toml" target.
 func hewtDoc(records string) string {
 	return "hew-transforms: 1\ntarget: t.toml\nformat: toml\ntransforms:\n" + records
@@ -425,10 +432,21 @@ func TestAChangedScalarAdoptsThePatchsRendering(t *testing.T) {
 
 // --- comments, §4.5b / OP-30 ------------------------------------------------
 
-func TestCommentLineIsAddedAtItsAddress(t *testing.T) {
+// A comment add addresses the CONTAINER it goes into and takes its position
+// from before:/after:, the way any keyless member's add does (§9.1 step 5).
+func TestCommentLineIsAddedToItsContainer(t *testing.T) {
 	mustApply(t, "[hooks]\non_start = \"ctxloom apply\"\n",
-		"  - op: add\n    path: /hooks/#0\n    before: /hooks/on_start\n    value:\n      comment: managed\n",
+		"  - op: add\n    path: /hooks\n    before: /hooks/on_start\n    value:\n      comment: managed\n",
 		"[hooks]\n# managed\non_start = \"ctxloom apply\"\n")
+}
+
+// The container address alone does not decide WHERE: without a before/after the
+// comment still lands in the table, and with one it lands beside the named
+// member. Pinned so the placement is not silently ignored.
+func TestCommentLineWithoutPlacementLandsInTheContainer(t *testing.T) {
+	mustApply(t, "[hooks]\non_start = \"ctxloom apply\"\n",
+		"  - op: add\n    path: /hooks\n    value:\n      comment: managed\n",
+		"[hooks]\non_start = \"ctxloom apply\"\n# managed\n")
 }
 
 func TestStandaloneCommentIsTestedReplacedAndRemoved(t *testing.T) {
@@ -486,8 +504,8 @@ func TestCommentAddressNeedsACommentValue(t *testing.T) {
 }
 
 func TestCommentCannotBeAddedToATableWithNoBody(t *testing.T) {
-	he := mustFail(t, "x = {a = 1}\n", "  - op: add\n    path: /x/#0\n    value:\n      comment: q\n",
-		hewerr.CodeInexpressible, "/x/#0")
+	he := mustFail(t, "x = {a = 1}\n", "  - op: add\n    path: /x\n    value:\n      comment: q\n",
+		hewerr.CodeInexpressible, "/x")
 	mustContain(t, he, "table with a body of its own")
 }
 
@@ -1173,10 +1191,21 @@ func TestRootKeyAddedAboveTheFirstTableHeader(t *testing.T) {
 	mustApply(t, "[a]\nx = 1\n", "  - op: add\n    path: /y\n    value: 2\n", "y = 2\n[a]\nx = 1\n")
 }
 
-func TestCommentAddressUnderAMissingTable(t *testing.T) {
-	he := mustFail(t, "[a]\nx = 1\n", "  - op: add\n    path: /nope/#0\n    value:\n      comment: q\n",
+func TestCommentAddedUnderAMissingTable(t *testing.T) {
+	he := mustFail(t, "[a]\nx = 1\n", "  - op: add\n    path: /nope\n    value:\n      comment: q\n",
 		hewerr.CodeNoMatch, "/nope")
 	mustContain(t, he, "no key")
+}
+
+// The digest form identifies a comment that is ALREADY in the document, so it
+// is not an address an add can name — an add is precisely the case where no
+// such comment exists. The refusal says so and names the container spelling.
+func TestAddingAtACommentAddressIsRefused(t *testing.T) {
+	he := mustFail(t, "[a]\n# one\n\nx = 1\n",
+		"  - op: add\n    path: /a/"+cfrag("one")+"\n    value:\n      comment: two\n",
+		hewerr.CodeInexpressible, "/a/"+cfrag("one"))
+	mustContain(t, he, "already exists")
+	mustContain(t, he, "before:/after:")
 }
 
 func TestACommentAddressCannotBeChainedOntoAComment(t *testing.T) {

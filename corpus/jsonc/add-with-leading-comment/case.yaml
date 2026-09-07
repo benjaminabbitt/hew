@@ -5,7 +5,13 @@ format: jsonc
 ops: [OP-31]
 why: |
   A patch CAN carry a comment for the node it adds (O23, decided yes). The mirror
-  spelling is two `+` lines; the parser desugars it into two `add` records — a
-  comment node at a comment address plus the member — so the IR carries no
-  `comment:` qualifier (§11.10 reduction 3).
+  spelling is two `+` lines; the parser desugars it into two `add` records — the
+  comment plus the member — so the IR carries no `comment:` qualifier (§11.10
+  reduction 3).
+
+  The comment add addresses its CONTAINER (`/`) and is placed by `after:`, the
+  way any keyless member's add is (§9.1 step 5): a comment is identified by the
+  digest of its text (§4.5b), and an add has no text in the target to identify
+  yet. The member added below it then refers to that comment by digest, which is
+  what pins the comment as an ADDRESSABLE node rather than a position.
 spec: "§8.2, §9.6, §11 OP-31, §11.10"

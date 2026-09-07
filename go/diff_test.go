@@ -25,6 +25,11 @@ func dnum(s string) *DiffNode { return dscalar("!!int", s) }
 // the opaque digest stays computed, not transcribed.
 func hfrag(n *DiffNode) string { return hashSegment(n.Value).String() }
 
+// cfrag is the same thing for a COMMENT, which is a keyless member too and so
+// is addressed by a digest of its text rather than by an ordinal (§4.5b):
+// `#hew:comment=<hex>`. Computed, never transcribed, for the same reason.
+func cfrag(text string) string { return commentSegment(text).String() }
+
 func dmap(kv ...any) *DiffNode {
 	n := &DiffNode{Kind: KindMap}
 	y := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -457,8 +462,11 @@ func TestDiffComments(t *testing.T) {
 	want := strings.Join([]string{
 		"test /timeout =30",
 		"replace /timeout =60",
-		"add /#0 ={comment: slow upstream} after:/timeout",
-		"add /retries =5 after:/#0",
+		// The comment add names the CONTAINER and is placed by after:; the
+		// member below it then refers back to that comment by its digest,
+		// which is the address form for a comment that now exists.
+		"add / ={comment: slow upstream} after:/timeout",
+		"add /retries =5 after:/" + cfrag("slow upstream"),
 		"",
 	}, "\n")
 	if got != want {
@@ -470,7 +478,10 @@ func TestDiffCommentRemoval(t *testing.T) {
 	old := dcomment(dmap("a", dnum("1")), 0, "doomed")
 	new := dmap("a", dnum("1"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	if !strings.Contains(got, "remove /#0") || !strings.Contains(got, "test /#0 ={comment: doomed}") {
+	// A removed comment is named by the digest of ITS OWN text, so the record
+	// cannot drift onto a neighbouring comment the way an ordinal could.
+	if !strings.Contains(got, "remove /"+cfrag("doomed")) ||
+		!strings.Contains(got, "test /"+cfrag("doomed")+" ={comment: doomed}") {
 		t.Fatalf("got:\n%s", got)
 	}
 }
@@ -481,7 +492,11 @@ func TestDiffNoticesACommentOnlyChange(t *testing.T) {
 	old := dmap("outer", dcomment(dmap("a", dnum("1")), 0, "before"))
 	new := dmap("outer", dcomment(dmap("a", dnum("1")), 0, "after"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	if !strings.Contains(got, "/outer/#0") {
+	// Retexting a comment is a remove of the old text plus an add of the new:
+	// a comment's identity IS its text, so nothing survives the edit to be
+	// "replaced". The remove names the old digest; the add names the container.
+	if !strings.Contains(got, "remove /outer/"+cfrag("before")) ||
+		!strings.Contains(got, "add /outer ={comment: after}") {
 		t.Fatalf("a comment-only change must be reported:\n%s", got)
 	}
 }

@@ -3,7 +3,7 @@ target: target.yaml
 format: yaml
 transforms:
   - op: test
-    path: /server/#0
+    path: /server/#hew:comment=87001b903a00327849f09c0ed0f6798c3049280a6e73990dc92cbc7bfcc50788
     value:
       comment: ports below 1024 need CAP_NET_BIND_SERVICE
   - op: test

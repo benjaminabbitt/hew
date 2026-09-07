@@ -174,6 +174,15 @@ func (d *doc) planCopy(target string, t hew.Transform) (*edit, error) {
 // an existing node directly, so they route to handleExistingConflict, which
 // already implements both correctly.
 func (d *doc) planInsert(target string, path, before, after hew.Path, value hew.Value, text string, onConflict hew.OnConflict, idempotent bool, line int) (*edit, error) {
+	// A comment add addresses its CONTAINER and carries `{comment: <text>}` as
+	// its value (§4.5b, §9.1 step 5), so the VALUE is what json has to refuse —
+	// asked before the resolve below, because the container it names normally
+	// does exist and would otherwise be reported as HEW014 "already exists",
+	// which says nothing about the qualifier json cannot honour (§9.3).
+	if _, ok := hew.CommentText(value); ok {
+		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line,
+			"add: JSON has no comment nodes; cannot add a comment (§8.1, §9.3)")
+	}
 	if existing, err := d.resolveFull(target, path, line); err == nil {
 		if existing.kind == jArr && onConflict != hew.ConflictReplace && onConflict != hew.ConflictKeep {
 			return d.insertArrayElement(existing, before, after, value, text, line)

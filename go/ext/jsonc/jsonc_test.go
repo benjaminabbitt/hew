@@ -65,6 +65,12 @@ func cval(text string) hew.Value {
 
 func p(s string) hew.Path { return hew.MustParsePath(s) }
 
+// cfrag is a comment's address (§4.5b): `#hew:comment=<hex>` over the digest of
+// its text. Computed from the text so the opaque digest is never transcribed.
+func cfrag(text string) string {
+	return strings.TrimPrefix(hew.NewPath(hew.Comment(text)).String(), "/")
+}
+
 func mustApply(t *testing.T, src string, ts ...hew.Transform) string {
 	t.Helper()
 	got, err := Apply([]byte(src), list(ts...))
@@ -679,8 +685,8 @@ func TestSecondMutationSeesTheFirst(t *testing.T) {
 	// The comment does not exist in the bytes the first transform was planned
 	// against; the member placed after it can only resolve post-edit.
 	wantApply(t, "{\n  \"a\": 1\n}\n", "{\n  \"a\": 1,\n  // note\n  \"b\": 2\n}\n",
-		hew.Transform{Op: hew.OpAdd, Path: p("/#0"), Value: cval("note"), After: p("/a")},
-		hew.Transform{Op: hew.OpAdd, Path: p("/b"), Value: val(t, "2"), After: p("/#0")})
+		hew.Transform{Op: hew.OpAdd, Path: p("/"), Value: cval("note"), After: p("/a")},
+		hew.Transform{Op: hew.OpAdd, Path: p("/b"), Value: val(t, "2"), After: p("/" + cfrag("note"))})
 }
 
 func TestNoMutationsLeavesTheTargetAlone(t *testing.T) {
