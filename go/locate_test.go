@@ -435,3 +435,55 @@ func TestLocateExplainsASuccess(t *testing.T) {
 		t.Fatal("a located pick must be able to explain which signal placed it")
 	}
 }
+
+// A refusal's whole job is to tell a reader which elements were in play, and the
+// address it can quote is a SHA-256 digest — unreadable, ungreppable, and naming
+// nothing the author recognises. A source LINE is the only handle a human has on
+// "which one did you mean".
+//
+// The line is the one in the document IN FRONT OF THEM, not the one recorded when
+// the patch was written. That is why it belongs on the candidate rather than in
+// the IR: the applier has already parsed the file, so it knows where the
+// candidates are, and no advisory, migration or spec change is involved.
+//
+// This is DIAGNOSTICS ONLY. No tier consults a line, and none may: the ruling
+// caps it strictly below the confidence floor, so any case where it could decide
+// requires it to outrank signals it is defined to be weaker than.
+func TestLocateNamesCandidateLines(t *testing.T) {
+	seg := Segment{Kind: SegHash, Form: "hew", Name: "sha256", Hash: "abc123"}
+
+	t.Run("a conflict names the line of each element the signals chose", func(t *testing.T) {
+		got := Locate([]Candidate{{Index: 3, Line: 12}, {Index: 4, Line: 17}}, 6,
+			Advisory{At: at(3), Length: at(5)})
+		if got.OK {
+			t.Fatalf("expected a refusal, located %d", got.Index)
+		}
+		detail := got.Explain(seg)
+		for _, want := range []string{"line 12", "line 17"} {
+			if !strings.Contains(detail, want) {
+				t.Fatalf("explanation does not name the candidate lines: %s", detail)
+			}
+		}
+	})
+
+	t.Run("an equidistant refusal names the tied candidates' lines", func(t *testing.T) {
+		got := Locate([]Candidate{{Index: 1, Line: 8}, {Index: 5, Line: 20}}, 7,
+			Advisory{At: at(3), Length: at(7)})
+		if got.OK {
+			t.Fatalf("expected a refusal, located %d", got.Index)
+		}
+		if detail := got.Explain(seg); !strings.Contains(detail, "8") || !strings.Contains(detail, "20") {
+			t.Fatalf("explanation does not name the tied lines: %s", detail)
+		}
+	})
+
+	t.Run("a binding that supplies no line still explains itself", func(t *testing.T) {
+		// Not every binding can place every node, and a missing line must cost
+		// the reader the line, not the whole diagnostic.
+		got := Locate([]Candidate{{Index: 3}, {Index: 4}}, 6, Advisory{At: at(3), Length: at(5)})
+		detail := got.Explain(seg)
+		if detail == "" || strings.Contains(detail, "line 0") {
+			t.Fatalf("a lineless candidate produced a broken explanation: %s", detail)
+		}
+	})
+}

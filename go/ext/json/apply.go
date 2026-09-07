@@ -225,6 +225,7 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 		for i, e := range n.elems {
 			if v, err := d.nodeValue(e.value); err == nil && seg.MatchesHash(v) {
 				cands = append(cands, hew.Candidate{Index: i,
+					Line:       lineOf(d.src, e.value.start),
 					Neighbours: hew.ObservedNeighbours(i, len(n.elems), radius, tokenAt)})
 			}
 		}

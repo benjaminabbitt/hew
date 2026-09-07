@@ -281,6 +281,7 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 		for i, el := range n.elems {
 			if v, has := r.d.comparedValue(el.val, hew.Segment{}); has && seg.MatchesHash(v) {
 				cands = append(cands, hew.Candidate{Index: i,
+					Line:       r.d.lineOf(el.val),
 					Neighbours: hew.ObservedNeighbours(i, len(n.elems), radius, tokenAt)})
 			}
 		}

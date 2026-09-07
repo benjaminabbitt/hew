@@ -96,6 +96,15 @@ func (t Tier) String() string {
 // counting. They are empty for a binding that does not supply them.
 type Candidate struct {
 	Index int
+	// Line is this candidate's source line in the document AS IT STANDS, for
+	// diagnostics only. It is the line a reader can open, not the line the patch
+	// recorded, which is why it lives here rather than in the IR — the applier
+	// has already parsed the file. 0 when the binding cannot place the node.
+	//
+	// NO TIER CONSULTS IT, and none may: a line is capped strictly below the
+	// confidence floor, so any case where it could decide would require it to
+	// outrank signals it is defined to be weaker than.
+	Line int
 	// Neighbours are the members around this candidate as the document stands
 	// now. Empty for a binding that does not supply them.
 	Neighbours []Neighbour
@@ -142,6 +151,7 @@ type Located struct {
 	depth             int // neighbour digests that agreed
 	dist              int // distance from the nearest derived position
 	frontHit, backHit int // candidates the two anchors named, -1 for none
+	lineA, lineB      int // source lines of the elements in play, 0 when unknown
 	at, length        int
 	hasAt, hasLength  bool
 }
@@ -218,6 +228,7 @@ func Locate(cands []Candidate, curLen int, adv Advisory) Located {
 		return out
 	case out.frontHit >= 0 && out.backHit >= 0:
 		out.Tier = TierConflicted
+		out.lineA, out.lineB = lineOfCandidate(cands, out.frontHit), lineOfCandidate(cands, out.backHit)
 		return out
 	case out.frontHit >= 0:
 		out.Tier, out.Index, out.OK = TierOneSided, out.frontHit, true
@@ -258,6 +269,21 @@ func Locate(cands []Candidate, curLen int, adv Advisory) Located {
 	out.dist = bestDist
 	if ties > 1 {
 		out.Tier = TierEquidistant
+		for _, c := range cands {
+			d := -1
+			for _, a := range anchors {
+				if x := distance(c.Index, a); d < 0 || x < d {
+					d = x
+				}
+			}
+			if d == bestDist {
+				if out.lineA == 0 {
+					out.lineA = c.Line
+				} else if out.lineB == 0 {
+					out.lineB = c.Line
+				}
+			}
+		}
 		return out
 	}
 	out.Tier, out.Index, out.OK = TierDisplaced, best, true
@@ -375,11 +401,11 @@ func (l Located) Explain(seg Segment) string {
 		return fmt.Sprintf("%d elements collide on %s and the patch carries no recorded position to separate them",
 			l.n, seg.String())
 	case TierConflicted:
-		return fmt.Sprintf("%d elements collide on %s and the position signals disagree: counting from the front names element %d, counting from the end names element %d",
-			l.n, seg.String(), l.frontHit, l.backHit)
+		return fmt.Sprintf("%d elements collide on %s and the position signals disagree: counting from the front names element %d%s, counting from the end names element %d%s",
+			l.n, seg.String(), l.frontHit, onLine(l.lineA), l.backHit, onLine(l.lineB))
 	case TierEquidistant:
-		return fmt.Sprintf("%d elements collide on %s and two of them sit equally far (%d) from the recorded position",
-			l.n, seg.String(), l.dist)
+		return fmt.Sprintf("%d elements collide on %s and two of them sit equally far (%d) from the recorded position%s",
+			l.n, seg.String(), l.dist, bothLines(l.lineA, l.lineB))
 	case TierIdentity:
 		return fmt.Sprintf("%s matched exactly one element", seg.String())
 	case TierNeighboured:
@@ -444,4 +470,37 @@ func ObservedNeighbours(index, curLen, radius int, tokenAt func(int) (string, bo
 		}
 	}
 	return out
+}
+
+// lineOfCandidate is the source line of the candidate at a given element index,
+// 0 when the binding did not supply one.
+func lineOfCandidate(cands []Candidate, index int) int {
+	for _, c := range cands {
+		if c.Index == index {
+			return c.Line
+		}
+	}
+	return 0
+}
+
+// onLine and bothLines render a source line into a diagnostic, or nothing at all
+// when the binding could not place the node. A missing line costs the reader the
+// line, never the whole sentence.
+func onLine(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" at line %d", n)
+}
+
+func bothLines(a, b int) string {
+	switch {
+	case a > 0 && b > 0:
+		return fmt.Sprintf(" (line %d and line %d)", a, b)
+	case a > 0:
+		return fmt.Sprintf(" (line %d)", a)
+	case b > 0:
+		return fmt.Sprintf(" (line %d)", b)
+	}
+	return ""
 }

@@ -281,6 +281,7 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		for i, el := range n.elems {
 			if v, has := comparedValue(el.val, hew.Segment{}); has && seg.MatchesHash(v) {
 				cands = append(cands, hew.Candidate{Index: i,
+					Line:       lineOf(r.d.src, el.blockStart),
 					Neighbours: hew.ObservedNeighbours(i, len(n.elems), radius, tokenAt)})
 			}
 		}

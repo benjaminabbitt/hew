@@ -331,6 +331,7 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 		for i, e := range parent.elems {
 			if v, err := d.nodeValue(e.value); err == nil && last.MatchesHash(v) {
 				cands = append(cands, hew.Candidate{Index: i,
+					Line:       lineOf(d.src, e.value.start),
 					Neighbours: hew.ObservedNeighbours(i, len(parent.elems), radius, tokenAt)})
 			}
 		}

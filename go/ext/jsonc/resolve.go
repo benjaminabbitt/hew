@@ -120,6 +120,7 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 		for i, e := range cur.node.elems {
 			if v, has := d.comparedValue(e.value, hew.Segment{}); has && seg.MatchesHash(v) {
 				cands = append(cands, hew.Candidate{Index: i,
+					Line:       lineOf(d.src, e.value.start),
 					Neighbours: hew.ObservedNeighbours(i, len(cur.node.elems), radius, tokenAt)})
 			}
 		}
