@@ -1834,9 +1834,26 @@ refused the whole patch (HEW010) for a node that was never the author's business
 neighbour's **value was copied verbatim into the patch** — the disclosure that put a sibling's
 `Authorization: Bearer …` into a stored reversal. So the differ emits an unchanged
 mapping sibling within the radius as a keys-only `~` hint (§3): it names the neighbour to
-locate and position the change, asserts nothing, and never carries the value. Sequence and set
-neighbours keep value context lines for now, pending the hash-based locator that gives an
-unordered or positional member an identity without carrying it.
+locate and position the change, asserts nothing, and never carries the value.
+
+A neighbour rides the hint channel exactly when it has an address that identifies it without
+carrying it. Three kinds do:
+
+| Neighbour | Hint | Identified by |
+| --- | --- | --- |
+| mapping member | `~ key` | its key |
+| set member (by-value scalar) | `~ #hew:sha256=<hex>` | the digest of its value (§4.5c) |
+| comment | `~ #hew:comment=<hex>` | the digest of its text (§4.5b) |
+
+A comment qualifies in **every** container kind, mapping and sequence alike, because a comment
+is keyless everywhere and is therefore already addressed by digest wherever it sits — the
+container's own addressing decides nothing for it. It is also the neighbour that most wants
+withholding: a comment is prose a human wrote, and asserting one refuses a patch because
+somebody reworded a remark next to the line it changes.
+
+A KEYED or INDEX sequence element keeps its value context line. A keyed element's context line
+is already just its identity field — an address, not a disclosure — and an index carries no
+value in the address either, so neither is a disclosure the hint channel would repair.
 
 Because the still-asserting context lines compile into assertions (§9.0), the radius remains a
 **strictness dial, not a verbosity dial** for them — a fact the CLI's help text must state,
