@@ -24,11 +24,16 @@ const (
 
 // SegmentKind discriminates the segment forms of §4.
 //
-// The core knows the UNIVERSAL shapes and no others (§8.8): RFC 6901
-// contributes SegKey, SegIndex and SegAppend, and hew adds SegMatch and the
-// quoted segment — the shapes every tree-shaped format has, which is why a
-// format-neutral pointer standard needed them. Everything else is
-// SegExtension: a token the core lexed and a registered extension claimed.
+// The core knows the UNIVERSAL shapes and no others (§8.8), and §4 names the
+// standards they come from. RFC 6901 contributes SegKey, SegIndex and
+// SegAppend — the shapes every tree-shaped format has, which is why a
+// format-neutral pointer standard needed them; the quoted segment is a
+// SPELLING of SegKey rather than a kind, so it appears as Segment.Quoted.
+// RFC 3986's fragment (§3.5) contributes the `#` family, SegComment and
+// SegHash: a part named within the node the rest of the path located. SegMatch
+// is hew's one extension to pointer syntax, identity in place of position
+// (§4.2). SegExtension is not a shape but the MECHANISM: a token the core lexed
+// and a registered extension claimed.
 type SegmentKind uint8
 
 const (

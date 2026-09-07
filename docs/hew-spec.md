@@ -273,14 +273,55 @@ The Hew margin `#` and the target's `#` never collide because the target's lives
 
 ## 4. Hew paths
 
-A hew path addresses a node. It is **RFC 6901 JSON Pointer plus four extensions**, chosen so
-that the common config edit is expressible without positional indices.
+A hew path addresses a node. It is **RFC 6901 JSON Pointer, RFC 3986's fragment, and one
+extension of its own** — key-match — chosen so that the common config edit is expressible
+without positional indices.
 
 ```
 hewpath  := "/" | ( "/" segment )+
-segment  := key | quoted | index | "-" | keymatch | label | heading | block | marker | comment
+segment  := key | index | "-" | keymatch | fragment | extension-claimed
+key      := bare | quoted
 quoted   := '"' ( char | '\"' | '\\' )* '"'
+keymatch := key? "=" value
+fragment := "#" ( "t" | tag )
+tag      := ( namespace ":" )? key ( "=" value )?
 ```
+
+**RFC 6901 supplies `key`, `index` and `-`**, with the two root differences and the added `~2`
+escape §4.1 states. Those are the shapes a format-neutral pointer standard needed, and hew
+changes none of their meanings.
+
+**`#` is RFC 3986, and this spec used not to say so.** RFC 3986 §3.5 defines the fragment
+component as identifying **a secondary resource** — "some portion or subset of the primary
+resource" — by reference to the primary one plus additional identifying information. That is
+precisely what every `#` segment here does: `/# Getting started` names a section of a document
+(§4.5), `/#t` and `/#hew:comment=<hex>` a comment within a container (§4.5b), and
+`/#hew:sha256=<hex>` a member within a collection (§4.5c). Naming the standard costs nothing
+and settles two things that used to be local convention. The **spelling** needs no
+hew-specific justification — `#` means "a part within" wherever URIs are read. And the
+**namespace rule** (§4.5c), which keeps `hew`'s computed locators apart from an extension's,
+becomes the ordinary discipline of not letting two vocabularies collide in one fragment,
+rather than a rule this document invented. So the `#` family is not an extension to pointer
+syntax; it is standard usage that RFC 6901, which defines no fragment of its own, leaves open.
+
+**Key-match is the one genuine extension**, and §4.2 is where it is defined. It is the whole
+value proposition: a pointer addresses by **position** in a sequence, and `name=value`
+addresses by **identity**, so an edit survives a list being reordered or appended to. One
+extension is the budget this section is trying to keep, because every shape beyond the
+standards is one the Rust port must reimplement and one a reader must learn.
+
+**`extension-claimed` is a mechanism, not a shape** (§8.8). It is how a registered format
+claims a token — Markdown's `# Setup`, `code:0` and `@marker` are its only v0 consumers —
+and it is deliberately not counted among the forms above, because what it accepts is whatever
+the linked extensions say. Counting it would mean a different number for every build.
+
+> **This section states the standards it composes, and does not count them.** The count it
+> used to give ("four extensions") was a coincidence that had already stopped being true: it
+> was three before the content-hash fragment landed, and it was only four by grouping
+> Markdown's shapes into one. A number in this position goes stale every time a fragment form
+> is added, and a stale number invites a reader to hunt for the fourth thing. Naming RFC 6901,
+> RFC 3986 and key-match stays true as the fragment vocabulary grows, because a new fragment
+> key is more of something §4 already cites.
 
 There is **no ordinal segment**. A path is always a statement about identity, never about
 position in the file; siblings a path cannot distinguish are addressed by a key-match on a
@@ -291,7 +332,10 @@ of any kind, so they carry a kind-scoped ordinal (§4.5,
 
 **A quoted segment is the literal form**, and it is what makes the grammar closed: every other
 segment form is recognized by its shape, so a key whose text happens to have one of those
-shapes needs a spelling that says "this is literal text, not a form". §4.1 gives the rule and
+shapes needs a spelling that says "this is literal text, not a form". It is a **spelling of a
+key, not a kind of segment** — the grammar above puts it under `key` for that reason, and an
+implementation carries it as a flag on the key rather than as a segment kind of its own.
+§4.1 gives the rule and
 [O41](#p5--the-api-ratification-2026-08-14) gives the reasoning. Quoting is **container-kind
 resolved**: against a
 mapping it is a key. The two contexts are disjoint — a container is one or the other — so one
@@ -488,9 +532,10 @@ own — it desugars into an ordinary `add` in the enclosing container.
 
 ### 4.5c Content-hash fragments — `#hew:sha256=<hex>`
 
-`#` is the third and last of the fragment-locator forms (heading §4.5, comment §4.5b): the
-member of an unordered or by-value collection, addressed by a **hash of its value** rather
-than by the value itself. Two of the three forms are computed — a comment digests its TEXT
+`#` is the third and last of the fragment-locator forms (heading §4.5, comment §4.5b) — the
+fragment of RFC 3986 §3.5, as §4 states, naming a part within the node the rest of the path
+located. This one is the member of an unordered or by-value collection, addressed by a **hash
+of its value** rather than by the value itself. Two of the three forms are computed — a comment digests its TEXT
 under this same grammar — and they differ only in what they hash, which is why the tag key
 carries that distinction and the section below is written over both.
 
@@ -2301,6 +2346,7 @@ Format column key: `✓` supported · `—` not applicable to this format's data
 |---|---|---|
 | **RFC 6902** | `add`, `remove`, `replace`, `move`, `copy`, `test` | The IR's six ops verbatim. OP-01–OP-06, OP-21, OP-22, OP-24. |
 | **RFC 6901** | `-` append token, `~0`/`~1` escapes | §4.1, OP-11. |
+| **RFC 3986** | the **fragment** component (§3.5): a secondary resource within the primary one | §4's `#` family — heading §4.5, comment §4.5b, content hash §4.5c. Not an extension: the standard usage RFC 6901 leaves open. |
 | **RFC 7386 merge patch** | implicit set; `null` = delete; whole-array replace | OP-01, OP-05, OP-08. `null`-as-delete **rejected** (OP-10). |
 | **K8s strategic merge** | `$patch: delete`, `$patch: replace`, `$patch: merge`, merge-key list semantics, `$setElementOrder`, `$deleteFromPrimitiveList` | OP-05, OP-08, OP-09 (rejected), OP-16, OP-19 (deferred), OP-15. |
 | **ytt overlay** | `@overlay/match` (`by=`, `expects=`, `missing_ok=`), `@overlay/remove`, `@overlay/replace`, `@overlay/insert before=/after=`, `@overlay/append`, `@overlay/assert`, `@overlay/replace via=λ` | §4.2 (`by=`), OP-05, OP-01, OP-13, OP-11, OP-24–OP-28, OP-27 (`expects=`), OP-04 (`missing_ok=`), OP-29 (rejected: `via=λ`). |
