@@ -27,6 +27,19 @@ const (
 	ContextNone = -2
 )
 
+// HintContextDefault is the neighbour radius of the non-asserting hint channel:
+// three untouched neighbours either side of each changed run.
+//
+// It is WIDER than ContextDefault on purpose, and the asymmetry is the whole
+// reason the two are separate constants. A hint costs the patch nothing in
+// strictness — it asserts nothing, so an extra one can never make the patch
+// refuse — while it buys the locator another piece of evidence for placing a
+// hunk whose address no longer resolves on its own. Three either side is the
+// point where a repeated value's neighbourhood distinguishes it: at 1 a
+// duplicate-bearing array offers the locator two neighbours to weigh, at 3 it
+// offers six.
+const HintContextDefault = 3
+
 // DefaultKeyFields is §9.4-R4's candidate identity-field list, tried in order.
 // It is binding DATA, not a rule (ruling O18): the rule is "present on every
 // element, scalar, unique", and `--key-fields` overrides the list.
@@ -55,7 +68,8 @@ type DiffOptions struct {
 	// matches costs nothing, because it asserts nothing. One shared knob would
 	// silently trade one property for the other in whichever direction it moved.
 	//
-	// Zero means "follow Context"; ContextNone and ContextAll spell the two ends.
+	// Zero means HintContextDefault; ContextNone and ContextAll spell the two
+	// ends. Spelling either of those on Context alone carries it here too.
 	HintContext int
 
 	// Target is stamped into the produced TransformList; it is a label, not a
@@ -82,15 +96,21 @@ func (o DiffOptions) radius() (n int, all bool) {
 
 // hintRadius is the radius governing the hint channel.
 //
-// An UNSET knob follows Context, and the two SENTINELS carry across even when
-// the knob is set to a plain count elsewhere: ContextNone and ContextAll are
-// body-wide requests — "no context at all", "every sibling" — and a user who
-// spells one means it for the whole hunk body, not for one channel of it. A
-// plain COUNT does not carry across once HintContext names its own, which is
-// the entire point of there being two knobs.
+// An unset knob takes HintContextDefault rather than Context's count: the two
+// channels want opposite numbers, so a plain count set on one must not drag the
+// other with it. The two SENTINELS do carry across, because ContextNone and
+// ContextAll are body-wide requests — "no context at all", "every sibling" —
+// and a user who spells one means it for the whole hunk body, not for one
+// channel of it.
 func (o DiffOptions) hintRadius() (n int, all bool) {
 	if o.HintContext == 0 {
-		return o.radius()
+		switch {
+		case o.Context == ContextNone:
+			return 0, false
+		case o.Context < 0: // ContextAll, and any other negative spelling of it
+			return 0, true
+		}
+		return HintContextDefault, false
 	}
 	switch {
 	case o.HintContext == ContextNone:

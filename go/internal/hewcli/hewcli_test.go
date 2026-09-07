@@ -649,7 +649,7 @@ func TestApplyReversalDefaultName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no reversal patch at the derived name: %v", err)
 	}
-	const want = "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n~ port\n- timeout: 60\n+ timeout: 30\n"
+	const want = "hew: 1\n\n--- config.yaml format=yaml\n\n@@ /server @@\n~ host\n~ port\n- timeout: 60\n+ timeout: 30\n"
 	if string(got) != want {
 		t.Fatalf("reversal patch:\n%s\nwant:\n%s", got, want)
 	}

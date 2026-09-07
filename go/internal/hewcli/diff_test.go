@@ -49,7 +49,7 @@ func TestDiffWritesAPatchToStdout(t *testing.T) {
 	// The `--- ` line names the OLD side (§9.4-R7, Appendix B.2.1, ruling
 	// O39): the patch applies to old, so naming new would stamp a file the
 	// applier never opens.
-	want := "hew: 1\n\n--- old.yaml format=yaml\n\n@@ /server @@\n~ port\n- timeout: 30\n+ timeout: 60\n"
+	want := "hew: 1\n\n--- old.yaml format=yaml\n\n@@ /server @@\n~ host\n~ port\n- timeout: 30\n+ timeout: 60\n"
 	if stdout != want {
 		t.Fatalf("stdout:\n%q\nwant:\n%q", stdout, want)
 	}

@@ -162,32 +162,42 @@ func TestDiffKindChangeIsAReplace(t *testing.T) {
 
 // --- §9.4-R2, the context radius --------------------------------------------
 
-func contextBody(t *testing.T, ctx int) string {
+func contextBody(t *testing.T, opt DiffOptions) string {
 	t.Helper()
 	old := dseq(dstr("a"), dstr("b"), dstr("c"), dstr("d"), dstr("e"))
 	new := dseq(dstr("a"), dstr("b"), dstr("c"), dstr("d"), dstr("e"), dstr("f"))
-	return summarize(diffOK(t, old, new, DiffOptions{Context: ctx}))
+	return summarize(diffOK(t, old, new, opt))
 }
 
-func TestDiffContextRadius(t *testing.T) {
+// This fixture is a by-value SET, so its untouched neighbours ride the hint
+// channel and answer to HintContext — not to Context, which governs the
+// value-carrying assertions a keyed or index sequence emits. The two SENTINELS
+// are still spelled through Context, because those are body-wide requests that
+// carry across both channels.
+func TestDiffHintRadius(t *testing.T) {
 	hf := func(s string) string { return "/" + hfrag(dstr(s)) }
 	ha, hb, hc, hd, he := hf("a"), hf("b"), hf("c"), hf("d"), hf("e")
+	add := "add / =f after:" + he + "\n"
 	// A scalar set neighbour is a content-hash HINT, not a value test; the add
 	// anchors on the surviving sibling's hash even at ContextNone (satisfied-recoil).
 	cases := []struct {
 		name string
-		ctx  int
+		opt  DiffOptions
 		want string
 	}{
-		{"zero value is the default of one", 0, "hint " + he + "\nadd / =f after:" + he + "\n"},
-		{"explicit one", 1, "hint " + he + "\nadd / =f after:" + he + "\n"},
-		{"two", 2, "hint " + hd + "\nhint " + he + "\nadd / =f after:" + he + "\n"},
-		{"none", ContextNone, "add / =f after:" + he + "\n"},
-		{"all", ContextAll, "hint " + ha + "\nhint " + hb + "\nhint " + hc + "\nhint " + hd + "\nhint " + he + "\nadd / =f after:" + he + "\n"},
+		{"zero value is the default of three", DiffOptions{},
+			"hint " + hc + "\nhint " + hd + "\nhint " + he + "\n" + add},
+		{"explicit one", DiffOptions{HintContext: 1}, "hint " + he + "\n" + add},
+		{"two", DiffOptions{HintContext: 2}, "hint " + hd + "\nhint " + he + "\n" + add},
+		{"a wide Context does not widen the hint channel", DiffOptions{Context: 5, HintContext: 1},
+			"hint " + he + "\n" + add},
+		{"none", DiffOptions{Context: ContextNone}, add},
+		{"all", DiffOptions{Context: ContextAll},
+			"hint " + ha + "\nhint " + hb + "\nhint " + hc + "\nhint " + hd + "\nhint " + he + "\n" + add},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := contextBody(t, c.ctx); got != c.want {
+			if got := contextBody(t, c.opt); got != c.want {
 				t.Fatalf("got:\n%s\nwant:\n%s", got, c.want)
 			}
 		})
@@ -207,12 +217,24 @@ func TestDiffCoalescesOverlappingWindows(t *testing.T) {
 	}
 }
 
+// A radius still STOPS somewhere — widening the hint channel to 3 did not turn
+// it into "every sibling". A mapping's neighbours ride the hint channel, so the
+// default reaches exactly three keys past the change and no further.
 func TestDiffContextDoesNotSpanUnrelatedRuns(t *testing.T) {
-	old := dmap("a", dnum("1"), "b", dnum("2"), "c", dnum("3"), "d", dnum("4"), "e", dnum("5"))
-	new := dmap("a", dnum("9"), "b", dnum("2"), "c", dnum("3"), "d", dnum("4"), "e", dnum("5"))
+	old := dmap("a", dnum("1"), "b", dnum("2"), "c", dnum("3"), "d", dnum("4"),
+		"e", dnum("5"), "f", dnum("6"))
+	new := dmap("a", dnum("9"), "b", dnum("2"), "c", dnum("3"), "d", dnum("4"),
+		"e", dnum("5"), "f", dnum("6"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	if strings.Contains(got, "test /c") || strings.Contains(got, "test /d") {
-		t.Fatalf("radius 1 must not reach the third sibling:\n%s", got)
+	for _, want := range []string{"hint /b", "hint /c", "hint /d"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the default hint radius of 3 must reach %s:\n%s", want, got)
+		}
+	}
+	for _, reach := range []string{"/e", "/f"} {
+		if strings.Contains(got, reach) {
+			t.Fatalf("the hint radius must stop before %s:\n%s", reach, got)
+		}
 	}
 }
 
@@ -233,6 +255,32 @@ func TestDiffHintContextIsItsOwnKnob(t *testing.T) {
 		"\nadd / =f after:" + hf("e") + "\n"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The condition the ruling named as settling it: a duplicate-bearing array
+// emits three neighbours EITHER SIDE by default. The duplicates are what make
+// the count load-bearing — a repeated value cannot be told apart by its digest,
+// so the neighbourhood is the evidence that says which occurrence is meant, and
+// a radius of 1 gave the locator two hints where 3 gives it six.
+func TestDiffDefaultHintRadiusIsThreeEitherSide(t *testing.T) {
+	elems := func(mid string) *DiffNode {
+		// "dup" appears twice, so no element is addressable by digest alone.
+		return dseq(dstr("dup"), dstr("b"), dstr("c"), dstr("d"), dstr(mid),
+			dstr("f"), dstr("g"), dstr("h"), dstr("dup"))
+	}
+	got := summarize(diffOK(t, elems("e"), elems("E"), DiffOptions{}))
+	if n := strings.Count(got, "hint "); n != 6 {
+		t.Fatalf("want 6 hints (three either side), got %d:\n%s", n, got)
+	}
+	for _, want := range []string{"b", "c", "d", "f", "g", "h"} {
+		if !strings.Contains(got, "hint /"+hfrag(dstr(want))) {
+			t.Fatalf("neighbour %q must be hinted:\n%s", want, got)
+		}
+	}
+	// The duplicates sit four out, past the radius on both sides.
+	if strings.Contains(got, "hint /"+hfrag(dstr("dup"))) {
+		t.Fatalf("the radius must stop before the fourth sibling:\n%s", got)
 	}
 }
 
@@ -376,10 +424,11 @@ func TestDiffScalarSequenceAddressesByHash(t *testing.T) {
 	old := dseq(dstr("alpha"), dstr("beta"))
 	new := dseq(dstr("alpha"), dstr("beta"), dstr("gamma"))
 	got := summarize(diffOK(t, old, new, DiffOptions{}))
-	// beta is the untouched neighbour: a content-hash HINT, not a value assertion.
-	// The add anchors on that same hash (satisfied-recoil).
-	beta := "/" + hfrag(dstr("beta"))
-	want := "hint " + beta + "\nadd / =gamma after:" + beta + "\n"
+	// Both survivors are untouched neighbours within the hint radius: each rides
+	// a content-hash HINT, not a value assertion. The add anchors on the nearest
+	// one's hash (satisfied-recoil).
+	alpha, beta := "/"+hfrag(dstr("alpha")), "/"+hfrag(dstr("beta"))
+	want := "hint " + alpha + "\nhint " + beta + "\nadd / =gamma after:" + beta + "\n"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -680,10 +729,10 @@ func TestDiffOptionsDefaults(t *testing.T) {
 	}
 }
 
-// The hint knob spells its two ends the same way Context does, and an UNSET
-// hint knob follows Context — so the two sentinels, which are body-wide
-// requests ("no context at all", "every sibling"), still mean what they say
-// across both channels.
+// The hint knob spells its two ends the same way Context does. An unset knob
+// takes the hint DEFAULT rather than Context's count — the two channels want
+// opposite numbers — but the two SENTINELS, which are body-wide requests ("no
+// context at all", "every sibling"), still carry across both channels.
 func TestHintRadiusSpellings(t *testing.T) {
 	for _, c := range []struct {
 		ctx, hint int
@@ -691,8 +740,8 @@ func TestHintRadiusSpellings(t *testing.T) {
 		all       bool
 		name      string
 	}{
-		{0, 0, 1, false, "both unset: the hint radius follows Context"},
-		{2, 0, 2, false, "unset follows an explicit Context"},
+		{0, 0, HintContextDefault, false, "both unset: the hint default of three"},
+		{2, 0, HintContextDefault, false, "a plain Context does not move the hint radius"},
 		{1, 3, 3, false, "an explicit hint knob wins over Context"},
 		{ContextAll, 0, 0, true, "unset carries ContextAll across"},
 		{ContextNone, 0, 0, false, "unset carries ContextNone across"},

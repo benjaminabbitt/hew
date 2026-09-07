@@ -3,6 +3,7 @@ hew: 1
 --- before.yaml format=yaml
 
 @@ /server @@
+~ host
 ~ port
 - timeout: 30
 + timeout: 60
