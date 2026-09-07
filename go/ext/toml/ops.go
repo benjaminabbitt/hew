@@ -140,6 +140,22 @@ func (r *run) converge(t hew.Transform, w hew.Transform) error {
 		r.converged[t.Path.String()] = true
 		return nil
 	}
+	if n := t.Path.Len(); n > 0 && t.Path.Segment(n-1).Kind == hew.SegComment {
+		// A COMMENT's identity IS its text (§4.5b), so "no comment reading X"
+		// is not evidence that X was removed — it is equally consistent with
+		// the comment having been EDITED, or with X never having been there.
+		// Every other address may converge here because a key's identity
+		// survives a change to its value, which makes its absence real proof
+		// of a prior application; a text-addressed node has no such stability.
+		//
+		// Calling that "already applied" points the reader at `! idempotent`,
+		// which would then silently accept a document this patch was never
+		// written against — the near miss comment identity exists to stop. It
+		// is drift, and a paired REPLACE over the same drift already says so.
+		return r.err(hewerr.CodeStaleTarget, t.Path.String(), t.PatchLine,
+			"no comment with this text is here; a comment is addressed by the digest of its text, "+
+				"so its absence is drift rather than a re-application (§4.5b, §10.6)")
+	}
 	return r.err(hewerr.CodeAssertionFailed, t.Path.String(), t.PatchLine, alreadyApplied)
 }
 
