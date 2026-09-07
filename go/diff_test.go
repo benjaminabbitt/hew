@@ -216,6 +216,44 @@ func TestDiffContextDoesNotSpanUnrelatedRuns(t *testing.T) {
 	}
 }
 
+// --- the hint radius, a knob of its own --------------------------------------
+
+// The two channels cannot share a radius, because the same number has OPPOSITE
+// effects on them. Widening ASSERTING context makes a patch more BRITTLE: every
+// extra neighbour is one more unrelated edit the patch can refuse over.
+// Widening HINT context makes it more ROBUST: every extra neighbour is more
+// evidence to locate the hunk with, and a hint that no longer matches costs
+// nothing. So HintContext moves the `~` lines without moving the assertions.
+func TestDiffHintContextIsItsOwnKnob(t *testing.T) {
+	hf := func(s string) string { return "/" + hfrag(dstr(s)) }
+	old := dseq(dstr("a"), dstr("b"), dstr("c"), dstr("d"), dstr("e"))
+	new := dseq(dstr("a"), dstr("b"), dstr("c"), dstr("d"), dstr("e"), dstr("f"))
+	got := summarize(diffOK(t, old, new, DiffOptions{Context: 1, HintContext: 3}))
+	want := "hint " + hf("c") + "\nhint " + hf("d") + "\nhint " + hf("e") +
+		"\nadd / =f after:" + hf("e") + "\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The other half of the same property: a wide HINT radius must not widen the
+// ASSERTING context of a keyed sequence by so much as one sibling. Those `test`
+// records are what the patch refuses over, and they answer to Context alone.
+func TestDiffHintContextLeavesAssertingContextAlone(t *testing.T) {
+	old := dseq(delem("a", "1"), delem("b", "1"), delem("c", "1"),
+		delem("d", "1"), delem("e", "1"))
+	new := dseq(delem("a", "1"), delem("b", "1"), delem("c", "1"), delem("d", "1"))
+	got := summarize(diffOK(t, old, new, DiffOptions{Context: 1, HintContext: 3}))
+	if !strings.Contains(got, "test /name=d/name =d") {
+		t.Fatalf("Context 1 must still reach the immediate keyed neighbour:\n%s", got)
+	}
+	for _, reach := range []string{"/name=c", "/name=b", "/name=a"} {
+		if strings.Contains(got, reach) {
+			t.Fatalf("the hint radius must not widen asserting context to %s:\n%s", reach, got)
+		}
+	}
+}
+
 // A container with no changed child of its own emits nothing at all — that is
 // how R3's "deepest container" falls out structurally, and it is why the
 // corpus round-trips show no root hunk.
@@ -638,6 +676,33 @@ func TestDiffOptionsDefaults(t *testing.T) {
 		n, all := DiffOptions{Context: c.in}.radius()
 		if n != c.n || all != c.all {
 			t.Fatalf("%s: radius(%d) = (%d,%v), want (%d,%v)", c.name, c.in, n, all, c.n, c.all)
+		}
+	}
+}
+
+// The hint knob spells its two ends the same way Context does, and an UNSET
+// hint knob follows Context — so the two sentinels, which are body-wide
+// requests ("no context at all", "every sibling"), still mean what they say
+// across both channels.
+func TestHintRadiusSpellings(t *testing.T) {
+	for _, c := range []struct {
+		ctx, hint int
+		n         int
+		all       bool
+		name      string
+	}{
+		{0, 0, 1, false, "both unset: the hint radius follows Context"},
+		{2, 0, 2, false, "unset follows an explicit Context"},
+		{1, 3, 3, false, "an explicit hint knob wins over Context"},
+		{ContextAll, 0, 0, true, "unset carries ContextAll across"},
+		{ContextNone, 0, 0, false, "unset carries ContextNone across"},
+		{1, ContextNone, 0, false, "the hint channel can be silenced on its own"},
+		{1, ContextAll, 0, true, "the hint channel can be opened on its own"},
+	} {
+		n, all := DiffOptions{Context: c.ctx, HintContext: c.hint}.hintRadius()
+		if n != c.n || all != c.all {
+			t.Fatalf("%s: hintRadius(ctx=%d, hint=%d) = (%d,%v), want (%d,%v)",
+				c.name, c.ctx, c.hint, n, all, c.n, c.all)
 		}
 	}
 }

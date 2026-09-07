@@ -38,9 +38,25 @@ type DiffOptions struct {
 	// tried in order (§9.4-R4). Empty means DefaultKeyFields.
 	KeyFields []string
 
-	// Context is the sibling radius (§9.4-R2). Zero means ContextDefault;
-	// ContextNone and ContextAll spell the two ends.
+	// Context is the sibling radius (§9.4-R2) for the ASSERTING channel: the
+	// value-carrying `test` records a keyed or index sequence's untouched
+	// neighbours ride. Zero means ContextDefault; ContextNone and ContextAll
+	// spell the two ends.
 	Context int
+
+	// HintContext is the neighbour radius for the non-asserting HINT channel:
+	// the `~` lines a mapping's and a by-value set's untouched neighbours ride.
+	//
+	// It needs a knob of its own because the same number has OPPOSITE effects on
+	// the two channels. Widening ASSERTING context makes a patch more BRITTLE —
+	// every extra neighbour is one more unrelated edit it can refuse over.
+	// Widening HINT context makes it more ROBUST — every extra neighbour is more
+	// evidence the locator can place the hunk with, and a hint that no longer
+	// matches costs nothing, because it asserts nothing. One shared knob would
+	// silently trade one property for the other in whichever direction it moved.
+	//
+	// Zero means "follow Context"; ContextNone and ContextAll spell the two ends.
+	HintContext int
 
 	// Target is stamped into the produced TransformList; it is a label, not a
 	// path the differ reads. The differ performs no I/O of any kind.
@@ -62,6 +78,27 @@ func (o DiffOptions) radius() (n int, all bool) {
 		return 0, true
 	}
 	return o.Context, false
+}
+
+// hintRadius is the radius governing the hint channel.
+//
+// An UNSET knob follows Context, and the two SENTINELS carry across even when
+// the knob is set to a plain count elsewhere: ContextNone and ContextAll are
+// body-wide requests — "no context at all", "every sibling" — and a user who
+// spells one means it for the whole hunk body, not for one channel of it. A
+// plain COUNT does not carry across once HintContext names its own, which is
+// the entire point of there being two knobs.
+func (o DiffOptions) hintRadius() (n int, all bool) {
+	if o.HintContext == 0 {
+		return o.radius()
+	}
+	switch {
+	case o.HintContext == ContextNone:
+		return 0, false
+	case o.HintContext < 0: // ContextAll, and any other negative spelling of it
+		return 0, true
+	}
+	return o.HintContext, false
 }
 
 func (o DiffOptions) keyFields() []string {
@@ -141,6 +178,7 @@ func DiffTrees(old, new *DiffNode, format FormatID, opt DiffOptions) (TransformL
 	}
 	d := &differ{opt: opt, fields: opt.keyFields()}
 	d.radius, d.all = opt.radius()
+	d.hint, d.hintAll = opt.hintRadius()
 	if err := d.root(old, new); err != nil {
 		return TransformList{}, err
 	}
@@ -155,11 +193,13 @@ func DiffTrees(old, new *DiffNode, format FormatID, opt DiffOptions) (TransformL
 }
 
 type differ struct {
-	opt    DiffOptions
-	fields []string
-	radius int
-	all    bool
-	out    []Transform
+	opt     DiffOptions
+	fields  []string
+	radius  int
+	all     bool
+	hint    int
+	hintAll bool
+	out     []Transform
 }
 
 func (d *differ) note(format string, args ...any) {
@@ -308,7 +348,7 @@ func pairState(o, n *DiffChild) slotState {
 // so that a differ-produced list and a parser-produced list of the same patch
 // are the same list.
 func (d *differ) emit(addr addressing, slots []slot) {
-	show := d.window(slots)
+	show := d.window(addr, slots)
 	pos, dup := positions(addr, slots)
 	for i := range slots {
 		if !show[i] {
@@ -329,8 +369,7 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		// Keyed and index sequences keep their current emission for now: a keyed
 		// element's context line is already just its identity field (an address),
 		// and an index carries no value in the address.
-		if slots[i].state == slotSame && slots[i].old != nil && !slots[i].old.Comment &&
-			(!addr.seq || addr.byValue) {
+		if addr.hinted(&slots[i]) {
 			h := Transform{Op: OpHint, Path: slots[i].ref}
 			// A HINT always carries its position in a duplicate-bearing
 			// collection, even when its own value is unique. The dup[] gate that
@@ -392,6 +431,15 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		}
 		d.out = append(d.out, t)
 	}
+}
+
+// hinted reports whether a shown slot rides the non-asserting hint channel
+// rather than carrying an assertion. It is asked in two places that must agree:
+// window, deciding which RADIUS governs the slot, and emit, deciding which
+// RECORD to write for it. Were they to drift, a slot could be admitted by one
+// channel's radius and then emitted on the other's.
+func (a addressing) hinted(s *slot) bool {
+	return s.state == slotSame && s.old != nil && !s.old.Comment && (!a.seq || a.byValue)
 }
 
 type elemPos struct{ at, length int }
@@ -462,23 +510,55 @@ func positions(addr addressing, slots []slot) (map[int]elemPos, map[int]bool) {
 // (`@@ /mcpServers/name=github @@`), where the identity is the anchor. The
 // case R2 guards against — a radius small enough to leave a hunk unaddressable
 // — cannot arise.
-func (d *differ) window(slots []slot) []bool {
+// Each neighbour is admitted by the radius of the CHANNEL IT WILL RIDE, not by
+// one shared number: a slot destined for a `~` hint answers to HintContext, one
+// destined for a value-carrying `test` to Context. The scan therefore reaches as
+// far as the WIDER of the two and filters per slot, which is what lets the hint
+// channel run at 3 while assertions stay at 1 in the very same hunk.
+func (d *differ) window(addr addressing, slots []slot) []bool {
 	show := make([]bool, len(slots))
+	reach := d.radius
+	if d.hint > reach {
+		reach = d.hint
+	}
 	for i := range slots {
-		if d.all {
+		if d.channelAll(addr, &slots[i]) {
 			show[i] = true
-			continue
 		}
+	}
+	for i := range slots {
 		if !slots[i].state.changed() {
 			continue
 		}
-		for j := i - d.radius; j <= i+d.radius; j++ {
-			if j >= 0 && j < len(slots) {
+		for j := i - reach; j <= i+reach; j++ {
+			if j < 0 || j >= len(slots) {
+				continue
+			}
+			dist := j - i
+			if dist < 0 {
+				dist = -dist
+			}
+			if dist <= d.channelRadius(addr, &slots[j]) {
 				show[j] = true
 			}
 		}
 	}
 	return show
+}
+
+// channelRadius and channelAll read the knob governing one slot's channel.
+func (d *differ) channelRadius(addr addressing, s *slot) int {
+	if addr.hinted(s) {
+		return d.hint
+	}
+	return d.radius
+}
+
+func (d *differ) channelAll(addr addressing, s *slot) bool {
+	if addr.hinted(s) {
+		return d.hintAll
+	}
+	return d.all
 }
 
 type placementRef struct {
