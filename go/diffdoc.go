@@ -151,6 +151,14 @@ func scalarToken(v Value) string {
 	if n == nil {
 		return "!!absent:"
 	}
+	// A COMMENT is a keyless member like a set element, and its identity is its
+	// text — with the marker and one leading space already stripped (§4.5b), so
+	// a `// note` in JSONC and a `# note` in YAML are the same comment and hash
+	// alike. Without this a comment value would hash through its rendered
+	// {comment: …} mapping, which is neither stable nor meaningful.
+	if txt, ok := CommentText(v); ok {
+		return "!!comment:" + txt
+	}
 	if n.Kind != yaml.ScalarNode {
 		return "!!node:" + v.String()
 	}
@@ -165,3 +173,20 @@ func sameNode(a, b *DiffNode) bool { return a.canonical() == b.canonical() }
 // candidate's NEIGHBOURS with it (§4.5d) and only the binding can walk its own
 // document; the core cannot reach a jNode or a yaml.Node.
 func MemberToken(v Value) string { return hashScalar(v) }
+
+// commentSegment addresses a comment by the digest of its text rather than by an
+// ordinal (§4.5b). A comment has no key, exactly like a set member, so it locates
+// the way one does — and the ordinal it replaces was the single position-based
+// address in a design whose §4 says it has none.
+func commentSegment(text string) Segment {
+	return Segment{Kind: SegComment, Form: "hew", Name: "comment",
+		Hash: hashScalar(CommentValue(text))}
+}
+
+// MatchesComment reports whether text is the comment this segment addresses: its
+// canonical digest equals the fragment's. It is the applier's side of comment
+// hash addressing, exactly as MatchesHash is a set member's — a comment is a
+// keyless member and locates the same way.
+func (s Segment) MatchesComment(text string) bool {
+	return s.Kind == SegComment && s.Hash != "" && hashScalar(CommentValue(text)) == s.Hash
+}

@@ -155,6 +155,27 @@ func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
 		return ref{}, &resolveErr{detail: "comment ordinals address a container's comments"}
 	}
 	all := cur.node.standalone()
+	if seg.Hash != "" {
+		// Addressed by the digest of its TEXT. Identical comments collide just as
+		// identical set members do, and are resolved by the same scored locator
+		// rather than by a private rule.
+		var cands []hew.Candidate
+		for i, c := range all {
+			if seg.MatchesComment(c.text) {
+				cands = append(cands, hew.Candidate{Index: i})
+			}
+		}
+		if len(cands) == 0 {
+			return ref{}, &resolveErr{detail: "no comment matches " + seg.String()}
+		}
+		pick := hew.Locate(cands, len(all), d.adv)
+		if !pick.OK {
+			return ref{}, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
+		}
+		return ref{cmt: all[pick.Index], parent: cur.node}, nil
+	}
+	// A bare ordinal is no longer produced by anything; it resolves only for a
+	// hand-authored patch that still carries one.
 	if seg.Index < 0 || seg.Index >= len(all) {
 		return ref{}, &resolveErr{detail: fmt.Sprintf("no comment node #%d in this container", seg.Index)}
 	}

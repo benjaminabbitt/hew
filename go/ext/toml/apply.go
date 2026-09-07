@@ -317,6 +317,27 @@ func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		return &ref{comment: c, parent: cur.parent}, nil
 	}
 	comments := r.d.commentChildren(cur.node)
+	if seg.Hash != "" {
+		// Addressed by the digest of its TEXT. Identical comments collide just as
+		// identical set members do, and are resolved by the same scored locator
+		// rather than by a private rule.
+		var cands []hew.Candidate
+		for i, c := range comments {
+			if seg.MatchesComment(c.text) {
+				cands = append(cands, hew.Candidate{Index: i})
+			}
+		}
+		if len(cands) == 0 {
+			return nil, noMatch("no comment matches %s", seg.String())
+		}
+		pick := hew.Locate(cands, len(comments), r.adv)
+		if !pick.OK {
+			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true, detail: pick.Explain(seg)}
+		}
+		return &ref{comment: comments[pick.Index], parent: cur.node}, nil
+	}
+	// A bare ordinal is no longer produced by anything; it resolves only for a
+	// hand-authored patch that still carries one.
 	if seg.Index < 0 || seg.Index >= len(comments) {
 		return nil, noMatch("no comment #%d in this container (found %d)", seg.Index, len(comments))
 	}

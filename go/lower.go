@@ -589,7 +589,11 @@ func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
 		if idx < 0 {
 			return Path{}, parseErr(e.line, path.String(), "comment node is in neither projection (§5)")
 		}
-		return path.Append(Segment{Kind: SegComment, Index: idx}), nil
+		// A comment is addressed by the digest of its TEXT, never by an ordinal.
+		// The ordinal was assigned from the comment's position in the PATCH BODY
+		// rather than in the target, so a patch naming one comment resolved to a
+		// different one; and §4 has no ordinal segment in the first place.
+		return path.Append(commentSegment(e.comment)), nil
 	}
 	return identityPath(path, e)
 }

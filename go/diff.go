@@ -624,7 +624,7 @@ func identityToken(n *DiffNode, field string) string {
 func (a addressing) childPath(path Path, c DiffChild, index, commentIndex int) Path {
 	switch {
 	case c.Comment:
-		return path.Append(Segment{Kind: SegComment, Index: commentIndex})
+		return path.Append(commentSegment(c.Text))
 	case !a.seq:
 		return path.Append(Segment{Kind: SegKey, Name: c.Key})
 	case a.field != "":

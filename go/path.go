@@ -235,17 +235,19 @@ func (s Segment) String() string {
 		b.WriteString(s.Raw)
 	case SegComment:
 		b.WriteByte('#')
-		if s.Trailing {
+		switch {
+		case s.Trailing:
+			// `#t` is IDENTITY, not an ordinal: it names the comment attached to
+			// the preceding member, of which there is at most one. It stays.
 			b.WriteByte('t')
-		} else {
+		case s.Hash != "":
+			b.WriteString(fragmentTag(s))
+		default:
 			b.WriteString(strconv.Itoa(s.Index))
 		}
 	case SegHash:
-		// `#` + the tagma tag, rendered by the shared library so the spelling is
-		// the exact inverse of the ParseTag the parser used to read it.
 		b.WriteByte('#')
-		ns, val := s.Form, s.Hash
-		b.WriteString(tagma.Tag{Namespace: &ns, Key: s.Name, Value: &val}.String())
+		b.WriteString(fragmentTag(s))
 	}
 	if s.Optional {
 		b.WriteByte('?')
@@ -882,7 +884,14 @@ func segHashFromTag(tagText string) (Segment, bool) {
 	if err != nil || tag.Namespace == nil {
 		return Segment{}, false
 	}
-	seg := Segment{Kind: SegHash, Form: *tag.Namespace, Name: tag.Key}
+	kind := SegHash
+	if tag.Key == "comment" {
+		// Same `#` fragment family, different member kind: a comment is
+		// addressed by the digest of its TEXT, a sequence member by the digest
+		// of its VALUE. The key is what tells them apart.
+		kind = SegComment
+	}
+	seg := Segment{Kind: kind, Form: *tag.Namespace, Name: tag.Key}
 	if tag.Value != nil {
 		seg.Hash = *tag.Value
 	}
@@ -1122,4 +1131,14 @@ func quoteSegment(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+// fragmentTag renders a `#` fragment's tagma tag — `hew:sha256=<hex>` for a
+// member's content digest, `hew:comment=<hex>` for a comment's. Rendered by the
+// shared library so the spelling is the exact inverse of the ParseTag the parser
+// read it with, and shared so the two members of the `#` family cannot drift
+// apart in how they are written.
+func fragmentTag(s Segment) string {
+	ns, val := s.Form, s.Hash
+	return tagma.Tag{Namespace: &ns, Key: s.Name, Value: &val}.String()
 }
