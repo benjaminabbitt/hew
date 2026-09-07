@@ -1,6 +1,9 @@
 package hew
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // Scored location (satisfied-recoil slice 4). A content hash addresses a member
 // of a collection; when two members hold the same value they hash alike, and the
@@ -92,8 +95,23 @@ func (t Tier) String() string {
 // are how an ordered collection identifies a position by content rather than by
 // counting. They are empty for a binding that does not supply them.
 type Candidate struct {
-	Index         int
-	Before, After []string
+	Index int
+	// Neighbours are the members around this candidate as the document stands
+	// now. Empty for a binding that does not supply them.
+	Neighbours []Neighbour
+}
+
+// Neighbour is one member of a neighbourhood, recorded or observed. Token is the
+// member's ADDRESS TOKEN — a key for a mapping, a content digest for a sequence —
+// which is why one type serves both: only the address grammar differs, and that
+// is the container's own.
+//
+// At is its position in an ORDERED container, nil when the container has no
+// order. Proximity is the whole value of a neighbourhood, so an entry without a
+// position carries no evidence about WHERE and is skipped when ordering.
+type Neighbour struct {
+	Token string
+	At    *int
 }
 
 // Advisory is the non-asserting position advisory a transform recorded when the
@@ -102,8 +120,12 @@ type Candidate struct {
 // time (Before/After, nearest first). None of it can fail a match — it only ever
 // chooses between candidates the hash already found.
 type Advisory struct {
-	At, Length    *int
-	Before, After []string
+	At, Length *int
+	// Neighbours is the neighbourhood as the patch recorded it. ONE list, not a
+	// before/after pair: which members precede the addressed element is a fact
+	// about THAT ELEMENT, so the split is derived at evaluation time (see
+	// splitNeighbourhood) rather than baked into the stored data.
+	Neighbours []Neighbour
 }
 
 // Located is Locate's verdict. It is comparable on purpose: the same inputs must
@@ -251,12 +273,17 @@ func Locate(cands []Candidate, curLen int, adv Advisory) Located {
 // unlike a conflict, is simply uninformative, so the position signals get their
 // turn.
 func neighbourPick(cands []Candidate, adv Advisory) (idx, depth int, ok bool) {
-	if len(adv.Before) == 0 && len(adv.After) == 0 {
+	if adv.At == nil || len(adv.Neighbours) == 0 {
+		return 0, 0, false
+	}
+	recBefore, recAfter := splitNeighbourhood(adv.Neighbours, *adv.At)
+	if len(recBefore) == 0 && len(recAfter) == 0 {
 		return 0, 0, false
 	}
 	best, bestDepth, ties := -1, 0, 0
 	for _, c := range cands {
-		d := agreeingRun(adv.Before, c.Before) + agreeingRun(adv.After, c.After)
+		gotBefore, gotAfter := splitNeighbourhood(c.Neighbours, c.Index)
+		d := agreeingRun(recBefore, gotBefore) + agreeingRun(recAfter, gotAfter)
 		switch {
 		case d > bestDepth:
 			best, bestDepth, ties = c.Index, d, 1
@@ -278,7 +305,48 @@ func distance(a, b int) int {
 	return a - b
 }
 
+// splitNeighbourhood orders a neighbourhood around a position: the members
+// BEFORE it and those AFTER it, each NEAREST FIRST. The split is DERIVED and not
+// stored, because "before" and "after" are facts about the element being located,
+// not about the neighbours; the same recorded list splits differently for each
+// candidate, which is the whole point. Entries with no position are skipped —
+// without one there is no proximity to order by.
+func splitNeighbourhood(ns []Neighbour, at int) (before, after []string) {
+	type placed struct {
+		dist  int
+		token string
+	}
+	var b, a []placed
+	for _, n := range ns {
+		if n.At == nil {
+			continue
+		}
+		switch {
+		case *n.At < at:
+			b = append(b, placed{at - *n.At, n.Token})
+		case *n.At > at:
+			a = append(a, placed{*n.At - at, n.Token})
+		}
+	}
+	nearestFirst := func(p []placed) []string {
+		sort.Slice(p, func(i, j int) bool { return p[i].dist < p[j].dist })
+		out := make([]string, len(p))
+		for i := range p {
+			out[i] = p[i].token
+		}
+		return out
+	}
+	return nearestFirst(b), nearestFirst(a)
+}
+
 // agreeingRun counts how many digests agree from the nearest neighbour outward.
+//
+// ABSENT IS NOT DISAGREEMENT, and this must not be "fixed" into a penalty.
+// Migration can SHRINK a recorded neighbourhood but never EXTEND it (§4.5e), so a
+// candidate legitimately has neighbours the patch never wrote down. Running out
+// of record is LESS EVIDENCE; only a token that is present and different is
+// contrary evidence. The loop ends on either list running out, which is exactly
+// that rule.
 func agreeingRun(recorded, actual []string) int {
 	n := 0
 	for n < len(recorded) && n < len(actual) && recorded[n] != "" && recorded[n] == actual[n] {

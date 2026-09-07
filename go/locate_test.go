@@ -215,11 +215,20 @@ func TestLocateTiers(t *testing.T) {
 // by CONTENT rather than by counting, so — unlike every index-derived signal — it
 // survives an unrelated insertion anywhere else in the collection, which is
 // exactly the edit that shifts every index. That is why it outranks the anchors.
+//
+// The recorded neighbourhood is ONE list, not a before/after pair. Which
+// neighbours are "before" and which are "after" is a fact about the element being
+// located, so the split is derived at evaluation time from each entry's own
+// position; storing it pre-split would bake an evaluation-time view into the data
+// and would have no meaning at all for an unordered container.
 func TestLocateByNeighbourDigests(t *testing.T) {
-	// Two identical members at indices 1 and 4. The patch recorded what sat
-	// either side of the one it meant.
-	nb := func(idx int, before, after []string) Candidate {
-		return Candidate{Index: idx, Before: before, After: after}
+	// nb builds a neighbourhood from (position, token) pairs.
+	nb := func(pairs ...any) []Neighbour {
+		out := make([]Neighbour, 0, len(pairs)/2)
+		for i := 0; i < len(pairs); i += 2 {
+			out = append(out, Neighbour{At: at(pairs[i].(int)), Token: pairs[i+1].(string)})
+		}
+		return out
 	}
 	for _, c := range []struct {
 		name      string
@@ -231,30 +240,28 @@ func TestLocateByNeighbourDigests(t *testing.T) {
 	}{
 		{
 			// The collection was reordered wholesale, so no index means anything;
-			// the neighbours still do.
+			// the neighbours still do. Element 4 sits between "cc" and "dd".
 			name: "neighbour digests locate where every index has shifted",
 			cands: []Candidate{
-				nb(1, []string{"aa"}, []string{"bb"}),
-				nb(4, []string{"cc"}, []string{"dd"}),
+				{Index: 1, Neighbours: nb(0, "aa", 2, "bb")},
+				{Index: 4, Neighbours: nb(3, "cc", 5, "dd")},
 			},
-			curLen: 9,
-			adv: Advisory{At: at(7), Length: at(8),
-				Before: []string{"cc"}, After: []string{"dd"}},
+			curLen:   9,
+			adv:      Advisory{At: at(7), Length: at(8), Neighbours: nb(6, "cc", 8, "dd")},
 			wantTier: TierNeighboured, wantIndex: 4,
 		},
 		{
-			// Content beats arithmetic: the front and back anchors both land on
-			// element 1, and the neighbours say 4. The neighbours win, because an
-			// index agreeing after an insertion is a coincidence of counting
-			// while a digest agreeing is the same content.
+			// Content beats arithmetic: both anchors land on element 1, and the
+			// neighbours say 4. The neighbours win, because an index agreeing
+			// after an insertion is a coincidence of counting while a digest
+			// agreeing is the same content.
 			name: "neighbour digests outrank an index anchor that disagrees",
 			cands: []Candidate{
-				nb(1, []string{"aa"}, []string{"bb"}),
-				nb(4, []string{"cc"}, []string{"dd"}),
+				{Index: 1, Neighbours: nb(0, "aa", 2, "bb")},
+				{Index: 4, Neighbours: nb(3, "cc", 5, "dd")},
 			},
-			curLen: 9,
-			adv: Advisory{At: at(1), Length: at(9),
-				Before: []string{"cc"}, After: []string{"dd"}},
+			curLen:   9,
+			adv:      Advisory{At: at(1), Length: at(9), Neighbours: nb(0, "cc", 2, "dd")},
 			wantTier: TierNeighboured, wantIndex: 4,
 		},
 		{
@@ -262,38 +269,37 @@ func TestLocateByNeighbourDigests(t *testing.T) {
 			// neighbourhood is still evidence.
 			name: "agreement on one side alone still locates",
 			cands: []Candidate{
-				nb(1, []string{"aa"}, []string{"zz"}),
-				nb(4, []string{"cc"}, []string{"zz"}),
+				{Index: 1, Neighbours: nb(0, "aa", 2, "zz")},
+				{Index: 4, Neighbours: nb(3, "cc", 5, "zz")},
 			},
 			curLen:   9,
-			adv:      Advisory{Before: []string{"cc"}, After: []string{"dd"}},
+			adv:      Advisory{At: at(4), Neighbours: nb(3, "cc", 5, "dd")},
 			wantTier: TierNeighboured, wantIndex: 4,
 		},
 		{
 			// Agreement is counted OUTWARD and stops at the first disagreement.
-			// Candidate 4 agrees two deep; candidate 1 agrees zero deep then
-			// coincidentally matches further out, which is not evidence about
-			// this position and must not be counted.
+			// Candidate 4 agrees two deep; candidate 1's nearest disagrees and its
+			// coincidental match further out is not evidence about this position.
 			name: "agreement stops at the first disagreement rather than totalling matches",
 			cands: []Candidate{
-				nb(1, []string{"xx", "cc", "ee"}, nil),
-				nb(4, []string{"cc", "ee", "xx"}, nil),
+				{Index: 1, Neighbours: nb(0, "xx", -1, "cc", -2, "ee")},
+				{Index: 4, Neighbours: nb(3, "cc", 2, "ee", 1, "xx")},
 			},
 			curLen:   9,
-			adv:      Advisory{Before: []string{"cc", "ee", "ff"}},
+			adv:      Advisory{At: at(4), Neighbours: nb(3, "cc", 2, "ee", 1, "ff")},
 			wantTier: TierNeighboured, wantIndex: 4,
 		},
 		{
 			// Equal agreement is UNINFORMATIVE, not contradictory — the
-			// neighbours simply did not distinguish the candidates — so the
-			// position signals get their turn instead of the whole thing refusing.
+			// neighbours did not distinguish the candidates — so the position
+			// signals get their turn instead of the whole thing refusing.
 			name: "equal neighbour agreement defers to the position signals",
 			cands: []Candidate{
-				nb(1, []string{"cc"}, nil),
-				nb(4, []string{"cc"}, nil),
+				{Index: 1, Neighbours: nb(0, "cc")},
+				{Index: 4, Neighbours: nb(3, "cc")},
 			},
 			curLen:   9,
-			adv:      Advisory{At: at(4), Length: at(9), Before: []string{"cc"}},
+			adv:      Advisory{At: at(4), Length: at(9), Neighbours: nb(3, "cc")},
 			wantTier: TierAnchored, wantIndex: 4,
 		},
 		{
@@ -301,12 +307,28 @@ func TestLocateByNeighbourDigests(t *testing.T) {
 			// with no position recorded there is nothing left.
 			name: "neighbours matching nobody leave no evidence at all",
 			cands: []Candidate{
-				nb(1, []string{"aa"}, nil),
-				nb(4, []string{"bb"}, nil),
+				{Index: 1, Neighbours: nb(0, "aa")},
+				{Index: 4, Neighbours: nb(3, "bb")},
 			},
 			curLen:   9,
-			adv:      Advisory{Before: []string{"zz"}},
+			adv:      Advisory{Neighbours: nb(3, "zz")},
 			wantTier: TierNone,
+		},
+		{
+			// THE BOUND THAT MUST NOT BE "FIXED": migration can shrink a recorded
+			// neighbourhood but never extend it, so a candidate may legitimately
+			// have neighbours the patch never recorded. ABSENT IS NOT
+			// DISAGREEMENT — a short list is less evidence, never contrary
+			// evidence — so the candidate that agrees as far as the record goes
+			// still wins.
+			name: "a neighbour the patch never recorded is absent, not disagreeing",
+			cands: []Candidate{
+				{Index: 1, Neighbours: nb(0, "aa", 2, "bb")},
+				{Index: 4, Neighbours: nb(3, "cc", 5, "dd")},
+			},
+			curLen:   9,
+			adv:      Advisory{At: at(4), Neighbours: nb(3, "cc")},
+			wantTier: TierNeighboured, wantIndex: 4,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
