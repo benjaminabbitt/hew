@@ -80,6 +80,41 @@ func TestCommentOrdinalIsAParseError(t *testing.T) {
 	}
 }
 
+// The trailing `?` is GONE, and it is refused rather than ignored. It was
+// parsed, position-checked, compared and rendered, and read by no resolver, so
+// every patch that carried one got the plain no-match it was written to avoid.
+// The refusal is the whole point of the removal: `?` is an ordinary character
+// in a key, so a token that merely stopped being a flag would fall through to
+// the key fallback and address a key literally spelled `tls?` — the failure the
+// retired comment ordinal already demonstrated. The message must carry the
+// quoted spelling, because a writer who typed `tls?` meant one of the two
+// things it can now be, and needs to be told which spelling says which.
+func TestTrailingQuestionMarkIsAParseError(t *testing.T) {
+	for _, s := range []string{
+		"/server/tls?",              // the retired section's first worked example
+		"/mcpServers/name=ctxloom?", // and its second
+		"/a?/b",                     // not merely a last-segment rule any more
+		"/x?",
+	} {
+		_, err := ParsePath(s)
+		if err == nil {
+			t.Fatalf("ParsePath(%q) should fail: the optional segment is gone (§4.7)", s)
+		}
+		if !strings.Contains(err.Error(), `"`) {
+			t.Fatalf("ParsePath(%q) must name the quoted literal as the escape hatch, got: %v", s, err)
+		}
+	}
+	// The escape hatch itself: a key whose text really does end in `?` is
+	// addressable as a literal, and that is the ONLY way to say it.
+	p, err := ParsePath(`/server/"tls?"`)
+	if err != nil {
+		t.Fatalf(`ParsePath("/server/\"tls?\""): %v`, err)
+	}
+	if last := p.Segment(1); last.Kind != SegKey || last.Name != "tls?" {
+		t.Fatalf("kind/name = %v/%q, want key/tls?", last.Kind, last.Name)
+	}
+}
+
 func TestParsePathMustStartWithSlashOrDot(t *testing.T) {
 	if _, err := ParsePath("server/timeout"); err == nil {
 		t.Fatal("ParsePath without leading / or . should fail")
@@ -103,12 +138,6 @@ func TestRelativePath(t *testing.T) {
 	}
 	if !root.IsRelative() || root.Len() != 0 {
 		t.Fatalf("relative root: %+v", root)
-	}
-}
-
-func TestTrailingOptionalOnlyOnLastSegment(t *testing.T) {
-	if _, err := ParsePath("/server?/tls"); err == nil {
-		t.Fatal(`trailing "?" is legal only on the last segment (§4.4)`)
 	}
 }
 
@@ -195,7 +224,7 @@ func TestSegmentSpellability(t *testing.T) {
 		{"block kind with a non-numeric ordinal", Segment{Kind: SegKey, Name: "para:x"}, true},
 		{"unknown block kind is an ordinary key", Segment{Kind: SegKey, Name: "notablock:0"}, true},
 		{"empty brackets are not an ordinal", Segment{Kind: SegKey, Name: "a[]"}, true},
-		{"key with the optional flag", Segment{Kind: SegKey, Name: "tls", Optional: true}, true},
+		{"key ending in ?, spellable only quoted", Segment{Kind: SegKey, Name: "tls?"}, true},
 		{"empty key survives in a non-leading position", Segment{Kind: SegKey, Name: ""}, true},
 
 		// --- healthy non-key segments ---------------------------------------
@@ -276,7 +305,7 @@ func TestPathSpellability(t *testing.T) {
 		{"empty key after a key", NewPath(Segment{Kind: SegKey, Name: "a"}, Segment{Kind: SegKey, Name: ""}), true},
 		{"empty key before a key", NewPath(Segment{Kind: SegKey, Name: ""}, Segment{Kind: SegKey, Name: "a"}), true},
 		{"relative empty key", NewRelativePath(Segment{Kind: SegKey, Name: ""}), true},
-		{"optional on the last segment", NewPath(Segment{Kind: SegKey, Name: "server"}, Segment{Kind: SegKey, Name: "tls", Optional: true}), true},
+		{"key ending in ? is quoted into a spelling", NewPath(Segment{Kind: SegKey, Name: "server"}, Segment{Kind: SegKey, Name: "tls?"}), true},
 
 		// The lone empty key used to print "/" and vanish into the document
 		// root. It prints /"" now, which is RFC 6901's empty-key member and the
@@ -284,9 +313,10 @@ func TestPathSpellability(t *testing.T) {
 		{"lone empty key", NewPath(Segment{Kind: SegKey, Name: ""}), true},
 		{"key that used to read back as an index", NewPath(Segment{Kind: SegKey, Name: "deps"}, Segment{Kind: SegKey, Name: "8080"}, Segment{Kind: SegKey, Name: "version"}), true},
 
-		// "?" is legal only on the last segment (§4.4) — invisible to any
-		// single segment, and the last positional failure left.
-		{"optional on a non-final segment", NewPath(Segment{Kind: SegKey, Name: "server", Optional: true}, Segment{Kind: SegKey, Name: "tls"}), false},
+		// A path is no more spellable than its worst segment. There is no
+		// longer any POSITIONAL failure to test: the optional segment's
+		// "last segment only" rule was the only one, and it is retired (§4.7).
+		{"an unspellable segment makes the path unspellable", NewPath(Segment{Kind: SegKey, Name: "server"}, Segment{Kind: SegIndex, Index: -1}), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -338,16 +368,11 @@ func TestFirstUnspellableNamesTheEarliestOffender(t *testing.T) {
 		t.Fatalf("firstUnspellable() named index %d, want the earliest offender -2", seg.Index)
 	}
 
-	// Positional failures have no locally-broken segment, so attribution falls
-	// to the shortest prefix that stopped round-tripping.
-	mid := NewPath(
-		Segment{Kind: SegKey, Name: "server", Optional: true},
-		Segment{Kind: SegKey, Name: "tls"},
-	)
-	seg, bad = mid.firstUnspellable()
-	if !bad || seg.Name != "tls" {
-		t.Fatalf(`"?" before the last segment: got (%+v, %v), want the segment that could not follow it`, seg, bad)
-	}
+	// There is no positional failure left to attribute: the optional segment's
+	// "last segment only" rule was the only spelling that could break a path
+	// while every segment survived alone, and it is retired (§4.7). The
+	// shortest-prefix fallback below firstUnspellable's loop is now a net for a
+	// future form, not a path any v0 spelling can reach.
 
 	// A key that would once have been blamed here is now spelled, not refused:
 	// the guard follows the grammar rather than a remembered list.
@@ -369,7 +394,6 @@ func TestSpellFailureNamesTheCorruption(t *testing.T) {
 		{"different kind", Segment{Kind: SegExtension, Form: "heading", Raw: "# Setup"}, "re-reads as a key segment, not a heading"},
 		{"same kind, different segment", Segment{Kind: SegMatch, Name: "on", Value: Scalar{Kind: ScalarBool, Text: "True"}}, "re-reads as a different match segment"},
 		{"not a legal segment", Segment{Kind: SegExtension, Form: "wildcard", Raw: "*"}, "is not a legal segment"},
-		{"positional", Segment{Kind: SegKey, Name: "x", Optional: true}, "does not survive in this position"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

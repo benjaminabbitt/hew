@@ -1,7 +1,6 @@
 package hew
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
@@ -48,9 +47,6 @@ func TestSegmentArgConstructors(t *testing.T) {
 		{"comment", Comment("note"),
 			Segment{Kind: SegComment, Form: "hew", Name: "comment", Hash: hashScalar(CommentValue("note"))}},
 		{"trailing comment", TrailingComment(), Segment{Kind: SegComment, Trailing: true}},
-		{"optional", Optional(Key("tls")), Segment{Kind: SegKey, Name: "tls", Optional: true}},
-		{"optional over a match", Optional(MatchKey("name", "x")),
-			Segment{Kind: SegMatch, Name: "name", Value: Scalar{Kind: ScalarString, Text: "x", Quoted: true}, Optional: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := seg(t, tc.arg); !got.Equal(tc.want) {
@@ -138,7 +134,7 @@ func TestAtIsAtPathOfParsePath(t *testing.T) {
 	for _, s := range []string{
 		"/", "/port", "/a/b/c", "/servers/0", "/servers/-", `/servers/name="x"`,
 		"/servers/port=8080", `/provider/"google"`, "/list/" + cfrag("note"), "/list/#t",
-		"/deps/@scope~1pkg", "/a/b?", "/a~0b/c~1d",
+		"/deps/@scope~1pkg", `/a/"b?"`, "/a~0b/c~1d",
 	} {
 		want, err := ParsePath(s)
 		if err != nil {
@@ -174,7 +170,7 @@ func TestHoleArgumentIsNeverParsedAsPathText(t *testing.T) {
 			t.Fatalf("Key(%q) produced %d segments", hostile, p.Len())
 		}
 		s := p.Segment(1)
-		if s.Kind != SegKey || s.Name != hostile || s.Optional {
+		if s.Kind != SegKey || s.Name != hostile {
 			t.Fatalf("Key(%q) became %+v", hostile, s)
 		}
 	}
@@ -263,12 +259,21 @@ func TestAtRejectsAPatternCarryingTheHoleSentinel(t *testing.T) {
 	wantCode(t, d.err, hewerr.CodeParse)
 }
 
-func TestAtRejectsAnOptionalHoleOffTheEnd(t *testing.T) {
+// A hole may be filled with a key whose name ends in "?". The name is DATA and
+// never passes back through the segment lexer, so the retired optional segment
+// (§4.7) obstructs nothing here; the path renders with the literal form, which
+// is the only spelling that reparses.
+func TestAtFillsAHoleWithAKeyEndingInQuestionMark(t *testing.T) {
 	d := atDoc(t)
-	d.At("/{}/b", Optional(Key("a")))
-	he := wantCode(t, d.err, hewerr.CodeParse)
-	if !strings.Contains(he.Detail, "last segment") {
-		t.Fatalf("detail = %q", he.Detail)
+	p := d.At("/{}/b", Key("a?")).path
+	if d.err != nil {
+		t.Fatal(d.err)
+	}
+	if got := p.String(); got != `/"a?"/b` {
+		t.Fatalf("String() = %q, want the literal form", got)
+	}
+	if seg := p.Segment(0); seg.Kind != SegKey || seg.Name != "a?" {
+		t.Fatalf("segment 0 = %+v, want the key a?", seg)
 	}
 }
 

@@ -78,6 +78,32 @@ func TestUnclaimedTokensStayKeys(t *testing.T) {
 	}
 }
 
+// A claimed form is offered the WHOLE token, so a heading whose text ends in a
+// question mark keeps it. This is what the core's refusal of a trailing `?`
+// (§4.7) is positioned around: the refusal sits below the claim in the dispatch
+// (§8.8), because `?` is not a shape an extension might own but a suffix on an
+// otherwise ordinary token, and prose headings end in one all the time. Refusing
+// above the claim would make `## Is it safe?` unaddressable; stripping it, as
+// the retired optional segment did, silently addressed the heading "Is it safe"
+// — a heading the document does not contain.
+func TestClaimedHeadingKeepsATrailingQuestionMark(t *testing.T) {
+	const path = "/# Is it safe?"
+	p, err := hew.ParsePath(path)
+	if err != nil {
+		t.Fatalf("ParsePath(%q): %v", path, err)
+	}
+	seg := p.Segment(0)
+	if seg.Kind != hew.SegExtension || seg.Form != FormHeading {
+		t.Fatalf("kind/form = %v/%q, want an extension-claimed heading", seg.Kind, seg.Form)
+	}
+	if seg.Raw != "# Is it safe?" {
+		t.Fatalf("raw = %q, want the heading text with its question mark intact", seg.Raw)
+	}
+	if got := p.String(); got != path {
+		t.Fatalf("String() = %q, want %q", got, path)
+	}
+}
+
 // TestMalformedClaimsAreRefused pins the third answer a SegmentForm can give.
 // "@" is claimed and rejected rather than quietly demoted to a key, because a
 // nameless marker is a typo and a key named "@" would fail much later, as a

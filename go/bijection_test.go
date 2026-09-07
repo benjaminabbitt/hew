@@ -42,8 +42,8 @@ func adversarialKeys() []string {
 		"# Setup", "## Install", "#0", "#12", "#t", "#foo", "##0", // headings and comment addresses
 		`"quoted"`, `"unterminated`, // a key that opens with the literal form's own quote
 		"code:0", "para:1", "list:12", "notablock:0", "para:x", // block ordinals (§4.5)
-		"opt?", "?", "a?b", // the optional flag (§4.4)
-		"a[1]", "a[]", "[0]", "a[1]b", // the IR-only [n] selector
+		"opt?", "?", "a?b", // refused as a bare segment (§4.7)
+		"a[1]", "a[]", "[0]", "a[1]b", // the retired IR-only [n] selector
 		"*", "**", "a*b", // O44's wildcard reservation
 
 		// --- what the escapes act on ------------------------------------------
@@ -81,7 +81,6 @@ func TestKeyBijection(t *testing.T) {
 				NewPath(Segment{Kind: SegKey, Name: key}, Segment{Kind: SegKey, Name: "version"}),
 				NewPath(Segment{Kind: SegKey, Name: key}, Segment{Kind: SegKey, Name: key}),
 				NewRelativePath(Segment{Kind: SegKey, Name: key}),
-				NewPath(Segment{Kind: SegKey, Name: key, Optional: true}),
 				// The same key as a key-match FIELD and as a match VALUE.
 				NewPath(Segment{Kind: SegMatch, Name: key, Value: Scalar{Kind: ScalarString, Text: "v"}}),
 				NewPath(Segment{Kind: SegMatch, Name: "name", Value: Scalar{Kind: ScalarString, Text: key}}),
@@ -172,7 +171,7 @@ func TestQuotedSegmentSpellsTheSpecsExamples(t *testing.T) {
 		{`/paths/"*"`, "*"},                          // a real tsconfig key (§4.7)
 		{`/x/""`, ""},                                // RFC 6901's empty-key member
 		{`/x/"code:0"`, "code:0"},                    // NOT a block ordinal
-		{`/x/"a?"`, "a?"},                            // NOT an optional segment
+		{`/x/"a?"`, "a?"},                            // the ONLY spelling of a key ending in "?" (§4.7)
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
@@ -186,9 +185,6 @@ func TestQuotedSegmentSpellsTheSpecsExamples(t *testing.T) {
 			last := p.Segment(1)
 			if last.Kind != SegKey || last.Name != tc.key || !last.IsQuoted() {
 				t.Fatalf("%q's last segment is %+v, want the quoted key %q", tc.path, last, tc.key)
-			}
-			if last.Optional {
-				t.Errorf("%q: the trailing %q is inside the quotes and is not the optional flag (§4.4)", tc.path, "?")
 			}
 			if got := p.String(); got != tc.path {
 				t.Errorf("re-rendered as %q, want %q", got, tc.path)

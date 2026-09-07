@@ -364,24 +364,22 @@ func TestClaimedSegmentParsesAndRoundTrips(t *testing.T) {
 	}
 }
 
-func TestClaimedSegmentCarriesTheUniversalSuffixes(t *testing.T) {
+// A form is offered the WHOLE token — there are no universal suffixes left to
+// strip — so `[server]?` is simply not a stanza, and what happens next is the
+// core's business. It is REFUSED rather than demoted to a key: a token ending
+// in `?` that reached the fallbacks would otherwise address a key literally
+// spelled `[server]?`, which is the silent mis-addressing the refusal exists to
+// prevent (§4.7). A form that does want a trailing `?` gets it — see
+// ext/markdown's heading test.
+func TestUnclaimedTokenEndingInQuestionMarkIsRefused(t *testing.T) {
 	registerStanza(t)
 
-	p, err := ParsePath("/[server]?")
-	if err != nil {
-		t.Fatalf("ParsePath: %v", err)
+	_, err := ParsePath("/[server]?")
+	if err == nil {
+		t.Fatal(`ParsePath("/[server]?") succeeded; an unclaimed trailing "?" must be refused (§4.7)`)
 	}
-	seg := p.Segment(0)
-	// The `?` is stripped before the form is offered the token, so a form
-	// describes only its own shape and cannot forget to handle it.
-	if seg.Raw != "[server]" {
-		t.Fatalf("raw = %q, want the token without the universal suffixes", seg.Raw)
-	}
-	if !seg.Optional {
-		t.Fatalf("suffix lost: %+v", seg)
-	}
-	if got := p.String(); got != "/[server]?" {
-		t.Fatalf("String() = %q", got)
+	if !strings.Contains(err.Error(), `"[server]?"`) {
+		t.Fatalf("error %q does not offer the literal spelling as the escape hatch", err)
 	}
 }
 

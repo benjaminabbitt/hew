@@ -9,26 +9,22 @@ import (
 // TestDefaultCreatesAbsentTopLevelKey pins OP-04's `! default` (Sel.Default)
 // against the shape a caller like ctxloom's .mcp.json writer hits: a key
 // directly under the document ROOT — always present — that may or may not
-// exist yet ("mcpServers"). §4.4's trailing `?` on the address is documented
-// as a second, independent way to say "match it, or create it" for the same
-// last-segment-absent shape.
+// exist yet ("mcpServers").
 //
-// Both are exercised here, addressed with and without the trailing "?", and
-// both create the key. Measured: they are FULLY REDUNDANT for this shape.
-// Sel.Default already lowers to Op:Add, OnConflict:ConflictKeep (OP-04), and
-// every binding's add-planning (ext/{json,jsonc,yaml,toml}'s planAdd /
-// planInsert) treats a last-segment SegKey whose immediate parent already
-// resolves — root always does — as creatable UNCONDITIONALLY: on_conflict is
-// consulted only in the branch reached when the node ALREADY exists, never in
-// the "not found" branch that runs here. So a trailing "?" on the address
-// changes nothing observable for `add`/`! default`: the op's own semantics
-// already provide the "create if absent" `?` promises. Segment.Optional (the
-// parsed "?" flag) is consulted nowhere in the resolution pipeline — see
-// go/resolve.go's resolver.walk/step/createPointer and each ext package's own
-// private resolver — which is consistent with §4.4 restricting "?" to a hunk
-// ANCHOR: a fluent-API Sel whose own address IS the anchor, with no children
-// written beneath it, is exactly the case where the anchor's own op already
-// decides "absent" for itself.
+// This file used to exercise each address twice, with and without a trailing
+// `?`, and measured that the two were FULLY REDUNDANT: `Sel.Default` lowers to
+// Op:Add, OnConflict:ConflictKeep (OP-04), and every binding's add-planning
+// (ext/{json,jsonc,yaml,toml}'s planAdd / planInsert) treats a last-segment
+// SegKey whose immediate parent already resolves — root always does — as
+// creatable UNCONDITIONALLY: on_conflict is consulted only in the branch
+// reached when the node ALREADY exists, never in the "not found" branch that
+// runs here. The `?` changed nothing observable, because the op's own semantics
+// already provide the "create if absent" it promised.
+//
+// That measurement is why the optional segment was retired rather than wired
+// up (§4.7). `! default` is the spelling; the `?` is now a parse error, which
+// TestOptionalSegmentAddressIsRefused below pins so the redundancy cannot
+// quietly come back as a second way to say this.
 func TestDefaultCreatesAbsentTopLevelKey(t *testing.T) {
 	for _, c := range []struct {
 		format hew.FormatID
@@ -40,7 +36,7 @@ func TestDefaultCreatesAbsentTopLevelKey(t *testing.T) {
 		{hew.FormatYAML, "config.yaml", "port: 8080\n"},
 		{hew.FormatTOML, "config.toml", "port = 8080\n"},
 	} {
-		for _, addr := range []string{"/mcpServers", "/mcpServers?"} {
+		for _, addr := range []string{"/mcpServers"} {
 			t.Run(string(c.format)+"/"+addr, func(t *testing.T) {
 				doc, err := hew.OpenBytes(c.name, []byte(c.src), hew.As(c.format))
 				if err != nil {
@@ -72,8 +68,23 @@ func TestDefaultCreatesAbsentTopLevelKey(t *testing.T) {
 	}
 }
 
+// TestOptionalSegmentAddressIsRefused is the other side of the ruling: the
+// spelling `! default` replaced is refused, in every format, rather than
+// silently addressing a key whose name ends in `?`. Two spellings for one
+// behaviour is how two sources of one truth start disagreeing, and a refusal is
+// what keeps the second from reappearing by accident.
+func TestOptionalSegmentAddressIsRefused(t *testing.T) {
+	for _, f := range []hew.FormatID{hew.FormatJSON, hew.FormatJSONC, hew.FormatYAML, hew.FormatTOML} {
+		t.Run(string(f), func(t *testing.T) {
+			if _, err := hew.ParsePathIn(f, "/mcpServers?"); err == nil {
+				t.Fatal(`ParsePathIn("/mcpServers?") succeeded; the optional segment is retired (§4.7)`)
+			}
+		})
+	}
+}
+
 // TestDefaultLeavesPresentKeyAlone is OP-04's non-clobbering half: a key that
-// already exists is left exactly as the user wrote it, `?` or no `?`.
+// already exists is left exactly as the user wrote it.
 func TestDefaultLeavesPresentKeyAlone(t *testing.T) {
 	for _, c := range []struct {
 		format hew.FormatID
@@ -83,7 +94,7 @@ func TestDefaultLeavesPresentKeyAlone(t *testing.T) {
 		{hew.FormatJSON, "config.json", "{\n  \"mcpServers\": {\n    \"mine\": {}\n  }\n}\n"},
 		{hew.FormatYAML, "config.yaml", "mcpServers:\n  mine: {}\n"},
 	} {
-		for _, addr := range []string{"/mcpServers", "/mcpServers?"} {
+		for _, addr := range []string{"/mcpServers"} {
 			t.Run(string(c.format)+"/"+addr, func(t *testing.T) {
 				doc, err := hew.OpenBytes(c.name, []byte(c.src), hew.As(c.format))
 				if err != nil {

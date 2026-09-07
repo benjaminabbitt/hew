@@ -111,9 +111,10 @@ type Binding struct {
 // which of its own shapes it is looking at — and Claim decides whether a lexed
 // token is one of them.
 //
-// Claim receives the token with the universal suffixes already stripped (the
-// `?` of §4.4 and the IR-only `[n]` of §9.6), so a form describes only its own
-// shape. Its three answers are distinct on purpose:
+// Claim receives the WHOLE token. There are no universal suffixes left to
+// strip — the IR-only `[n]` and the optional segment's `?` were both retired —
+// so a form sees exactly what the author wrote, and a heading whose text ends
+// in `?` keeps it (§4.7, §8.8). Its three answers are distinct on purpose:
 //
 //   - (true, nil)   — mine, and well formed.
 //   - (false, nil)  — not mine; the core keeps looking, and `key` is the floor.

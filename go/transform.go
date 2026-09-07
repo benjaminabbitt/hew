@@ -372,7 +372,11 @@ func spellFailure(seg Segment) string {
 	case !seg.Equal(got):
 		return "its spelling " + spelling + " re-reads as a different " + seg.describe() + " segment"
 	}
-	return "its spelling " + spelling + " does not survive in this position"
+	// The total-function fallback. No v0 segment reaches it: one that parses,
+	// keeps its kind and form and compares equal IS spellable, so spellFailure
+	// would not have been called. The optional segment's position rule was the
+	// one construct that could, and it is retired (§4.7).
+	return "its spelling " + spelling + " does not round-trip"
 }
 
 // Validate checks one record's field/op compatibility (§9.6: "fields whose
