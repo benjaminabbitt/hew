@@ -344,7 +344,14 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		if slots[i].state == slotSame && slots[i].old != nil && !slots[i].old.Comment &&
 			(!addr.seq || addr.byValue) {
 			h := Transform{Op: OpHint, Path: slots[i].ref}
-			if p, ok := pos[i]; ok && dup[i] {
+			// A HINT always carries its position in a duplicate-bearing
+			// collection, even when its own value is unique. The dup[] gate that
+			// applies to mutations does not apply here: a neighbour's position is
+			// what makes it ORDERABLE evidence, and the most discriminating
+			// neighbours are precisely the unique ones. Without it the
+			// neighbourhood is a bag of unplaced tokens and cannot be compared
+			// against a candidate's surroundings at all.
+			if p, ok := pos[i]; ok {
 				// Without this two context duplicates are byte-identical records:
 				// indistinguishable in the IR, collapsed into one body line by the
 				// renderer, and useless as the anchor an add is placed against.

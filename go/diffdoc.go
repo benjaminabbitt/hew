@@ -159,3 +159,9 @@ func scalarToken(v Value) string {
 
 // sameNode reports node equality, the relation the sequence diff runs over.
 func sameNode(a, b *DiffNode) bool { return a.canonical() == b.canonical() }
+
+// MemberToken is the address token of a keyless member: the digest its
+// `#hew:sha256=` address carries. Exported because a binding must name a
+// candidate's NEIGHBOURS with it (§4.5d) and only the binding can walk its own
+// document; the core cannot reach a jNode or a yaml.Node.
+func MemberToken(v Value) string { return hashScalar(v) }

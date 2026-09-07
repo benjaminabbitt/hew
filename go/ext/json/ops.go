@@ -319,10 +319,19 @@ func (d *doc) planRemove(target string, t hew.Transform) (*edit, error) {
 			}
 		}
 	case parent.kind == jArr && last.Kind == hew.SegHash:
+		tokenAt := func(k int) (string, bool) {
+			v, err := d.nodeValue(parent.elems[k].value)
+			if err != nil {
+				return "", false
+			}
+			return hew.MemberToken(v), true
+		}
+		radius := hew.NeighbourRadius(d.adv)
 		var cands []hew.Candidate
 		for i, e := range parent.elems {
 			if v, err := d.nodeValue(e.value); err == nil && last.MatchesHash(v) {
-				cands = append(cands, hew.Candidate{Index: i})
+				cands = append(cands, hew.Candidate{Index: i,
+					Neighbours: hew.ObservedNeighbours(i, len(parent.elems), radius, tokenAt)})
 			}
 		}
 		// Matching nothing falls through to the no-match report below, which can

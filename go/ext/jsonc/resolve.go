@@ -108,10 +108,19 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 		if cur.node.kind != kArr {
 			return ref{}, &resolveErr{detail: "not an array"}
 		}
+		tokenAt := func(k int) (string, bool) {
+			v, has := d.comparedValue(cur.node.elems[k].value, hew.Segment{})
+			if !has {
+				return "", false
+			}
+			return hew.MemberToken(v), true
+		}
+		radius := hew.NeighbourRadius(d.adv)
 		var cands []hew.Candidate
 		for i, e := range cur.node.elems {
 			if v, has := d.comparedValue(e.value, hew.Segment{}); has && seg.MatchesHash(v) {
-				cands = append(cands, hew.Candidate{Index: i})
+				cands = append(cands, hew.Candidate{Index: i,
+					Neighbours: hew.ObservedNeighbours(i, len(cur.node.elems), radius, tokenAt)})
 			}
 		}
 		if len(cands) == 0 {

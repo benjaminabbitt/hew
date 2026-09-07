@@ -1,7 +1,6 @@
 package all
 
 import (
-	"strings"
 	"testing"
 
 	hew "github.com/benjaminabbitt/hew/go"
@@ -78,32 +77,30 @@ func TestForeignTwoSidedDriftLocatesTheNearest(t *testing.T) {
 	assertTags(t, got, []any{"x", "y", "a", "b", "c", "dup"})
 }
 
-// EQUIDISTANT. Symmetrical two-sided drift: one element inserted at each end. No
+// NEIGHBOURS. Symmetrical two-sided drift: one element inserted at each end. No
 // anchor lands, and the two duplicates now sit the SAME distance from where the
-// advisory points. Position has genuinely run out, and hew refuses rather than
+// advisory points, so POSITION HAS RUN OUT IN PRINCIPLE — not for want of
+// cleverness. Before the neighbour channel this refused, correctly, rather than
 // tossing a coin.
 //
-// This case is the argument for the neighbour channel. The position signals
-// cannot separate these two candidates even in principle — but their
-// NEIGHBOURHOODS still can: the target duplicate is still between "a" and "b",
-// and the other is still between "b" and "c". Content adjacency survives exactly
-// the two-sided drift that defeats both anchors, which is why it is not
-// substitutable by any amount of further position work.
-func TestForeignSymmetricDriftRefusesAndNeighboursWouldNot(t *testing.T) {
-	_, patch, err := foreignDrift(t,
+// Their NEIGHBOURHOODS still separate them: the target duplicate is still between
+// "a" and "b", the other still between "b" and "c". Content adjacency survives
+// exactly the two-sided drift that defeats both anchors, because both anchors are
+// derived from ONE recorded coordinate and adjacency is not. That is why it is
+// not substitutable by any amount of further position work, and it is the case
+// the neighbour channel was built for.
+func TestForeignSymmetricDriftLocatesByNeighbours(t *testing.T) {
+	got, patch, err := foreignDrift(t,
 		`{"tags": ["a", "dup", "b", "dup", "c"]}`,
 		`{"tags": ["a", "b", "dup", "c"]}`, // the dup at index 1 removed
 		`{"tags": ["front", "a", "dup", "b", "dup", "c", "back"]}`)
-	if err == nil {
-		t.Fatalf("symmetrical drift leaves the candidates indistinguishable by "+
-			"position; hew must refuse rather than guess\n%s", patch)
+	if err != nil {
+		t.Fatalf("the neighbourhood still separates these candidates where position "+
+			"cannot: %v\n%s", err, patch)
 	}
-	detail := err.Error()
-	for _, want := range []string{"collide", "equally"} {
-		if !strings.Contains(detail, want) {
-			t.Fatalf("expected an equidistant refusal naming the tie, got: %s", detail)
-		}
-	}
+	// The dup originally at index 1 sits between "a" and "b"; after the foreign
+	// inserts it is at index 2, and it is the one to go.
+	assertTags(t, got, []any{"front", "a", "b", "dup", "c", "back"})
 }
 
 func assertTags(t *testing.T, got []byte, want []any) {

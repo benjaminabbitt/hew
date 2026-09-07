@@ -458,6 +458,14 @@ func (r *resolver) stepHash(n Node, seg Segment) (string, Node, *stepErr) {
 	if n.Kind() != KindSeq {
 		return "", nil, &stepErr{detail: "not a sequence"}
 	}
+	tokenAt := func(k int) (string, bool) {
+		e, ok := n.Elem(k)
+		if !ok {
+			return "", false
+		}
+		return hashScalar(e.Value()), true
+	}
+	radius := NeighbourRadius(r.adv)
 	var cands []Candidate
 	var nodes []Node
 	for i := 0; i < n.Len(); i++ {
@@ -466,7 +474,8 @@ func (r *resolver) stepHash(n Node, seg Segment) (string, Node, *stepErr) {
 			continue
 		}
 		if hashScalar(e.Value()) == seg.Hash {
-			cands = append(cands, Candidate{Index: i})
+			cands = append(cands, Candidate{Index: i,
+				Neighbours: ObservedNeighbours(i, n.Len(), radius, tokenAt)})
 			nodes = append(nodes, e)
 		}
 	}

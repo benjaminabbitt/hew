@@ -269,10 +269,19 @@ func (r *run) stepRaw(cur *ref, seg hew.Segment) (*ref, *resolveErr) {
 		if n.kind != nSeq {
 			return nil, noMatch("not an array")
 		}
+		tokenAt := func(k int) (string, bool) {
+			v, has := comparedValue(n.elems[k].val, hew.Segment{})
+			if !has {
+				return "", false
+			}
+			return hew.MemberToken(v), true
+		}
+		radius := hew.NeighbourRadius(r.adv)
 		var cands []hew.Candidate
 		for i, el := range n.elems {
 			if v, has := comparedValue(el.val, hew.Segment{}); has && seg.MatchesHash(v) {
-				cands = append(cands, hew.Candidate{Index: i})
+				cands = append(cands, hew.Candidate{Index: i,
+					Neighbours: hew.ObservedNeighbours(i, len(n.elems), radius, tokenAt)})
 			}
 		}
 		if len(cands) == 0 {

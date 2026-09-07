@@ -213,10 +213,19 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 		if n.kind != jArr {
 			return nil, &resolveErr{detail: "not an array"}
 		}
+		tokenAt := func(k int) (string, bool) {
+			v, err := d.nodeValue(n.elems[k].value)
+			if err != nil {
+				return "", false
+			}
+			return hew.MemberToken(v), true
+		}
+		radius := hew.NeighbourRadius(d.adv)
 		var cands []hew.Candidate
 		for i, e := range n.elems {
 			if v, err := d.nodeValue(e.value); err == nil && seg.MatchesHash(v) {
-				cands = append(cands, hew.Candidate{Index: i})
+				cands = append(cands, hew.Candidate{Index: i,
+					Neighbours: hew.ObservedNeighbours(i, len(n.elems), radius, tokenAt)})
 			}
 		}
 		if len(cands) == 0 {

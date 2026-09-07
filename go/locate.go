@@ -400,3 +400,48 @@ func (l Located) Explain(seg Segment) string {
 			l.n, seg.String(), l.Index, l.dist)
 	}
 }
+
+// NeighbourRadius is how far the recorded neighbourhood reaches, in members. A
+// binding gathers the same span around each candidate so the two are comparable;
+// gathering further would waste hashing, gathering less would throw away
+// evidence.
+func NeighbourRadius(adv Advisory) int {
+	if adv.At == nil {
+		return 0
+	}
+	far := 0
+	for _, n := range adv.Neighbours {
+		if n.At == nil {
+			continue
+		}
+		if d := distance(*n.At, *adv.At); d > far {
+			far = d
+		}
+	}
+	return far
+}
+
+// ObservedNeighbours builds a candidate's neighbourhood from the document as it
+// stands, using tokenAt to name the member at an index. It is shared so that
+// every binding gathers the SAME span in the SAME order; a binding that gathered
+// differently would score the same document two ways.
+//
+// A member tokenAt declines to name is skipped rather than substituted, keeping
+// the rule that absent is not disagreement.
+func ObservedNeighbours(index, curLen, radius int, tokenAt func(int) (string, bool)) []Neighbour {
+	if radius <= 0 {
+		return nil
+	}
+	var out []Neighbour
+	for d := 1; d <= radius; d++ {
+		for _, at := range [2]int{index - d, index + d} {
+			if at < 0 || at >= curLen {
+				continue
+			}
+			if tok, ok := tokenAt(at); ok {
+				out = append(out, Neighbour{Token: tok, At: intPtr(at)})
+			}
+		}
+	}
+	return out
+}
