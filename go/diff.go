@@ -812,7 +812,7 @@ func valueScalar(v Value) Scalar {
 	// No Quoted here, and that is the point: the differ used to carry its own
 	// copy of "which strings would re-read as something else", and O42 made
 	// that the RENDERER's rule — pathString force-quotes exactly this set, and
-	// a little more (a value ending `?` or `[n]`). One copy of the rule cannot
+	// a little more (a value ending `?`). One copy of the rule cannot
 	// drift from itself.
 	return Scalar{Kind: ScalarString, Text: n.Value}
 }

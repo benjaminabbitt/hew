@@ -111,14 +111,6 @@ func Comment(text string) SegmentArg { return commentSegment(text) }
 // TrailingComment is §4.5b's "#t", the comment on a node's own line.
 func TrailingComment() SegmentArg { return Segment{Kind: SegComment, Trailing: true} }
 
-// Optional is §4.4's trailing "?" — match it, or create it. Legal only on a
-// path's last segment.
-func Optional(s SegmentArg) SegmentArg {
-	seg := s.segmentArg()
-	seg.Optional = true
-	return seg
-}
-
 // NewPath builds an absolute path from typed segment arguments (A.0, review
 // point 20). NewPath() is RootPath.
 //
@@ -195,14 +187,6 @@ func buildPath(format FormatID, pattern string, args []SegmentArg) (Path, error)
 	}
 	if filled != len(args) {
 		return Path{}, patternErr(pattern, "pattern's holes did not survive parsing")
-	}
-	// §4.4 again, because a hole can carry the flag the pattern could not:
-	// ParsePath enforced this over the skeleton, and the fill may have moved
-	// an Optional off the end.
-	for i, s := range segs {
-		if s.Optional && i != len(segs)-1 {
-			return Path{}, patternErr(pattern, `trailing "?" is legal only on the last segment (§4.4)`)
-		}
 	}
 	return Path{origin: p.origin, segs: segs}, nil
 }

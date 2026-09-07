@@ -180,12 +180,6 @@ type Segment struct {
 
 	// Trailing marks the `#t` comment form (§4.5b).
 	Trailing bool
-
-	// Optional is the trailing `?` of §4.4: match it, or create it. Legal
-	// only on a path's last segment, which ParsePath enforces. The further
-	// rule that `?` is legal only on a hunk anchor is the .hew parser's to
-	// enforce — a Path merely carries the flag.
-	Optional bool
 }
 
 // IsQuoted reports whether this segment is the LITERAL form of §4.1 — the
@@ -214,7 +208,7 @@ func (s Segment) Equal(o Segment) bool {
 	if s.Kind != o.Kind || s.Name != o.Name || s.Index != o.Index ||
 		s.Form != o.Form || s.Raw != o.Raw || s.Hash != o.Hash || !s.Value.equal(o.Value) ||
 		s.IsQuoted() != o.IsQuoted() ||
-		s.Trailing != o.Trailing || s.Optional != o.Optional {
+		s.Trailing != o.Trailing {
 		return false
 	}
 	switch {
@@ -253,9 +247,6 @@ func (s Segment) String() string {
 	case SegHash:
 		b.WriteByte('#')
 		b.WriteString(fragmentTag(s))
-	}
-	if s.Optional {
-		b.WriteByte('?')
 	}
 	return b.String()
 }
@@ -299,7 +290,7 @@ func mustQuoteKey(name string) bool {
 		return true
 	case allDigits(name): // an index
 		return true
-	case strings.HasSuffix(name, "?"): // the optional flag (§4.4)
+	case strings.HasSuffix(name, "?"): // refused as a bare segment (§4.7)
 		return true
 	case blockOrdinalShape(name): // `<kind>:<n>` (§4.5)
 		return true
@@ -427,10 +418,11 @@ func mustQuoteScalar(text string) bool {
 	if strings.ContainsAny(text, "\r\n") {
 		return true
 	}
-	// The `?` of §4.4 and the `[n]` of §9.6 are stripped from the END of the
-	// whole segment, which is where a match value sits: `f=opt?` reads as the
-	// value "opt" plus an optional flag, and `f=a[1]` as the value "a" plus an
-	// ordinal. Both are silent, and both are the value's problem to prevent.
+	// A trailing `?` is refused for the WHOLE segment (§4.7), and a match value
+	// sits at the segment's end: `/x/f=opt?` is refused rather than read as the
+	// value "opt". Quoting is what keeps such a value addressable, so a value
+	// ending in `?` is force-quoted here — otherwise a `.hewt` address the
+	// differ built would not reparse at all.
 	esc := escapeKey(text)
 	return strings.HasSuffix(esc, "?")
 }
@@ -567,10 +559,9 @@ func (s Segment) spellable() bool {
 	return err == nil && s.Equal(got)
 }
 
-// spellable reports whether the whole path survives the round trip. It is
-// stricter than every segment being spellable on its own: a "?" on a non-final
-// segment is refused outright (§4.4), which no single segment can see. The
-// absent (zero) path is spellable because nothing is emitted for it.
+// spellable reports whether the whole path survives the round trip, segment by
+// segment. The absent (zero) path is spellable because nothing is emitted for
+// it.
 func (p Path) spellable() bool {
 	if p.IsZero() {
 		return true
@@ -598,8 +589,11 @@ func (p Path) firstUnspellable() (Segment, bool) {
 			return p.segs[i], true
 		}
 	}
-	// Every segment survives alone, so the failure is POSITIONAL: a "?" before
-	// the last segment. Blame the shortest prefix that stops round-tripping.
+	// Every segment survives alone, so the failure belongs to the path as a
+	// whole rather than to any one segment. No v0 spelling reaches here — the
+	// one that did was the optional segment's position rule, now retired
+	// (§4.7) — so this is a net for a whole-path failure a future form could
+	// introduce: blame the shortest prefix that stops round-tripping.
 	for i := 1; i <= len(p.segs); i++ {
 		if !(Path{origin: p.origin, segs: p.segs[:i]}).spellable() {
 			return p.segs[i-1], true
@@ -703,13 +697,10 @@ func parsePath(s string, sc scope) (Path, error) {
 
 	parts := splitSegments(rest)
 	p.segs = make([]Segment, 0, len(parts))
-	for i, raw := range parts {
+	for _, raw := range parts {
 		seg, err := parseSegment(raw, sc)
 		if err != nil {
 			return Path{}, pathErr(s, err.Error())
-		}
-		if seg.Optional && i != len(parts)-1 {
-			return Path{}, pathErr(s, `trailing "?" is legal only on the last segment (§4.4)`)
 		}
 		p.segs = append(p.segs, seg)
 	}
@@ -754,10 +745,6 @@ func splitSegments(rest string) []string {
 func parseSegment(raw string, sc scope) (Segment, error) {
 	var seg Segment
 	body := raw
-	if strings.HasSuffix(body, "?") {
-		seg.Optional = true
-		body = body[:len(body)-1]
-	}
 
 	switch {
 	case strings.HasPrefix(body, `"`):
@@ -829,6 +816,26 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 		}
 		seg.Kind, seg.Form, seg.Raw = SegExtension, form, body
 		return seg, nil
+	}
+
+	// The trailing `?` — the retired optional segment (§4.7). It is refused,
+	// not ignored: `?` is an ordinary character in a key, so a token that
+	// merely stopped being a flag would drop through to the key fallback below
+	// and address a key literally spelled `tls?`, which is the silent
+	// mis-addressing the retired comment ordinal already demonstrated.
+	//
+	// The refusal sits HERE, below the claim, and the position is the ruling.
+	// `?` is not a shape an extension might own but a suffix on an otherwise
+	// ordinary token, and prose headings end in one all the time — refusing
+	// above the claim would make `/# Is it safe?` unaddressable, and stripping
+	// it, as the optional segment did, addressed the heading "Is it safe"
+	// instead. An extension that claims the token keeps its `?`; only what
+	// reaches the core's own fallbacks is refused.
+	if strings.HasSuffix(body, "?") {
+		return seg, segErr("segment " + strconv.Quote(raw) +
+			`: the trailing "?" optional segment is gone (§4.7) — create with "! default" ` +
+			"or an add, and write a key that really ends in \"?\" as its literal spelling, " +
+			quoteSegment(body))
 	}
 
 	// A `#<namespace>:...` fragment (§4.5c, satisfied-recoil): the text after `#`
