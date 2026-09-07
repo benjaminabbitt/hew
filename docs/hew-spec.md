@@ -283,7 +283,10 @@ quoted   := '"' ( char | '\"' | '\\' )* '"'
 
 There is **no ordinal segment**. A path is always a statement about identity, never about
 position in the file; siblings a path cannot distinguish are addressed by a key-match on a
-distinguishing attribute (§4.2).
+distinguishing attribute (§4.2), and a sibling with no key at all by a digest of its content
+(§4.5b, §4.5c). Markdown is the single exception, and a stated one: its blocks have no keys
+of any kind, so they carry a kind-scoped ordinal (§4.5,
+[O7](#decisions-and-residual-open-questions)).
 
 **A quoted segment is the literal form**, and it is what makes the grammar closed: every other
 segment form is recognized by its shape, so a key whose text happens to have one of those
@@ -338,7 +341,7 @@ needed nor interpreted there, because nothing inside quotes is being disambiguat
 back to text MUST emit the quoted form for any key whose bare spelling would not reparse as
 the same segment. Concretely, a key is rendered quoted when it is empty, or is entirely
 digits, or is exactly `-`, or begins with `@`, `#` or `"`, or has the `<blockkind>:<n>` shape
-of §4.5, or has the `#<n>`/`#t` shape of §4.5b, or ends with `?`, or would otherwise be
+of §4.5, or has the `#t` shape of §4.5b, or ends with `?`, or would otherwise be
 recognized as another segment form. Everything else renders
 bare, so ordinary paths are unchanged and stay readable.
 
@@ -433,49 +436,75 @@ index; see [O7](#decisions-and-residual-open-questions).
 
 ### 4.5b Comment segments
 
-Comments are nodes in JSONC, YAML and TOML (§8), so they need addresses. Two forms:
+Comments are nodes in JSONC, YAML and TOML (§8), so they need addresses. A comment has no key,
+so it is located the way every other keyless member is located: **by a digest of its content**.
 
 ```
-/server/#0                 the first standalone comment node inside "server"
-/server/#2                 the third
-/server/timeout/#t         the trailing comment on the "timeout" member
+/server/#hew:comment=1a2b…    the standalone comment in "server" whose text hashes to this
+/server/timeout/#t            the trailing comment on the "timeout" member
 ```
 
-`#<n>` is kind-scoped within the container, exactly like a Markdown block ordinal. `#t` is the
-trailing comment attached to the preceding member. Comment addresses are what let a comment be
-removed or replaced as a node (OP-32, OP-33) and are why the mirror grammar's
-comment-attachment spelling (OP-31) needs no IR qualifier of its own — it desugars into an
-`add` at a comment address.
+`#hew:comment=<hex>` is the same `#` fragment family as a content-hash member (§4.5c) and a
+Markdown heading (§4.5), in the same tagma grammar under the same `hew` namespace, and every
+rule §4.5c states about a digest address holds here unchanged. **The tag KEY is what tells the
+two computed forms apart**: `comment=` digests a comment's text, `sha256=` digests a member's
+canonical value. They hash different things over different node kinds, so a reader should not
+have to know what a container holds to know which question an address is asking.
 
-**The ordinal is a selector on a `test`, `remove` or `replace`, and a POSITION on an `add`**
-([O47](#p5--the-api-ratification-2026-08-14)). This is the one place the two readings of a
-number diverge, and the spec previously left it to be guessed. On an `add`, `#<n>` names the
-index the new comment **takes**, and `#-` appends — the same append spelling §4.1 gives a
-sequence, for the same reason. Existing comments at that index and after shift down; the
-placement is otherwise governed by `before:`/`after:` exactly as any other add.
+**What is hashed is the comparison form, not the source line** — the comment's text with its
+marker and one leading space already stripped, which is the form §6.3 already compares comments
+by. Address and equality therefore agree by construction: a comment that a `test` would call
+equal is a comment the address finds. It also means `// note` in JSONC and `# note` in YAML are
+the *same* comment and hash alike. Hashing the raw line instead would make a comment's identity
+a fact about a format's punctuation rather than about what the author wrote, and would give one
+comment three addresses across the three formats that have comments.
 
-A worked example, with the container's comments numbered before and after:
+**Identical comments collide, and the collision is resolved like any other.** Two comments with
+the same text hash alike; that is ambiguity, not a match, and it refuses (`HEW012`) unless a
+position advisory breaks the tie. The advisory and the scored locator of §4.5c and §4.5d apply
+with nothing added — duplicate comments are a digest collision exactly as duplicate array
+elements are. There is no comment-specific rule, and its absence is the point of this spelling.
 
-```jsonc
-// before                       addresses          // after `add` at /server/#1
-{                                                  {
-  // pinned by ops     -> /server/#0                 // pinned by ops     -> #0
-  // do not reformat   -> /server/#1                 // reviewed 2026-08  -> #1  <- added
-  "timeout": 30 // sec -> /server/timeout/#t         // do not reformat   -> #2  <- shifted
-}                                                  }
-```
+**`#t` stays, and it is identity, not an ordinal.** It names the comment attached to a member,
+and a member has at most one trailing comment — so it locates uniquely without counting
+anything, and leaves nothing for a digest to disambiguate. It states a ROLE, not a position.
 
-`/server/#1` on a `remove` deletes "do not reformat". `/server/#1` on an `add` inserts *above*
-it. Both are the same address; the op decides whether the number selects or positions, which
-is what makes `#-` worth having — an append needs no such decision. `#t` is never an `add`
-position (a member has at most one trailing comment); an `add` at `#t` where one already
-exists is `HEW014`, and `! upsert` replaces it.
+**There is no `#<n>`.** A bare number after `#` is `HEW001`, and the message names the digest
+form as its replacement. The ordinal was the only place a hew path carried a position, against
+§4's rule that it carries none, and it did not merely bend that rule — it broke silently. The
+number was assigned from a comment's position in the PATCH BODY rather than in the target, so a
+patch removing the second comment of a hunk removed the second comment of the *container*: a
+different node, no error, exit 0. Nothing about the address showed the author which comment it
+would reach, and a digest cannot make that mistake because it is derived from the text itself.
+
+**Rejected: keeping `#<n>` as a fallback** for hand-authored patches. It would leave two ways to
+address a comment with the surviving one being the mechanism that mislocated, and a fallback is
+consulted precisely where the primary form is absent — the case least likely to have been
+exercised. The cost is stated rather than hidden: a hand-written patch carrying `/#0` stops
+parsing instead of being reinterpreted, which is the right failure for a spelling that used to
+resolve to a node its author had not named.
+
+**An added comment addresses the CONTAINER**, and takes its position from `before:`/`after:`
+exactly as a sequence element add does (§9.1 step 5):
+`{op: add, path: /server, before: /server/timeout, value: {comment: "…"}}`. A comment that does
+not exist yet has no text in the before-image to digest and no position of its own (§4.5c's
+last rule), so there is no comment segment for it to be addressed by. `#-` goes with the
+ordinal: an append needs no comment-specific spelling once placement is `before:`/`after:`/`end`
+like every other add's. `#t` is likewise never an `add` position — a member has at most one
+trailing comment, so an `add` at `#t` where one already exists is `HEW014`, and `! upsert`
+replaces it.
+
+Comment addresses are what let a comment be removed or replaced as a node (OP-32, OP-33) and
+are why the mirror grammar's comment-attachment spelling (OP-31) needs no IR qualifier of its
+own — it desugars into an ordinary `add` in the enclosing container.
 
 ### 4.5c Content-hash fragments — `#hew:sha256=<hex>`
 
 `#` is the third and last of the fragment-locator forms (heading §4.5, comment §4.5b): the
 member of an unordered or by-value collection, addressed by a **hash of its value** rather
-than by the value itself.
+than by the value itself. Two of the three forms are computed — a comment digests its TEXT
+under this same grammar — and they differ only in what they hash, which is why the tag key
+carries that distinction and the section below is written over both.
 
 ```
 /tags/#hew:sha256=1a2b…       the /tags member whose canonical value hashes to this digest
@@ -484,8 +513,9 @@ than by the value itself.
 The text after `#` is a tag in the shared **tagma** grammar `(namespace ":")? key ("=" value)?`
 (the same grammar taskloom/ctxloom tags use). hew's own computed locators take the namespace
 `hew`; `#<ext>:…` is reserved for extension namespaces, the same separation §8.8 draws for
-segment shapes. The namespace is what tells a `#hew:…` fragment apart from a `#<n>`/`#t`
-comment (no namespace) and a `# Heading` (a heading marker, not a tag).
+segment shapes. The namespace is what tells a `#hew:…` fragment apart from a `#t` comment (no
+namespace) and a `# Heading` (a heading marker, not a tag); within the namespace, the KEY tells
+`comment=` from `sha256=` (§4.5b).
 
 Rules:
 
@@ -1858,7 +1888,7 @@ removed by the reduction; each is now produced by the parser as a composition:
 | Removed | Desugars to |
 |---|---|
 | `exhaustive` | `test`+`count` on the container, plus one `test`+`value` per listed child (OP-26). |
-| `comment: {leading, trailing}` | A separate `add` of a comment node at a comment address (§4.5b), placed with `before`/`after` (OP-31). |
+| `comment: {leading, trailing}` | A separate `add` of a comment node in the enclosing container (§4.5b), placed with `before`/`after` (OP-31). |
 | `ord` | A `[n]` selector on the path's last segment — addressing, not operation (OP-37). |
 | `labels` | Nothing. The labels are already the path's label segments; the parser checks the redundant `label=[…]` spelling and drops it. |
 | `move` | `copy` + `remove` (OP-21). |
@@ -2564,7 +2594,7 @@ spec, resolving the brief's open point): a patch CAN carry a comment for a node 
 Two forms, both v0.
 
 #### OP-30 `add-comment-node` — a standalone comment
-**Status** v0 · **Disp** `CORE` — `add` at a comment address · **Sources** none of the surveyed patch formats can do this at all; it is
+**Status** v0 · **Disp** `CORE` — `add` in the comment's container · **Sources** none of the surveyed patch formats can do this at all; it is
 required by ctxloom's own managed-marker practice (M1/M2 both write explanatory comments)
 **Absent/empty** Position follows §6.2 like any other node.
 **Mirror**
@@ -2573,7 +2603,7 @@ required by ctxloom's own managed-marker practice (M1/M2 both write explanatory 
 + # ctxloom-managed — regenerate with `ctxloom apply`
   timeout: 60
 ```
-**IR** `{op: add, path: /server/#0, before: /server/timeout, value: {comment: "ctxloom-managed — …"}}`
+**IR** `{op: add, path: /server, before: /server/timeout, value: {comment: "ctxloom-managed — …"}}`
 **Formats** json ✗ (`HEW020`) · jsonc ✓ · yaml ✓ · toml ✓ · markdown ✓ (HTML comment block)
 **Errors** `HEW020` · **Corpus** `toml/add-comment-line`, `json/comment-inexpressible` (error)
 
@@ -2589,7 +2619,7 @@ mirror form; the IR carries it as a qualifier so an applier need not reconstruct
 + [mcp_servers.taskloom]
 + command = "taskloom"
 ```
-**IR** desugars to `{op: add, path: /mcp_servers/#0, value: {comment: "added by taskloom manage install"}, before: /mcp_servers/taskloom}` plus `{op: add, path: /mcp_servers/taskloom, value: {...}}`
+**IR** desugars to `{op: add, path: /mcp_servers, value: {comment: "added by taskloom manage install"}, before: /mcp_servers/taskloom}` plus `{op: add, path: /mcp_servers/taskloom, value: {...}}`
 **Formats** json ✗ · jsonc ✓ · yaml ✓ · toml ✓ · markdown —
 **Errors** `HEW020` · **Corpus** `jsonc/add-with-leading-comment`
 
@@ -2722,9 +2752,9 @@ it is a different kind of record, added on purpose alongside the five.
 2. **`exhaustive` → `count` + per-child `test`.** "These are all the children" is exactly "the
    child count is N" conjoined with "each of these N is present and equal", both of which are
    already core. The qualifier bought nothing but a shorter record.
-3. **`comment: {leading, trailing}` → an `add` at a comment address.** This one required a
-   *change elsewhere*: comments needed addresses (§4.5b) — which they needed anyway for OP-32
-   and OP-33. Once they had them, the qualifier was redundant. This is the reduction working
+3. **`comment: {leading, trailing}` → an ordinary `add` of a comment node.** This one required
+   a *change elsewhere*: comments needed to be addressable (§4.5b) — which they needed anyway
+   for OP-32 and OP-33. Once they were, the qualifier was redundant. This is the reduction working
    as intended: it forced the node model to become uniform instead of letting a qualifier
    paper over a gap.
 
@@ -3288,7 +3318,7 @@ func Append() SegmentArg                             // §4.1's "-"
 func Heading(level int, text string) SegmentArg      // §4.5
 func Block(kind BlockKind, ord int) SegmentArg       // §4.5
 func Marker(name string) SegmentArg                  // §4.5
-func Comment(ord int) SegmentArg                     // §4.5b
+func Comment(text string) SegmentArg                 // §4.5b — hashes the text, never stores it
 func TrailingComment() SegmentArg                    // §4.5b's "#t"
 func Optional(s SegmentArg) SegmentArg               // §4.4's trailing `?`
 func MatchValue(value string) SegmentArg             // §4.2  ="value"
@@ -4251,7 +4281,7 @@ reason that decided it.
 | **O23** | Comment attachment on added nodes. | **Yes** (OP-30, OP-31), `HEW020` for JSON which has no comments. No surveyed patch format can do this, and ctxloom's own managed writers require it — every managed region carries an explanatory header. The implementation cost lands on the appliers, which is the right place for it. |
 | **O26** | `replace` vs `add`+`on_conflict: replace` overlap. | **Both kept.** They differ in *precondition*, not effect: `replace` requires the node (`HEW013` if absent), `add` does not. A precondition is orthogonal to an effect, so this is not the duplication the reduction forbids. Removing `replace` would make the most common operation a two-record composition. |
 | **O27** | Two tolerance flags rather than one. | **Both kept.** `optional` tolerates an absent node; `idempotent` tolerates an already-applied state. Different conditions, and a single `tolerate:` enum would spell them less obviously while saving one field. |
-| **O28** | Comment addresses (`/x/#0`, `/x/timeout/#t`). | **Kept.** They had to exist for OP-32/OP-33 regardless, and their existence is what let the comment-attachment qualifier reduce away entirely (§11.10). The positional-drift hazard is real and bounded: a comment address is only used by a patch that is editing that comment, and such a patch asserts the comment's text, so a shifted ordinal fails loudly rather than editing the wrong comment. |
+| **O28** | Comment addresses (`/x/#0`, `/x/timeout/#t`). | **Kept** — they had to exist for OP-32/OP-33 regardless, and their existence is what let the comment-attachment qualifier reduce away entirely (§11.10). **The spelling is superseded and this row's hazard assessment was wrong**: the addresses are now `/x/#hew:comment=<hex>` and `/x/timeout/#t` (§4.5b, [O47](#p5--the-addressing-language-review-2026-08-14)). This row judged positional drift "real and bounded" because a patch editing a comment asserts that comment's text, so a shifted ordinal would fail loudly. It did not: the ordinal was assigned from the comment's position in the patch body rather than in the target, so the assertion was checked against whichever node the ordinal had already selected and agreed with it. The guard was downstream of the defect it was supposed to catch. Content addressing removes the drift instead of bounding it. |
 | **O22, O24, O29** | *(residual — see below)* | |
 
 ### P5 — the API ratification, 2026-08-14
@@ -4291,7 +4321,7 @@ fixes addresses that are wrong on disk today.
 | **O43** | How does a caller get a runtime value into a path? | **Typed holes: `At(pattern string, args ...SegmentArg)`** (A.0). Normatively: `At` parses **only the pattern** — literal spans go through the §4 grammar — and each `{}` consumes the next arg as a **structural `Segment` value slotted into the parsed skeleton**, never substituted into text and re-parsed. The invariant that follows is the ruling's whole point: **user data supplied through a typed constructor is never parsed as path text.** It enters as struct data, so there is no escaping step and **no injection channel** — a value cannot introduce a segment boundary, a key-match or an optional marker. The precedent is `database/sql`: parameters travel out-of-band from the statement text, and a placeholder is not a paste site. `SegmentArg` is a **sealed interface** (unexported method, implementable only inside the module); its constructors are `Key`, `Index`, `MatchKey` (always a quoted string scalar, [O42](#p5--the-addressing-language-review-2026-08-14)), `MatchKeyNumber`/`Bool`/`Null`, and `Quoted` — and **every string parameter to them is opaque data**. An address that is programmatic all the way down skips the pattern entirely: build a `Path` from the same constructors and pass it to `doc.AtPath(p)`. **Soundness depends on [O41](#p5--the-addressing-language-review-2026-08-14)**: a structural segment holding hostile data is safe in memory for free, but the path is later written into a `.hew`, a `.hewt` or an error message and read back, so without canonical rendering's bijection the injection prevented at construction would simply move to serialization. The pattern language is **§4-plus-holes, owned by `At`** — and since `{}` is a legal *key* spelling in bare §4, a literal `{}` key needs the quoted form or `AtPath`. A hole/argument count mismatch is an **immediate error, not a partial path**. String concatenation into `At` is documented as a **defect**, not guarded against. Recorded **rejected**: printf-style character-level escaping (an escaper cannot know which of key/field/value its argument stands for, and they escape differently), and concatenation-detection heuristics (false positives on legitimately-computed paths train the reader to route around the warning). |
 | **O44** | Should v0 reserve the tokens its own named extensions would need? | **Yes, two** (§4.7). A key-match **field** ending `<`, `>` or `!` is `HEW001`, reserved for [O6](#ratified-by-the-coordinator-2026-08-14)'s comparison operators — `count>=5` **parses today** as a match on a field named `count>`, a working address a later `>=` would silently reinterpret. A bare `*` segment is `HEW001`, reserved for a wildcard. Both are affordable **only because O41 gives every literal a spelling**: `*` is a real key in `tsconfig.json`, written `/paths/"*"`. The quoted form is named as the permanent escape hatch for any token this spec reserves later, so a reservation can never make a real document unpatchable. |
 | **O46** | A key-match that hits nothing reports "no match", which sends the author looking for an element that is in front of them. | **`HEW013` MUST name the nearest miss and its type** (§10.3) — `1 element has version="1.0" (string) — quote the value to match a string`. Because §4.2 compares after decoding, a match can fail for a reason that is invisible in the address, and the remedy (quote the value) is not guessable from "no match". |
-| **O47** | At a comment address, is `#<n>` on an `add` a selector or a position? | **A selector on `test`/`remove`/`replace`; a POSITION on `add`, with `#-` to append** (§4.5b, with the per-projection worked example the section lacked). The two readings genuinely diverge only here, and leaving it to be guessed means two conformant implementations insert in different places. `#t` is never an `add` position — a member has one trailing comment, so an `add` where one exists is `HEW014` and `! upsert` replaces it. |
+| **O47** | At a comment address, is `#<n>` on an `add` a selector or a position? | Originally: **a selector on `test`/`remove`/`replace`; a POSITION on `add`, with `#-` to append**, on the reasoning that the two readings genuinely diverge only here and leaving it to be guessed means two conformant implementations insert in different places. **That ruling is superseded, and the question with it.** §4.5b now addresses a comment by a digest of its text (`#hew:comment=<hex>`), because a comment is a keyless member and locates like one; the bare `#<n>` is removed from the grammar and is a parse error. No number remains in the address for an op to read either way, so the ambiguity dissolves rather than being decided differently — and the fix was not to arbitrate the two readings but to notice that one number serving two meanings was the symptom of a comment being the only node hew did not address by identity. An added comment addresses its CONTAINER and takes its position from `before:`/`after:` exactly as a sequence element add does (§9.1 step 5), which retires `#-` as well. O47's `#t` half survives unchanged: `#t` is never an `add` position — a member has one trailing comment, so an `add` where one exists is `HEW014` and `! upsert` replaces it. |
 
 ### P5 — the format-isolation audit, 2026-08-14
 
