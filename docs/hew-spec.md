@@ -1557,6 +1557,38 @@ line fell and why.
    lowered ([O9](#ratified-by-the-coordinator-2026-08-14), `HEW021`), so nothing new becomes
    unparseable.
 
+**Where a claim sits in the segment dispatch, and what that lets an extension do.** A
+claimed form is offered the token at a specific point, and the position is a deliberate
+affordance rather than an accident of implementation. In order, a segment is read as:
+
+1. the **quoted** literal form (§4.1);
+2. `*`, reserved (§4.7);
+3. `#t`, the trailing comment (§4.5b);
+4. the retired `#<n>` comment ordinal, which is refused (§4.5b);
+5. `-`, RFC 6901's append token (§4.1);
+6. **an extension's claimed forms** (this section);
+7. `#<namespace>:…` fragments — `#hew:sha256=`, `#hew:comment=` (§4.5b, §4.5c);
+8. index, key-match, key.
+
+Two consequences follow, and both are intended.
+
+**An extension may layer over a `#` fragment form, including one spelled like hew's own.**
+Claims are consulted at step 6, ahead of the core's fragment forms at step 7, so an extension
+that wants to interpret a `#`-prefixed shape gets it first. This is the layering point for a
+format whose own notation uses `#` — a Markdown heading (`# Setup`) already relies on it. An
+implementation MUST NOT "correct" this ordering to give hew's fragments precedence: doing so
+would close the extension surface this section exists to provide.
+
+**An extension may NOT reinterpret what sits above it.** The quoted form, `#t` and `-` are
+resolved at steps 1–5 and never reach a claim. Those are the spellings whose meaning is fixed
+across every format, and a patch author must be able to read them without knowing which
+extensions are linked.
+
+The namespace is what keeps step 7 collision-free without needing precedence: `hew` is the
+core's, and `#<ext>:…` is reserved for extension namespaces (§4.5c). An extension therefore
+has two ways in — claim the shape outright at step 6, or take a namespace at step 7 — and the
+second needs no claim at all.
+
 ---
 
 ## 9. The transform list
