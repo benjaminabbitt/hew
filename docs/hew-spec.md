@@ -603,6 +603,23 @@ about this position; a run of three broken at the first is worth one, not three.
 wins on a strict unique maximum only: equal agreement is uninformative rather than
 contradictory, so it defers to the position signals instead of refusing.
 
+Both position anchors derive from ONE recorded coordinate and are therefore defeated by the
+same thing — change on BOTH sides of the element. Adjacency is not derived from that
+coordinate and survives it, which is why the neighbourhood is not substitutable by any amount
+of further position work.
+
+**ABSENT IS NOT DISAGREEMENT.** Migration can SHRINK a recorded neighbourhood but never EXTEND
+it (§4.5e): when the patch removes a member, the one beyond it becomes adjacent and its digest
+was never written down, so a candidate legitimately has neighbours the record does not mention.
+Running out of record is LESS EVIDENCE and must score as such; only a token that is PRESENT AND
+DIFFERENT is contrary evidence. An implementation that penalised a short record would make a
+patch score its own later transforms worse the more work it did.
+
+A neighbour must carry its POSITION to be evidence at all, because proximity is what a
+neighbourhood means. So in a collection where digests can collide, a hint carries its position
+even where its own value is unique — the most discriminating neighbours are precisely the
+unique ones.
+
 Scoring buys robustness against IRRELEVANT edits. It does not buy permission to guess: an
 unrecognised neighbourhood still refuses.
 
