@@ -91,8 +91,8 @@ func TestCommentOrdinalIsAParseError(t *testing.T) {
 // things it can now be, and needs to be told which spelling says which.
 func TestTrailingQuestionMarkIsAParseError(t *testing.T) {
 	for _, s := range []string{
-		"/server/tls?",              // §4.4's first worked example
-		"/mcpServers/name=ctxloom?", // §4.4's second
+		"/server/tls?",              // the retired section's first worked example
+		"/mcpServers/name=ctxloom?", // and its second
 		"/a?/b",                     // not merely a last-segment rule any more
 		"/x?",
 	} {
