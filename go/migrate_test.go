@@ -182,3 +182,111 @@ func showAdv(a Advisory) string {
 	}
 	return s + strconv.Itoa(*a.Length)
 }
+
+// The neighbourhood is a coordinate too, and the patch's own edits move it. A
+// recorded neighbour the patch itself REMOVES will not be there to agree, and an
+// element it INSERTS will be there without having been recorded — both read as
+// disagreement, so a patch would score its own later transforms worse the more
+// work it did.
+//
+// The recorded neighbourhood needs no new IR field: it is read from the OpHint
+// records already in Migrate's stream, which is what those records are. A hint
+// names a neighbour by address — a key for a mapping, a digest for a sequence —
+// and carries its position like any other body line.
+func TestMigrateNeighbourhood(t *testing.T) {
+	el := func(h string) Path {
+		return MustParsePath("/tags").Append(Segment{Kind: SegHash, Form: "hew", Name: "sha256", Hash: h})
+	}
+	hint := func(h string, a int) Transform {
+		return Transform{Op: OpHint, Path: el(h), At: at(a), Length: at(9)}
+	}
+	tokens := func(ts []Transform) (before, after []string) {
+		adv := Migrate(ts)[len(ts)-1]
+		if adv.At == nil {
+			t.Fatalf("no position on the addressed transform")
+		}
+		return splitNeighbourhood(adv.Neighbours, *adv.At)
+	}
+
+	t.Run("hints in the same container become the neighbourhood", func(t *testing.T) {
+		b, a := tokens([]Transform{
+			hint("n3", 3), hint("n6", 6),
+			{Op: OpRemove, Path: el("me"), At: at(5), Length: at(9)},
+		})
+		if !sameStrings(b, []string{"n3"}) || !sameStrings(a, []string{"n6"}) {
+			t.Fatalf("before=%v after=%v", b, a)
+		}
+	})
+
+	t.Run("a neighbour the patch itself removed drops out", func(t *testing.T) {
+		b, _ := tokens([]Transform{
+			hint("n3", 3), hint("n4", 4),
+			{Op: OpRemove, Path: el("n4"), At: at(4), Length: at(9)},
+			{Op: OpRemove, Path: el("me"), At: at(5), Length: at(9)},
+		})
+		if !sameStrings(b, []string{"n3"}) {
+			t.Fatalf("removed neighbour still recorded: before=%v", b)
+		}
+	})
+
+	t.Run("an element the patch inserted joins the neighbourhood", func(t *testing.T) {
+		b, _ := tokens([]Transform{
+			hint("n3", 3),
+			{Op: OpAdd, Path: MustParsePath("/tags"), After: el("n3"), At: at(3), Length: at(9),
+				Value: mustValNoT("fresh")},
+			{Op: OpRemove, Path: el("me"), At: at(5), Length: at(9)},
+		})
+		if !sameStrings(b, []string{hashScalar(mustValNoT("fresh")), "n3"}) {
+			t.Fatalf("inserted element missing or misplaced: before=%v", b)
+		}
+	})
+
+	t.Run("a replaced neighbour keeps its slot with the new digest", func(t *testing.T) {
+		b, _ := tokens([]Transform{
+			hint("n3", 3), hint("n4", 4),
+			{Op: OpReplace, Path: el("n4"), At: at(4), Length: at(9), Value: mustValNoT("swapped")},
+			{Op: OpRemove, Path: el("me"), At: at(5), Length: at(9)},
+		})
+		if !sameStrings(b, []string{hashScalar(mustValNoT("swapped")), "n3"}) {
+			t.Fatalf("replace did not keep the slot: before=%v", b)
+		}
+	})
+
+	t.Run("another container's hints are not this one's neighbours", func(t *testing.T) {
+		other := MustParsePath("/other").Append(Segment{Kind: SegHash, Form: "hew", Name: "sha256", Hash: "x9"})
+		b, a := tokens([]Transform{
+			{Op: OpHint, Path: other, At: at(4), Length: at(9)},
+			hint("n6", 6),
+			{Op: OpRemove, Path: el("me"), At: at(5), Length: at(9)},
+		})
+		if len(b) != 0 || !sameStrings(a, []string{"n6"}) {
+			t.Fatalf("borrowed a neighbour from /other: before=%v after=%v", b, a)
+		}
+	})
+
+	t.Run("a mapping hint names its key", func(t *testing.T) {
+		key := func(k string, a int) Transform {
+			return Transform{Op: OpHint, Path: MustParsePath("/server").Append(Segment{Kind: SegKey, Name: k}), At: at(a)}
+		}
+		adv := Migrate([]Transform{
+			key("host", 0), key("port", 2),
+			{Op: OpRemove, Path: MustParsePath("/server").Append(Segment{Kind: SegKey, Name: "tls"}), At: at(1)},
+		})[2]
+		b, a := splitNeighbourhood(adv.Neighbours, 1)
+		if !sameStrings(b, []string{"host"}) || !sameStrings(a, []string{"port"}) {
+			t.Fatalf("mapping neighbourhood wrong: before=%v after=%v", b, a)
+		}
+	})
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
