@@ -394,7 +394,7 @@ func TestParseContext(t *testing.T) {
 		{"x", 0, true},
 	}
 	for _, c := range cases {
-		got, err := parseContext(c.in)
+		got, err := parseContext("--context", c.in)
 		if (err != nil) != c.bad {
 			t.Fatalf("parseContext(%q) err = %v, bad = %v", c.in, err, c.bad)
 		}
@@ -410,5 +410,81 @@ func TestSplitFields(t *testing.T) {
 	}
 	if got := splitFields(" , "); len(got) != 0 {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// The hint channel has its own radius, and the CLI must expose it. Without a
+// flag the wider default (3) is unreachable from the command line: a user could
+// only move the hint radius by moving --context, which drags the ASSERTING
+// radius with it and changes how strict the patch is.
+//
+// /server is host, port, timeout; timeout is what changes, so port sits one
+// sibling away and host two.
+func TestDiffHintContextFlag(t *testing.T) {
+	dir := twoSided(t)
+
+	_, one, _ := run(t, dir, "diff", "--hint-context", "1", "old.yaml", "new.yaml")
+	if !strings.Contains(one, "~ port") {
+		t.Fatalf("--hint-context 1 must reach the adjacent sibling:\n%s", one)
+	}
+	if strings.Contains(one, "~ host") {
+		t.Fatalf("--hint-context 1 must NOT reach the second sibling:\n%s", one)
+	}
+
+	_, none, _ := run(t, dir, "diff", "--hint-context", "0", "old.yaml", "new.yaml")
+	if strings.Contains(none, "~ ") {
+		t.Fatalf("--hint-context 0 must emit no hints:\n%s", none)
+	}
+
+	_, all, _ := run(t, dir, "diff", "--hint-context", "all", "old.yaml", "new.yaml")
+	if !strings.Contains(all, "~ host") || !strings.Contains(all, "~ port") {
+		t.Fatalf("--hint-context all must hint every sibling:\n%s", all)
+	}
+}
+
+// The two dials are INDEPENDENT, which is the whole reason the hint channel got
+// a knob of its own: widening asserting context makes a patch more brittle,
+// widening hint context makes it more robust. An explicit --hint-context must
+// therefore survive a --context that would otherwise carry across to it.
+func TestDiffHintContextIsIndependentOfContext(t *testing.T) {
+	dir := twoSided(t)
+
+	// -U 0 alone suppresses hints too (a body-wide "no context" request)...
+	_, quiet, _ := run(t, dir, "diff", "-U", "0", "old.yaml", "new.yaml")
+	if strings.Contains(quiet, "~ ") {
+		t.Fatalf("-U 0 alone must emit no hints:\n%s", quiet)
+	}
+	// ...but asking for hints explicitly is not overridden by it. The hints
+	// assert nothing, so keeping them costs the strictness dial nothing.
+	_, hinted, _ := run(t, dir, "diff", "-U", "0", "--hint-context", "2", "old.yaml", "new.yaml")
+	if !strings.Contains(hinted, "~ port") {
+		t.Fatalf("an explicit --hint-context must outrank -U 0's carry-across:\n%s", hinted)
+	}
+}
+
+func TestDiffRejectsBadHintContext(t *testing.T) {
+	dir := twoSided(t)
+	for _, v := range []string{"-1", "lots", ""} {
+		exit, stdout, stderr := run(t, dir, "diff", "--hint-context", v, "old.yaml", "new.yaml")
+		if exit != 2 || stdout != "" {
+			t.Fatalf("--hint-context %q: exit %d stdout %q", v, exit, stdout)
+		}
+		// The error must name the flag the user actually typed, not --context.
+		if !strings.Contains(stderr, "--hint-context") {
+			t.Fatalf("--hint-context %q: stderr must name the flag: %q", v, stderr)
+		}
+	}
+}
+
+// Appendix B.2's help-text requirement covers both dials: a reader who sees `~`
+// lines in the output must be able to find out what governs them.
+func TestDiffHelpExplainsBothRadii(t *testing.T) {
+	dir := twoSided(t)
+	_, _, stderr := run(t, dir, "diff", "-U", "lots", "old.yaml", "new.yaml")
+	if !strings.Contains(stderr, "STRICTNESS dial") {
+		t.Fatalf("help must keep the strictness sentence: %q", stderr)
+	}
+	if !strings.Contains(stderr, "--hint-context") {
+		t.Fatalf("help must name the hint radius flag: %q", stderr)
 	}
 }

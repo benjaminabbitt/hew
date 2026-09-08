@@ -7,6 +7,11 @@ import (
 // init registers the JSON binding (Appendix A.6, O35). Importing this package
 // — for its symbols or blank, for effect — is what makes a build able to
 // detect, apply and diff JSON; nothing else has to be told.
+// Every binding registers itself the same way BY DESIGN; that shape IS the
+// registry contract. Four registrations that look alike is the contract
+// holding rather than duplication to factor out, and there is nothing to
+// factor into: each supplies its own format id and its own functions.
+// reprise:ignore
 func init() {
 	hew.Register(hew.FormatJSON, hew.Binding{
 		Applier:       Apply,

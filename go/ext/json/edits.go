@@ -56,12 +56,12 @@ func genericInsert(src []byte, containerStart, containerEnd int, children []chil
 		if block {
 			indent := lineIndent(src, containerStart) + "  "
 			closeIndent := lineIndent(src, containerStart)
-			return edit{start: containerStart + 1, end: containerEnd - 1, text: "\n" + indent + newText + "\n" + closeIndent}
+			return edit{Start: containerStart + 1, End: containerEnd - 1, Text: "\n" + indent + newText + "\n" + closeIndent}
 		}
 		if padded {
-			return edit{start: containerStart + 1, end: containerEnd - 1, text: " " + newText + " "}
+			return edit{Start: containerStart + 1, End: containerEnd - 1, Text: " " + newText + " "}
 		}
-		return edit{start: containerStart + 1, end: containerEnd - 1, text: newText}
+		return edit{Start: containerStart + 1, End: containerEnd - 1, Text: newText}
 	}
 
 	if block {
@@ -69,25 +69,25 @@ func genericInsert(src []byte, containerStart, containerEnd int, children []chil
 		switch {
 		case afterIdx >= 0:
 			c := children[afterIdx]
-			return edit{start: c.end, end: c.end, text: ",\n" + indent + newText}
+			return edit{Start: c.end, End: c.end, Text: ",\n" + indent + newText}
 		case beforeIdx >= 0:
 			c := children[beforeIdx]
-			return edit{start: c.start, end: c.start, text: newText + ",\n" + indent}
+			return edit{Start: c.start, End: c.start, Text: newText + ",\n" + indent}
 		default:
 			c := children[len(children)-1]
-			return edit{start: c.end, end: c.end, text: ",\n" + indent + newText}
+			return edit{Start: c.end, End: c.end, Text: ",\n" + indent + newText}
 		}
 	}
 	switch {
 	case afterIdx >= 0:
 		c := children[afterIdx]
-		return edit{start: c.end, end: c.end, text: ", " + newText}
+		return edit{Start: c.end, End: c.end, Text: ", " + newText}
 	case beforeIdx >= 0:
 		c := children[beforeIdx]
-		return edit{start: c.start, end: c.start, text: newText + ", "}
+		return edit{Start: c.start, End: c.start, Text: newText + ", "}
 	default:
 		c := children[len(children)-1]
-		return edit{start: c.end, end: c.end, text: ", " + newText}
+		return edit{Start: c.end, End: c.end, Text: ", " + newText}
 	}
 }
 
@@ -108,7 +108,7 @@ func genericRemove(containerStart int, children []childSpan, idx int) edit {
 		if children[idx].commaPos >= 0 {
 			end = children[idx].commaPos + 1
 		}
-		return edit{start: start, end: end, text: ""}
+		return edit{Start: start, End: end, Text: ""}
 	}
 	start := containerStart + 1
 	if idx > 0 {
@@ -118,7 +118,7 @@ func genericRemove(containerStart int, children []childSpan, idx int) edit {
 			start = children[idx-1].end
 		}
 	}
-	return edit{start: start, end: children[idx].end, text: ""}
+	return edit{Start: start, End: children[idx].end, Text: ""}
 }
 
 func insertIntoObj(src []byte, obj *jNode, afterIdx, beforeIdx int, newMemberText string) *edit {

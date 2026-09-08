@@ -128,6 +128,11 @@ func (o DiffOptions) keyFields() []string {
 	return o.KeyFields
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func diffErr(code hewerr.Code, target, path, format string, args ...any) error {
 	return &hewerr.Error{
 		Code:      code,
@@ -385,6 +390,8 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		//   - a MAPPING neighbour rides its KEY path      -> `~ key`
 		//   - a SET (by-value scalar) neighbour rides its content HASH
 		//                                                 -> `~ #hew:sha256=<hex>`
+		//   - a COMMENT rides the hash of its own TEXT, in every container kind
+		//                                                 -> `~ #hew:comment=<hex>`
 		//
 		// Keyed and index sequences keep their current emission for now: a keyed
 		// element's context line is already just its identity field (an address),
@@ -459,7 +466,23 @@ func (d *differ) emit(addr addressing, slots []slot) {
 // RECORD to write for it. Were they to drift, a slot could be admitted by one
 // channel's radius and then emitted on the other's.
 func (a addressing) hinted(s *slot) bool {
-	return s.state == slotSame && s.old != nil && !s.old.Comment && (!a.seq || a.byValue)
+	if s.state != slotSame || s.old == nil {
+		return false
+	}
+	// A COMMENT rides the hint channel in EVERY container kind, so the
+	// container's addressing decides nothing here. childPath addresses a
+	// comment by the digest of its own text BEFORE it splits on sequence vs
+	// mapping (§4.5b), which is exactly the property the hint channel asks
+	// for: an address that identifies the neighbour without carrying it.
+	//
+	// A comment is also the neighbour whose value most wants withholding —
+	// prose a human wrote, up to and including a credential pasted into a
+	// remark — and the one most likely to be reworded by someone who has not
+	// touched the code, which as an assertion refuses the whole patch.
+	if s.old.Comment {
+		return true
+	}
+	return !a.seq || a.byValue
 }
 
 type elemPos struct{ at, length int }

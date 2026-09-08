@@ -664,6 +664,11 @@ func MustParsePath(s string) Path {
 	return p
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func pathErr(path, detail string) error {
 	return &hewerr.Error{
 		Code:      hewerr.CodeParse,

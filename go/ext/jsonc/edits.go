@@ -1,40 +1,17 @@
 package jsonc
 
 import (
-	"sort"
-	"strings"
-
-	"github.com/benjaminabbitt/hew/go/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 )
 
 // edit is one byte-range splice against the source the doc was parsed from:
-// replace [start,end) with text. An insertion is start==end.
-type edit struct {
-	start, end int
-	text       string
-}
-
-// applyEdits splices a batch of non-overlapping edits. The sort is stable so
-// that a separator comma queued at the same offset as the content it separates
-// stays in front of it.
-func applyEdits(src []byte, edits []edit) ([]byte, error) {
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
-	for i := 1; i < len(edits); i++ {
-		if edits[i].start < edits[i-1].end {
-			return nil, &hewerr.Error{Code: hewerr.CodeConflict, Component: hewerr.ComponentApplier,
-				Detail: "two transforms touch overlapping regions of the target (§10 HEW030)"}
-		}
-	}
-	var b strings.Builder
-	pos := 0
-	for _, e := range edits {
-		b.Write(src[pos:e.start])
-		b.WriteString(e.text)
-		pos = e.end
-	}
-	b.Write(src[pos:])
-	return []byte(b.String()), nil
-}
+// replace [Start,End) with Text. An insertion is Start==End.
+//
+// The splice is not a per-format concern — every binding resolves transforms
+// to byte ranges and then splices them all at once — so the type and the
+// algorithm are shared (hewsplice.Apply). The alias keeps this package's own
+// spelling at its call sites.
+type edit = hewsplice.Edit
 
 // placement is where a new child goes: the byte offset, the slot index it will
 // occupy, and whether the surrounding source reads before-style (the existing
@@ -109,29 +86,29 @@ func (d *doc) insert(c *node, slots []slot, p placement, newText string, isItem 
 
 	var edits []edit
 	if prevItem >= 0 && slots[prevItem].commaPos < 0 && (isItem || itemFollows) {
-		edits = append(edits, edit{start: slots[prevItem].valEnd, end: slots[prevItem].valEnd, text: ","})
+		edits = append(edits, edit{Start: slots[prevItem].valEnd, End: slots[prevItem].valEnd, Text: ","})
 	}
 	comma := ""
 	if isItem && itemFollows {
 		comma = ","
 	}
 	if p.before {
-		edits = append(edits, edit{start: p.pos, end: p.pos, text: newText + comma + sep})
+		edits = append(edits, edit{Start: p.pos, End: p.pos, Text: newText + comma + sep})
 		return edits
 	}
-	return append(edits, edit{start: p.pos, end: p.pos, text: sep + newText + comma})
+	return append(edits, edit{Start: p.pos, End: p.pos, Text: sep + newText + comma})
 }
 
 // insertIntoEmpty seeds an empty container, keeping its flow or block layout.
 func (d *doc) insertIntoEmpty(c *node, newText string) edit {
 	if containsNewline(d.src, c.start, c.end) {
 		outer := lineIndent(d.src, c.start)
-		return edit{start: c.start + 1, end: c.end - 1, text: "\n" + outer + "  " + newText + "\n" + outer}
+		return edit{Start: c.start + 1, End: c.end - 1, Text: "\n" + outer + "  " + newText + "\n" + outer}
 	}
 	if c.kind == kObj {
-		return edit{start: c.start + 1, end: c.end - 1, text: " " + newText + " "}
+		return edit{Start: c.start + 1, End: c.end - 1, Text: " " + newText + " "}
 	}
-	return edit{start: c.start + 1, end: c.end - 1, text: newText}
+	return edit{Start: c.start + 1, End: c.end - 1, Text: newText}
 }
 
 // remove computes the edits that delete slot idx from container c.
@@ -150,7 +127,7 @@ func (d *doc) remove(c *node, slots []slot, idx int) []edit {
 	if s.commaPos+1 > end {
 		end = s.commaPos + 1
 	}
-	edits := []edit{{start: lineStart(d.src, s.start), end: lineEnd(d.src, end), text: ""}}
+	edits := []edit{{Start: lineStart(d.src, s.start), End: lineEnd(d.src, end), Text: ""}}
 	if !s.item() {
 		return edits
 	}
@@ -162,7 +139,7 @@ func (d *doc) remove(c *node, slots []slot, idx int) []edit {
 	}
 	for j := idx - 1; j >= 0; j-- {
 		if slots[j].item() && slots[j].commaPos >= 0 {
-			return append(edits, edit{start: slots[j].commaPos, end: slots[j].commaPos + 1, text: ""})
+			return append(edits, edit{Start: slots[j].commaPos, End: slots[j].commaPos + 1, Text: ""})
 		}
 	}
 	return edits
@@ -215,7 +192,7 @@ func flowRemove(c *node, slots []slot, idx int) edit {
 		if slots[idx].commaPos >= 0 {
 			end = slots[idx].commaPos + 1
 		}
-		return edit{start: prevEnd(), end: end, text: ""}
+		return edit{Start: prevEnd(), End: end, Text: ""}
 	}
 	start := c.start + 1
 	if idx > 0 {
@@ -224,5 +201,5 @@ func flowRemove(c *node, slots []slot, idx int) edit {
 			start = slots[idx-1].commaPos
 		}
 	}
-	return edit{start: start, end: slots[idx].end, text: ""}
+	return edit{Start: start, End: slots[idx].end, Text: ""}
 }

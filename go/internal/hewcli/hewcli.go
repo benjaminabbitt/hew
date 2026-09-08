@@ -85,7 +85,8 @@ apply flags:
 diff flags:
   -o, --output FILE     write the patch to FILE instead of stdout
       --format FORMAT   override format detection
-      --context N       context radius (default 1)
+  -U, --context N       asserting context radius (default 1, or "all")
+      --hint-context N  radius for the non-asserting ~ hint lines (default 3, or "all")
 
 exit codes:
   0  applied
@@ -538,6 +539,11 @@ func withPatchFile(err error, patchFile string) error {
 }
 
 // usageErr is an invocation the CLI refuses before doing any work.
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func usageErr(format string, args ...any) error {
 	return &hewerr.Error{Code: hewerr.CodeParse, Component: hewerr.ComponentParser,
 		Detail: fmt.Sprintf(format, args...)}

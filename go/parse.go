@@ -103,6 +103,11 @@ type parser struct {
 	format FormatID
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func parseErr(line int, path, format string, args ...any) error {
 	return &hewerr.Error{
 		Code:      hewerr.CodeParse,
@@ -113,6 +118,11 @@ func parseErr(line int, path, format string, args ...any) error {
 	}
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func assertErr(line int, path, format string, args ...any) error {
 	return &hewerr.Error{
 		Code:      hewerr.CodeAssertionFailed,
@@ -123,6 +133,11 @@ func assertErr(line int, path, format string, args ...any) error {
 	}
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func formatErr(line int, target, format string) error {
 	return &hewerr.Error{
 		Code:      hewerr.CodeUnsupportedFormat,

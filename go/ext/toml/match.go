@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewmatch"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,74 +16,78 @@ import (
 // which is what makes a context line survive `[a.b]` being respelled as a
 // dotted key (§8.4 rule 1).
 func matches(n *tnode, want *yaml.Node) bool {
-	if n == nil || want == nil {
+	if n == nil {
 		return false
 	}
-	switch want.Kind {
-	case yaml.ScalarNode:
-		return n.kind == nScalar && scalarEq(n, want)
-	case yaml.MappingNode:
-		if n.kind != nTable {
-			return false
-		}
-		for i := 0; i+1 < len(want.Content); i += 2 {
-			e := n.lookup(want.Content[i].Value)
-			if e == nil || !matches(e.val, want.Content[i+1]) {
-				return false
-			}
-		}
-		return true
-	case yaml.SequenceNode:
-		if n.kind != nSeq {
-			return false
-		}
-		i := 0
-		for _, w := range want.Content {
-			for i < len(n.elems) && !matches(n.elems[i].val, w) {
-				i++
-			}
-			if i >= len(n.elems) {
-				return false
-			}
-			i++
-		}
-		return true
-	}
-	return false
+	return hewmatch.Matches(matchNode{n}, want)
 }
 
 // equals is matches without the tolerance: the node is exactly the value, not
 // merely a superset of it. This is what "the after-image holds" means (§10.6).
 func equals(n *tnode, want *yaml.Node) bool {
-	if n == nil || want == nil {
+	if n == nil {
 		return false
 	}
-	switch want.Kind {
-	case yaml.ScalarNode:
-		return n.kind == nScalar && scalarEq(n, want)
-	case yaml.MappingNode:
-		if n.kind != nTable || len(n.entries)*2 != len(want.Content) {
-			return false
-		}
-		for i := 0; i+1 < len(want.Content); i += 2 {
-			e := n.lookup(want.Content[i].Value)
-			if e == nil || !equals(e.val, want.Content[i+1]) {
-				return false
-			}
-		}
-		return true
-	case yaml.SequenceNode:
-		if n.kind != nSeq || len(n.elems) != len(want.Content) {
-			return false
-		}
-		for i, w := range want.Content {
-			if !equals(n.elems[i].val, w) {
-				return false
-			}
-		}
-		return true
+	return hewmatch.Equals(matchNode{n}, want)
+}
+
+// matchNode presents a *tnode to the shared matcher. Only two things about
+// TOML are its own here: which of its node kinds is a mapping — a TABLE, which
+// is the same structure under a different name — and what makes two scalars
+// equal, since the reader has already normalized TOML's own number spellings
+// and `0x1e` therefore equals `30`.
+type matchNode struct{ n *tnode }
+
+func (m matchNode) Kind() hewmatch.Kind {
+	switch m.n.kind {
+	case nScalar:
+		return hewmatch.Scalar
+	case nTable:
+		return hewmatch.Mapping
+	case nSeq:
+		return hewmatch.Sequence
 	}
-	return false
+	return hewmatch.Other
+}
+
+func (m matchNode) ScalarEquals(want *yaml.Node) bool { return scalarEq(m.n, want) }
+
+// Lookup returns an UNTYPED nil for an absent key: a (*tnode)(nil) inside the
+// interface would not compare equal to nil, and the matcher tests for nil.
+// Alike in both bindings by necessity: this is the Node contract being
+// implemented over a different node type, which is exactly the split between
+// the shared traversal and the per-format shape. There is nothing to factor
+// out — the bodies name each binding's own entry and element types.
+// reprise:ignore
+func (m matchNode) Lookup(key string) hewmatch.Node {
+	e := m.n.lookup(key)
+	if e == nil || e.val == nil {
+		return nil
+	}
+	return matchNode{e.val}
+}
+
+// Alike in both bindings by necessity: this is the Node contract being
+// implemented over a different node type, which is exactly the split between
+// the shared traversal and the per-format shape. There is nothing to factor
+// out — the bodies name each binding's own entry and element types.
+// reprise:ignore
+func (m matchNode) Elems() []hewmatch.Node {
+	out := make([]hewmatch.Node, len(m.n.elems))
+	for i, e := range m.n.elems {
+		if e == nil || e.val == nil {
+			continue // leaves a nil entry, which matches nothing
+		}
+		out[i] = matchNode{e.val}
+	}
+	return out
+}
+
+func (m matchNode) Len() int {
+	if m.n.kind == nSeq {
+		return len(m.n.elems)
+	}
+	return len(m.n.entries)
 }
 
 // scalarEq is §6.1's "exact, after format-native decoding". The reader has
@@ -113,7 +118,7 @@ func scalarEq(n *tnode, want *yaml.Node) bool {
 // is what gives TOML the identity addressing of §6.4.2.
 func matchesSeg(n *tnode, seg hew.Segment) bool {
 	c, ok := comparedNode(n, seg)
-	return ok && scalarEq(c, scalarNode(seg.Value))
+	return ok && scalarEq(c, hewmatch.ScalarNode(seg.Value))
 }
 
 // comparedValue is comparedNode as a hew.Value, which is what the shared
@@ -144,25 +149,6 @@ func comparedNode(n *tnode, seg hew.Segment) (*tnode, bool) {
 		return nil, false
 	}
 	return e.val, true
-}
-
-// scalarNode converts a path segment's identity Scalar into a YAML scalar
-// node, so `port=8080` compares as the number and `port="8080"` as the string.
-func scalarNode(s hew.Scalar) *yaml.Node {
-	tag := "!!str"
-	switch s.Kind {
-	case hew.ScalarBool:
-		tag = "!!bool"
-	case hew.ScalarNull:
-		tag = "!!null"
-	case hew.ScalarNumber:
-		if strings.ContainsAny(s.Text, ".eE") {
-			tag = "!!float"
-		} else {
-			tag = "!!int"
-		}
-	}
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: s.Text}
 }
 
 // describe renders a node for a diagnostic's "found" half: a scalar shows its

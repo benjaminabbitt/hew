@@ -2,6 +2,7 @@ package jsonc
 
 import (
 	"fmt"
+	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
@@ -60,7 +61,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 		if len(edits) == 0 {
 			continue
 		}
-		cur, err = applyEdits(cur, edits)
+		cur, err = hewsplice.Apply(cur, edits)
 		if err != nil {
 			return nil, err
 		}

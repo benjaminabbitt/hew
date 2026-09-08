@@ -381,7 +381,7 @@ func (r *run) insertItem(seq *tnode, t hew.Transform) ([]edit, error) {
 	}
 	if len(seq.elems) == 0 {
 		pos := seq.end - 1
-		return []edit{{start: pos, end: pos, text: text}}, nil
+		return []edit{{Start: pos, End: pos, Text: text}}, nil
 	}
 	i, err2 := r.placeAmong(elemSpans(seq), t)
 	if err2 != nil {
@@ -389,10 +389,10 @@ func (r *run) insertItem(seq *tnode, t hew.Transform) ([]edit, error) {
 	}
 	if i < 0 {
 		pos := seq.elems[0].blockStart
-		return []edit{{start: pos, end: pos, text: text + ", "}}, nil
+		return []edit{{Start: pos, End: pos, Text: text + ", "}}, nil
 	}
 	pos := seq.elems[i].blockEnd
-	return []edit{{start: pos, end: pos, text: ", " + text}}, nil
+	return []edit{{Start: pos, End: pos, Text: ", " + text}}, nil
 }
 
 // placeAmong turns a before:/after: placement into the index of the sibling to
@@ -462,7 +462,7 @@ func (r *run) insertLines(holder *tnode, lines []string, t hew.Transform) ([]edi
 	if pos > 0 && r.d.src[pos-1] != '\n' {
 		text = "\n" + text
 	}
-	return []edit{{start: pos, end: pos, text: text}}, nil
+	return []edit{{Start: pos, End: pos, Text: text}}, nil
 }
 
 // linePos is the offset a new line lands at in a table's body.
@@ -504,7 +504,7 @@ func (r *run) insertBlock(holder *tnode, header string, body []string, t hew.Tra
 	if before && pos < len(src) && src[pos] != '\n' {
 		text += "\n"
 	}
-	return []edit{{start: pos, end: pos, text: text}}, nil
+	return []edit{{Start: pos, End: pos, Text: text}}, nil
 }
 
 // blockPos resolves a block insertion's before:/after: placement, defaulting
@@ -559,10 +559,10 @@ func (r *run) insertInline(n *tnode, name string, t hew.Transform) ([]edit, erro
 	pair := tomlKey(name) + " = " + text
 	if len(n.entries) == 0 {
 		pos := n.end - 1
-		return []edit{{start: pos, end: pos, text: pair}}, nil
+		return []edit{{Start: pos, End: pos, Text: pair}}, nil
 	}
 	pos := n.entries[len(n.entries)-1].blockEnd
-	return []edit{{start: pos, end: pos, text: ", " + pair}}, nil
+	return []edit{{Start: pos, End: pos, Text: ", " + pair}}, nil
 }
 
 // --- remove -----------------------------------------------------------------
@@ -581,7 +581,7 @@ func (r *run) planRemove(t hew.Transform) ([]edit, error) {
 	}
 	switch {
 	case rf.comment != nil:
-		return []edit{{start: rf.comment.lineStart, end: r.d.blockEndOf(rf.comment.lineStart)}}, nil
+		return []edit{{Start: rf.comment.lineStart, End: r.d.blockEndOf(rf.comment.lineStart)}}, nil
 	case rf.elem != nil && rf.parent.inline:
 		return []edit{cut(elemSpans(rf.parent), indexOf(elemSpans(rf.parent), rf.node))}, nil
 	case rf.entry != nil && rf.parent.inline:
@@ -597,7 +597,7 @@ func (r *run) planRemove(t hew.Transform) ([]edit, error) {
 			"remove: this node is only implied by the keys around it and occupies no region of its own; "+
 				"remove the assignments that name it instead (§8.4)")
 	}
-	return []edit{{start: start, end: end}}, nil
+	return []edit{{Start: start, End: end}}, nil
 }
 
 // removeMissDetail is what a failed remove says. "node does not exist" is the
@@ -634,11 +634,11 @@ func indexOf(spans []span, n *tnode) int {
 func cut(spans []span, i int) edit {
 	switch {
 	case i > 0:
-		return edit{start: spans[i-1].end, end: spans[i].end}
+		return edit{Start: spans[i-1].end, End: spans[i].end}
 	case len(spans) > 1:
-		return edit{start: spans[0].start, end: spans[1].start}
+		return edit{Start: spans[0].start, End: spans[1].start}
 	}
-	return edit{start: spans[i].start, end: spans[i].end}
+	return edit{Start: spans[i].start, End: spans[i].end}
 }
 
 // --- replace ----------------------------------------------------------------
@@ -674,7 +674,7 @@ func (r *run) write(rf *ref, t hew.Transform) ([]edit, error) {
 			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 				"a comment address takes a {comment: \"…\"} value (§4.5b)")
 		}
-		return []edit{{start: rf.comment.textStart, end: rf.comment.textEnd, text: text}}, nil
+		return []edit{{Start: rf.comment.textStart, End: rf.comment.textEnd, Text: text}}, nil
 	}
 	n := rf.node
 	if n == nil || n.end <= n.start {
@@ -687,7 +687,7 @@ func (r *run) write(rf *ref, t hew.Transform) ([]edit, error) {
 		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 			"write: "+t.Value.String()+" has no TOML spelling (§8.4)")
 	}
-	return []edit{{start: n.start, end: n.end, text: text}}, nil
+	return []edit{{Start: n.start, End: n.end, Text: text}}, nil
 }
 
 // --- copy -------------------------------------------------------------------

@@ -573,6 +573,11 @@ func (d *Doc) apply(tl TransformList) ([]byte, error) {
 	return out, nil
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func (d *Doc) noHalf(half string) error {
 	return &hewerr.Error{Code: hewerr.CodeUnsupportedFormat, Component: hewerr.ComponentResolver,
 		Target: d.name, Detail: fmt.Sprintf("this build cannot %s %q documents", half, string(d.format))}
@@ -647,6 +652,11 @@ func commitHandle(f afero.File, data []byte) error {
 	return nil
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func writeErr(name string, err error) error {
 	return &hewerr.Error{Code: hewerr.CodeTargetPath, Component: hewerr.ComponentResolver,
 		Target: name, Detail: err.Error()}

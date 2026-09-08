@@ -2,11 +2,11 @@ package json
 
 import (
 	"fmt"
-	"sort"
-	"strings"
+	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewresolve"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,7 +58,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 		if e == nil {
 			continue
 		}
-		cur, err = applyEdits(cur, []edit{*e})
+		cur, err = hewsplice.Apply(cur, []edit{*e})
 		if err != nil {
 			return nil, err
 		}
@@ -106,51 +106,32 @@ func parseDoc(src []byte) (*doc, error) {
 	return &doc{src: src, root: root}, nil
 }
 
-// edit is one byte-range splice against the ORIGINAL source: replace
-// [start,end) with text. An insertion is start==end.
-type edit struct {
-	start, end int
-	text       string
-}
-
-func applyEdits(src []byte, edits []edit) ([]byte, error) {
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
-	for i := 1; i < len(edits); i++ {
-		if edits[i].start < edits[i-1].end {
-			return nil, &hewerr.Error{Code: hewerr.CodeConflict, Component: hewerr.ComponentApplier,
-				Detail: "two transforms touch overlapping regions of the target (§10 HEW030)"}
-		}
-	}
-	var b strings.Builder
-	pos := 0
-	for _, e := range edits {
-		b.Write(src[pos:e.start])
-		b.WriteString(e.text)
-		pos = e.end
-	}
-	b.Write(src[pos:])
-	return []byte(b.String()), nil
-}
+// edit is one byte-range splice against the source the doc was parsed from:
+// replace [Start,End) with Text. An insertion is Start==End.
+//
+// The splice is not a per-format concern — every binding resolves transforms
+// to byte ranges and then splices them all at once — so the type and the
+// algorithm are shared (hewsplice.Apply). The alias keeps this package's own
+// spelling at its call sites.
+type edit = hewsplice.Edit
 
 // --- path resolution --------------------------------------------------------
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func appErr(code hewerr.Code, target, path string, patchLine int, detail string) *hewerr.Error {
 	return &hewerr.Error{Code: code, Component: hewerr.ComponentApplier, Target: target, Path: path, PatchLine: patchLine, Detail: detail}
 }
 
 // resolveErr classifies a step failure: HEW013 no-match or HEW012
 // ambiguous-match, both raised by the applier per §4.2/§4.3/§4.5.
-type resolveErr struct {
-	ambiguous bool
-	detail    string
-}
-
-func (e *resolveErr) Error() string { return e.detail }
-
 // walk resolves a sequence of segments against n, in order. It returns a
-// *resolveErr for a missing or ambiguous step, which the caller turns into
+// *hewresolve.Err for a missing or ambiguous step, which the caller turns into
 // the right HEW0xx code and path at the point of failure.
-func (d *doc) walk(n *jNode, segs []hew.Segment) (*jNode, int, error) {
+func (d *doc) walk(n *jNode, segs []hew.Segment) (*jNode, int, *hewresolve.Err) {
 	cur := n
 	for i, seg := range segs {
 		next, err := d.step(cur, seg)
@@ -162,29 +143,29 @@ func (d *doc) walk(n *jNode, segs []hew.Segment) (*jNode, int, error) {
 	return cur, -1, nil
 }
 
-func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
+func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, *hewresolve.Err) {
 	switch seg.Kind {
 	case hew.SegKey:
 		if n.kind != jObj {
-			return nil, &resolveErr{detail: fmt.Sprintf("%q: not an object", seg.Name)}
+			return nil, &hewresolve.Err{Detail: fmt.Sprintf("%q: not an object", seg.Name)}
 		}
 		for _, m := range n.members {
 			if m.key == seg.Name {
 				return m.value, nil
 			}
 		}
-		return nil, &resolveErr{detail: fmt.Sprintf("no key %q", seg.Name)}
+		return nil, &hewresolve.Err{Detail: fmt.Sprintf("no key %q", seg.Name)}
 	case hew.SegIndex:
 		if n.kind != jArr {
-			return nil, &resolveErr{detail: "not an array"}
+			return nil, &hewresolve.Err{Detail: "not an array"}
 		}
 		if seg.Index < 0 || seg.Index >= len(n.elems) {
-			return nil, &resolveErr{detail: fmt.Sprintf("index %d out of range", seg.Index)}
+			return nil, &hewresolve.Err{Detail: fmt.Sprintf("index %d out of range", seg.Index)}
 		}
 		return n.elems[seg.Index].value, nil
 	case hew.SegMatch:
 		if n.kind != jArr {
-			return nil, &resolveErr{detail: "not an array"}
+			return nil, &hewresolve.Err{Detail: "not an array"}
 		}
 		var found *jNode
 		var cands []hew.Value
@@ -203,15 +184,15 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 		if count == 0 {
 			// O46: the near miss, named with its type (§10.3). The wording is
 			// the core's, so every binding says it the same way.
-			return nil, &resolveErr{detail: hew.NoMatchDetail(seg, cands)}
+			return nil, &hewresolve.Err{Detail: hew.NoMatchDetail(seg, cands)}
 		}
 		if count > 1 {
-			return nil, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
+			return nil, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
 		}
 		return found, nil
 	case hew.SegHash:
 		if n.kind != jArr {
-			return nil, &resolveErr{detail: "not an array"}
+			return nil, &hewresolve.Err{Detail: "not an array"}
 		}
 		tokenAt := func(k int) (string, bool) {
 			v, err := d.nodeValue(n.elems[k].value)
@@ -230,16 +211,16 @@ func (d *doc) step(n *jNode, seg hew.Segment) (*jNode, error) {
 			}
 		}
 		if len(cands) == 0 {
-			return nil, &resolveErr{detail: "no element matches " + seg.String()}
+			return nil, &hewresolve.Err{Detail: "no element matches " + seg.String()}
 		}
 		// A collision is decided by the scored locator, shared with every binding.
 		pick := hew.Locate(cands, len(n.elems), d.adv)
 		if !pick.OK {
-			return nil, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
+			return nil, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Detail: pick.Explain(seg)}
 		}
 		return n.elems[pick.Index].value, nil
 	default:
-		return nil, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSON representation (§8.1)", seg.Kind)}
+		return nil, &hewresolve.Err{Detail: fmt.Sprintf("segment kind %v has no JSON representation (§8.1)", seg.Kind)}
 	}
 }
 
@@ -293,9 +274,9 @@ func (d *doc) resolveFull(target string, path hew.Path, line int) (*jNode, error
 	if err == nil {
 		return n, nil
 	}
-	re := err.(*resolveErr)
+	re := err
 	code := hewerr.CodeNoMatch
-	if re.ambiguous {
+	if re.Code == hewerr.CodeAmbiguousMatch {
 		code = hewerr.CodeAmbiguousMatch
 	}
 	failPath := path

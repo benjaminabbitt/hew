@@ -812,15 +812,27 @@ func (d dialect) memberLines(margin byte, seg Segment, v Value) []string {
 }
 
 // hintLine renders a non-asserting neighbour hint (satisfied-recoil), never a
-// value: `~ key` for a mapping neighbour (the key in the dialect's own spelling)
-// and `~ #hew:sha256=<hex>` for a set neighbour (the content-hash fragment,
-// spelled by SegHash.String() -> tagma). The mirror grammar reads each back the
-// same way it addresses the corresponding member.
+// value: `~ key` for a mapping neighbour (the key in the dialect's own
+// spelling), `~ #hew:sha256=<hex>` for a set neighbour, and
+// `~ #hew:comment=<hex>` for a comment — the last two both `#` fragments
+// spelled by the segment's own String() -> tagma. The mirror grammar reads each
+// back the same way it addresses the corresponding member.
 func (d dialect) hintLine(seg Segment) string {
-	if seg.Kind == SegHash {
-		return "~ " + seg.String()
+	// A KEY is the one segment with a dialect-specific spelling; every other
+	// kind IS its own address and renders as authored.
+	//
+	// The inverted test — special-casing the kinds that render as addresses —
+	// fails in the worst available way when a kind is missed. Segment.Name on
+	// a computed form holds the TAG's key, so a comment fell through to d.key
+	// and rendered `~ comment`, which re-parses as an ordinary key of that
+	// name: a hint that points at a member the document does not have, with
+	// nothing in the text to show the differ meant a digest. Keeping SegKey as
+	// the only special case means a kind added later renders as its address
+	// rather than silently as a key.
+	if seg.Kind == SegKey {
+		return "~ " + d.key(seg.Name)
 	}
-	return "~ " + d.key(seg.Name)
+	return "~ " + seg.String()
 }
 
 // withAdvice appends a transform's trailing position advisory (satisfied-recoil:

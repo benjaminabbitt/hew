@@ -223,7 +223,7 @@ func (d *doc) handleExistingConflict(target string, path hew.Path, existing *jNo
 	case hew.ConflictKeep:
 		return nil, nil
 	case hew.ConflictReplace:
-		return &edit{start: existing.start, end: existing.end, text: text}, nil
+		return &edit{Start: existing.start, End: existing.end, Text: text}, nil
 	}
 	if idempotent && existingVal.Equal(value) {
 		return nil, nil
@@ -388,7 +388,7 @@ func (d *doc) planReplace(target string, t hew.Transform) (*edit, error) {
 		}
 		return nil, err
 	}
-	return &edit{start: n.start, end: n.end, text: jsonEncode(t.Value)}, nil
+	return &edit{Start: n.start, End: n.end, Text: jsonEncode(t.Value)}, nil
 }
 
 // --- JSON value encoding ----------------------------------------------------

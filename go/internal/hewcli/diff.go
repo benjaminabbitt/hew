@@ -14,6 +14,7 @@ import (
 
 type diffFlags struct {
 	context       int
+	hintContext   int
 	format        string
 	keyFields     []string
 	transformsOut string
@@ -25,9 +26,16 @@ type diffFlags struct {
 // context lines compile into assertions (§9.0), so the radius is a strictness
 // dial, not a verbosity dial, and a user reaching for -U0 to make a patch
 // smaller is quietly disabling drift detection.
+//
+// It names BOTH radii because the output shows both. A reader who sees `~`
+// lines and reaches for -U to change them would move the asserting radius
+// instead, trading strictness for a change they meant to make to location.
 const contextHelp = "-U/--context sets the sibling context radius (default 1, or `all`). " +
 	"It is a STRICTNESS dial, not a verbosity dial: context lines compile into assertions, " +
-	"so a smaller radius makes the patch weaker at detecting drift."
+	"so a smaller radius makes the patch weaker at detecting drift. " +
+	"--hint-context sets the separate radius for the non-asserting `~` hint lines " +
+	"(default 3, or `all`); hints assert nothing, so widening that one makes the patch " +
+	"easier to place without making it stricter."
 
 func parseDiffArgs(args []string) (*diffFlags, error) {
 	f := &diffFlags{context: hew.ContextDefault}
@@ -45,11 +53,22 @@ func parseDiffArgs(args []string) (*diffFlags, error) {
 			if err != nil {
 				return nil, err
 			}
-			n, err := parseContext(v)
+			n, err := parseContext(a, v)
 			if err != nil {
 				return nil, err
 			}
 			f.context = n
+			i++
+		case "--hint-context":
+			v, err := need(i, a)
+			if err != nil {
+				return nil, err
+			}
+			n, err := parseContext(a, v)
+			if err != nil {
+				return nil, err
+			}
+			f.hintContext = n
 			i++
 		case "--format":
 			v, err := need(i, a)
@@ -97,16 +116,20 @@ func parseDiffArgs(args []string) (*diffFlags, error) {
 	return f, nil
 }
 
-// parseContext reads -U's argument. "all" is its own spelling because "every
-// sibling" is not a number, and 0 maps to the named ContextNone rather than to
-// the zero value, which means "unset, use the default".
-func parseContext(v string) (int, error) {
+// parseContext reads a radius argument. "all" is its own spelling because
+// "every sibling" is not a number, and 0 maps to the named ContextNone rather
+// than to the zero value, which means "unset, use the default".
+//
+// Both radii share it, and the error names the flag the user actually typed:
+// telling someone who wrote --hint-context that "--context" is wrong sends them
+// to the other dial.
+func parseContext(flag, v string) (int, error) {
 	if v == "all" {
 		return hew.ContextAll, nil
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 0 {
-		return 0, fmt.Errorf("--context takes a non-negative integer or \"all\", got %q", v)
+		return 0, fmt.Errorf("%s takes a non-negative integer or \"all\", got %q", flag, v)
 	}
 	if n == 0 {
 		return hew.ContextNone, nil
@@ -171,10 +194,11 @@ func runDiff(args []string, dir string, stdin io.Reader, stdout, stderr io.Write
 
 	var notes []string
 	tl, err := hewdiff.Diff(oldBytes, newBytes, format, hew.DiffOptions{
-		KeyFields: f.keyFields,
-		Context:   f.context,
-		Target:    target,
-		Note:      func(s string) { notes = append(notes, s) },
+		KeyFields:   f.keyFields,
+		Context:     f.context,
+		HintContext: f.hintContext,
+		Target:      target,
+		Note:        func(s string) { notes = append(notes, s) },
 	})
 	if err != nil {
 		printErr(stderr, err)
