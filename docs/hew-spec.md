@@ -1855,6 +1855,21 @@ A KEYED or INDEX sequence element keeps its value context line. A keyed element'
 is already just its identity field — an address, not a disclosure — and an index carries no
 value in the address either, so neither is a disclosure the hint channel would repair.
 
+**The hint channel has its own radius, and it is WIDER: `--hint-context`, default 3.** The two
+channels want opposite numbers, which is why one dial cannot serve both. Widening the
+*asserting* radius makes a patch more BRITTLE — every extra neighbour is one more unrelated
+edit it can refuse over. Widening the *hint* radius makes it more ROBUST — every extra
+neighbour is more evidence for placing a hunk whose address no longer resolves, and a hint
+that no longer matches costs nothing, because it asserts nothing. Three either side is where a
+repeated value's neighbourhood starts to distinguish it: at 1 a duplicate-bearing array offers
+the locator two neighbours to weigh, at 3 it offers six.
+
+A plain count set on one channel therefore does NOT carry to the other. The two SENTINELS do:
+`--context=0` and `--context=all` are body-wide requests — "no context at all", "every
+sibling" — and a reader who spells one means it for the whole hunk body rather than for one
+channel of it. An explicit `--hint-context` outranks that carry-across, since asking for hints
+costs the strictness dial nothing.
+
 Because the still-asserting context lines compile into assertions (§9.0), the radius remains a
 **strictness dial, not a verbosity dial** for them — a fact the CLI's help text must state,
 since users will otherwise reach for `--context=0` to make patches smaller and quietly disable
@@ -4260,7 +4275,8 @@ accepts, which is the only relationship between the two verbs that can be called
 
 | Flag | Meaning |
 |---|---|
-| `-U, --context N` | Sibling context radius (§9.4-R2). Default `1`. `all` emits every sibling. **This is a strictness dial, not a verbosity dial** — context lines compile into assertions (§9.0), so a smaller radius makes the patch *weaker*, and the help text says so. |
+| `-U, --context N` | Sibling context radius for the ASSERTING channel (§9.4-R2). Default `1`. `all` emits every sibling. **This is a strictness dial, not a verbosity dial** — context lines compile into assertions (§9.0), so a smaller radius makes the patch *weaker*, and the help text says so. |
+| `--hint-context N` | Radius for the non-asserting `~` hint lines (§9.4-R2). Default `3`, `all` hints every sibling. The opposite dial to `--context`: a hint asserts nothing, so a wider radius makes the patch easier to PLACE without making it stricter. The help text names it, because a reader who sees `~` lines and reaches for `-U` would move the other radius. |
 | `--format FMT` | Override format detection. Both sides must be the same format. |
 | `--key-fields a,b,c` | Candidate identity fields for keyed-array addressing (§9.4-R4). Default `name,id,key`. |
 | `--transforms-out FILE` | Emit the transform list instead of `.hew` notation. |
