@@ -661,7 +661,7 @@ func TestValueScalarCarriesTheTypeAndTheRendererDoesTheQuoting(t *testing.T) {
 		{"!!str", "true", ScalarString, `"true"`},
 		{"!!str", "null", ScalarString, `"null"`},
 		{"!!str", "", ScalarString, `""`},
-		{"!!str", "opt?", ScalarString, `"opt?"`},
+		{"!!str", "opt?", ScalarString, `opt?`},
 		{"!!int", "8080", ScalarNumber, "8080"},
 		{"!!float", "1.5", ScalarNumber, "1.5"},
 		{"!!bool", "true", ScalarBool, "true"},

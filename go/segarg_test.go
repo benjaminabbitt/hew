@@ -260,17 +260,16 @@ func TestAtRejectsAPatternCarryingTheHoleSentinel(t *testing.T) {
 }
 
 // A hole may be filled with a key whose name ends in "?". The name is DATA and
-// never passes back through the segment lexer, so the retired optional segment
-// (§4.7) obstructs nothing here; the path renders with the literal form, which
-// is the only spelling that reparses.
+// never passes back through the segment lexer, and `?` means nothing in a path
+// anyway (§4.7), so the path renders BARE — quoting it would be noise.
 func TestAtFillsAHoleWithAKeyEndingInQuestionMark(t *testing.T) {
 	d := atDoc(t)
 	p := d.At("/{}/b", Key("a?")).path
 	if d.err != nil {
 		t.Fatal(d.err)
 	}
-	if got := p.String(); got != `/"a?"/b` {
-		t.Fatalf("String() = %q, want the literal form", got)
+	if got := p.String(); got != "/a?/b" {
+		t.Fatalf("String() = %q, want the bare form", got)
 	}
 	if seg := p.Segment(0); seg.Kind != SegKey || seg.Name != "a?" {
 		t.Fatalf("segment 0 = %+v, want the key a?", seg)

@@ -49,63 +49,66 @@ func TestHashFragmentDoesNotCaptureComments(t *testing.T) {
 	}
 }
 
-// The bare `#<n>` comment ordinal is GONE, not merely deprecated. It was the
-// one position-based address in a design whose §4 says it has none, and it
-// mislocated silently: the ordinal came from the comment's position in the
-// patch body, so a patch naming one comment resolved to another and the
-// before-image assertion agreed with the wrong node. Parsing it must fail, and
-// the message must name the replacement — a reader who wrote `#0` needs to be
-// told what to write instead, not merely that `#0` is not a path.
-func TestCommentOrdinalIsAParseError(t *testing.T) {
-	for _, s := range []string{"/#0", "/server/#1", "/a/#12", "/#0/x"} {
-		_, err := ParsePath(s)
-		if err == nil {
-			t.Fatalf("ParsePath(%q) should fail: the comment ordinal is gone (§4.5b)", s)
+// `?` is an ORDINARY CHARACTER in a path, and a trailing one is nothing at
+// all. The optional segment it used to spell is gone: no resolver ever read
+// one, and the refusal that replaced it was migration scaffolding — it bought
+// a better diagnostic for a stale patch and charged, permanently, a key that
+// really ends in `?` having to be quoted forever.
+//
+// So `/server/tls?` addresses the key `tls?`, the same way `/server/tls!`
+// addresses `tls!`. Nothing in the grammar mentions `?` any more, which is the
+// point: a character that means nothing should not be reserved.
+func TestTrailingQuestionMarkIsAnOrdinaryKey(t *testing.T) {
+	for _, c := range []struct{ path, want string }{
+		{"/server/tls?", "tls?"}, // the retired section's first worked example
+		{"/x?", "x?"},
+		{"/a?/b", "a?"}, // not a last-segment rule either
+	} {
+		p, err := ParsePath(c.path)
+		if err != nil {
+			t.Fatalf("ParsePath(%q): %v", c.path, err)
 		}
-		if !strings.Contains(err.Error(), "#hew:comment=") {
-			t.Fatalf("ParsePath(%q) must name the digest form as the replacement, got: %v", s, err)
+		seg := p.Segment(0)
+		if c.path == "/server/tls?" {
+			seg = p.Segment(1)
+		}
+		if seg.Kind != SegKey || seg.Name != c.want {
+			t.Fatalf("ParsePath(%q) segment = %v/%q, want key/%q", c.path, seg.Kind, seg.Name, c.want)
 		}
 	}
-	// `#t` is NOT an ordinal: it names the trailing comment of a member, of
-	// which there is at most one, so it is an identity and it survives.
-	if _, err := ParsePath("/a/#t"); err != nil {
-		t.Fatalf("#t is identity, not an ordinal, and stays legal: %v", err)
+
+	// A key-match VALUE ending in `?` is likewise just that value. It was
+	// force-quoted only because the whole segment was refused.
+	p, err := ParsePath("/mcpServers/name=ctxloom?")
+	if err != nil {
+		t.Fatalf("ParsePath: %v", err)
 	}
-	// A `#` followed by anything that is not digits or `t` is still an
-	// ordinary key, which is what keeps `#foo` and `##0` addressable.
-	for _, s := range []string{"/#foo", "/##0"} {
-		if _, err := ParsePath(s); err != nil {
-			t.Fatalf("ParsePath(%q) is a key, not a comment address: %v", s, err)
-		}
+	if seg := p.Segment(1); seg.Kind != SegMatch || seg.Value.Text != "ctxloom?" {
+		t.Fatalf("segment = %v/%q, want match/ctxloom?", seg.Kind, seg.Value.Text)
 	}
 }
 
-// The trailing `?` is GONE, and it is refused rather than ignored. It was
-// parsed, position-checked, compared and rendered, and read by no resolver, so
-// every patch that carried one got the plain no-match it was written to avoid.
-// The refusal is the whole point of the removal: `?` is an ordinary character
-// in a key, so a token that merely stopped being a flag would fall through to
-// the key fallback and address a key literally spelled `tls?` — the failure the
-// retired comment ordinal already demonstrated. The message must carry the
-// quoted spelling, because a writer who typed `tls?` meant one of the two
-// things it can now be, and needs to be told which spelling says which.
-func TestTrailingQuestionMarkIsAParseError(t *testing.T) {
-	for _, s := range []string{
-		"/server/tls?",              // the retired section's first worked example
-		"/mcpServers/name=ctxloom?", // and its second
-		"/a?/b",                     // not merely a last-segment rule any more
-		"/x?",
-	} {
-		_, err := ParsePath(s)
-		if err == nil {
-			t.Fatalf("ParsePath(%q) should fail: the optional segment is gone (§4.7)", s)
-		}
-		if !strings.Contains(err.Error(), `"`) {
-			t.Fatalf("ParsePath(%q) must name the quoted literal as the escape hatch, got: %v", s, err)
-		}
+// The round trip is what makes `?` ordinary rather than merely accepted: a key
+// ending in one renders BARE and reparses as itself. While the refusal stood,
+// mustQuoteKey force-quoted it, so hew quoted a key that needed no quoting.
+func TestTrailingQuestionMarkRendersBare(t *testing.T) {
+	p := NewPath(Segment{Kind: SegKey, Name: "server"}, Segment{Kind: SegKey, Name: "tls?"})
+	got := p.String()
+	if got != "/server/tls?" {
+		t.Fatalf("String() = %q, want %q — a key needing no quoting must not be quoted", got, "/server/tls?")
 	}
-	// The escape hatch itself: a key whose text really does end in `?` is
-	// addressable as a literal, and that is the ONLY way to say it.
+	back, err := ParsePath(got)
+	if err != nil {
+		t.Fatalf("reparse %q: %v", got, err)
+	}
+	if last := back.Segment(1); last.Kind != SegKey || last.Name != "tls?" {
+		t.Fatalf("round trip = %v/%q, want key/tls?", last.Kind, last.Name)
+	}
+}
+
+// The quoted spelling stays legal — it is how any key is written literally —
+// and still names the same key, so a patch already using it keeps working.
+func TestTrailingQuestionMarkQuotedStillParses(t *testing.T) {
 	p, err := ParsePath(`/server/"tls?"`)
 	if err != nil {
 		t.Fatalf(`ParsePath("/server/\"tls?\""): %v`, err)

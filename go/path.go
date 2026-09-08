@@ -295,8 +295,6 @@ func mustQuoteKey(name string) bool {
 		return true
 	case allDigits(name): // an index
 		return true
-	case strings.HasSuffix(name, "?"): // refused as a bare segment (§4.7)
-		return true
 	case blockOrdinalShape(name): // `<kind>:<n>` (§4.5)
 		return true
 	case strings.ContainsAny(name, "\r\n"):
@@ -408,8 +406,11 @@ func (s Scalar) pathString() string {
 
 // mustQuoteScalar reports whether a STRING scalar's bare spelling would read
 // back as a different scalar: as a number, a boolean, null, the empty token,
-// or a quoted string — or would lose its tail to one of the suffixes a segment
-// strips before its value is read at all.
+// or a quoted string.
+//
+// A trailing `?` is not one of them any more (§4.7). It was force-quoted only
+// because the whole segment carrying it was refused, so `/x/f=opt?` now reads
+// as the value `opt?` and needs no quoting to stay addressable.
 func mustQuoteScalar(text string) bool {
 	switch text {
 	case "", "true", "false", "null":
@@ -423,13 +424,7 @@ func mustQuoteScalar(text string) bool {
 	if strings.ContainsAny(text, "\r\n") {
 		return true
 	}
-	// A trailing `?` is refused for the WHOLE segment (§4.7), and a match value
-	// sits at the segment's end: `/x/f=opt?` is refused rather than read as the
-	// value "opt". Quoting is what keeps such a value addressable, so a value
-	// ending in `?` is force-quoted here — otherwise a `.hewt` address the
-	// differ built would not reparse at all.
-	esc := escapeKey(text)
-	return strings.HasSuffix(esc, "?")
+	return false
 }
 
 type pathOrigin uint8
@@ -828,25 +823,18 @@ func parseSegment(raw string, sc scope) (Segment, error) {
 		return seg, nil
 	}
 
-	// The trailing `?` — the retired optional segment (§4.7). It is refused,
-	// not ignored: `?` is an ordinary character in a key, so a token that
-	// merely stopped being a flag would drop through to the key fallback below
-	// and address a key literally spelled `tls?`, which is the silent
-	// mis-addressing the retired comment ordinal already demonstrated.
+	// There is no rule here for a trailing `?`, and its absence is the ruling
+	// (§4.7). The optional segment it once spelled is gone, so `?` carries no
+	// meaning in a path and a token ending in one falls through to the key
+	// fallback below like any other — `/server/tls?` addresses the key `tls?`
+	// exactly as `/server/tls!` addresses `tls!`.
 	//
-	// The refusal sits HERE, below the claim, and the position is the ruling.
-	// `?` is not a shape an extension might own but a suffix on an otherwise
-	// ordinary token, and prose headings end in one all the time — refusing
-	// above the claim would make `/# Is it safe?` unaddressable, and stripping
-	// it, as the optional segment did, addressed the heading "Is it safe"
-	// instead. An extension that claims the token keeps its `?`; only what
-	// reaches the core's own fallbacks is refused.
-	if strings.HasSuffix(body, "?") {
-		return seg, segErr("segment " + strconv.Quote(raw) +
-			`: the trailing "?" optional segment is gone (§4.7) — create with "! default" ` +
-			"or an add, and write a key that really ends in \"?\" as its literal spelling, " +
-			quoteSegment(body))
-	}
+	// The refusal that stood here briefly was migration scaffolding: it gave a
+	// stale patch a message naming the replacement instead of a bare no-match.
+	// It charged a permanent price for that — a key genuinely ending in `?` had
+	// to be quoted for as long as it lived — and transitional scaffolding
+	// becomes load-bearing by default, because nobody revisits a rule that is
+	// merely working.
 
 	// A `#<namespace>:...` fragment (§4.5c, satisfied-recoil): the text after `#`
 	// is a tagma tag carrying a namespace — hew's computed locators use "hew",
