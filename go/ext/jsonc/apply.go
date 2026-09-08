@@ -5,68 +5,46 @@ import (
 	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewapply"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
-// Apply is the JSONC binding's apply half (§8.2, Appendix A.4's Applier.Apply
-// for the "jsonc" format). SEQUENTIAL RESOLUTION (§9.2, §9.3, human ruling):
-// every transform — `test` included — is resolved and evaluated (or applied)
-// against the document AS MODIFIED BY every transform before it, one at a
-// time, in list order. There is no longer a fixed "every test against the
-// untouched document" pass; a `test` placed after an earlier write in the
-// same list sees that write, exactly as an `add` placed after one already
-// did (this binding was already reparsing before each MUTATION — see the
-// history below — it just was not yet doing so for `test`).
-//
-// Every transform is planned against the document the transform before it
-// produced. That sequencing is not an implementation convenience: a JSONC
-// patch may place a member relative to a comment the same patch just added
-// (jsonc/add-with-leading-comment lowers to `add /#0 after /port` followed by
-// `add /telemetry after /#0`), and the second transform's anchor simply does
-// not exist in the bytes the first one was planned against.
-//
-// Everything happens against an in-memory byte buffer that is only ever
-// returned once every transform has succeeded (§10.5's all-or-nothing): an
-// error at any step discards the buffer and returns nil bytes.
-//
-// Byte preservation is structural, not textual: every untouched byte range of
-// the source is copied verbatim, and an edit's own replacement text is the
-// only place new bytes appear (§6.3) — so indentation, quoting style, numeric
-// literal form and every comment outside the edit survive exactly.
-func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
-	cur := target
-	// §4.5e: compensate the patch's own earlier edits before reading advisories.
-	migrated := hew.Migrate(tl.Transform)
-	for i, t := range tl.Transform {
-		d, err := parseDoc(cur)
-		if d != nil {
-			d.adv = migrated[i]
-		}
-		if err != nil {
-			return nil, targetParseErr(tl.Target, err)
-		}
-		if t.Op == hew.OpTest {
-			if err := d.evalTest(tl.Target, t); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if t.Op == hew.OpHint {
-			continue // the non-asserting hint channel (satisfied-recoil): no edit, no assertion
-		}
-		edits, err := d.plan(tl.Target, t)
-		if err != nil {
-			return nil, err
-		}
-		if len(edits) == 0 {
-			continue
-		}
-		cur, err = hewsplice.Apply(cur, edits)
-		if err != nil {
-			return nil, err
-		}
+// binding is this format's variant of the shared apply loop (hewapply): the
+// loop owns the SEQUENCE — reparse per transform, hints neither assert nor
+// edit, an empty plan is a no-op — and everything below is what JSONC itself
+// answers.
+type binding struct{}
+
+func (binding) FormatName() string { return "JSONC" }
+
+// Unsupported has nothing to refuse: this binding implements every qualifier
+// §9.3 defines for it, so pass 0 passes.
+func (binding) Unsupported(string, hew.Transform) error { return nil }
+
+func (binding) NewRun(src []byte, ctx hewapply.RunContext) (hewapply.Run, error) {
+	d, err := parseDoc(src)
+	if err != nil {
+		return nil, err
 	}
-	return cur, nil
+	d.adv = ctx.Adv
+	return docRun{d: d, target: ctx.Target}, nil
+}
+
+// docRun carries the target alongside the document because this binding's
+// evaluators take it per call rather than holding it.
+type docRun struct {
+	d      *doc
+	target string
+}
+
+func (r docRun) EvalTest(t hew.Transform) error { return r.d.evalTest(r.target, t) }
+
+func (r docRun) PlanOne(t hew.Transform) ([]hewsplice.Edit, error) {
+	return r.d.plan(r.target, t)
+}
+
+func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
+	return hewapply.Apply(target, tl, binding{})
 }
 
 // plan computes one mutating transform's byte edits against the current
@@ -87,9 +65,4 @@ func (d *doc) plan(target string, t hew.Transform) ([]edit, error) {
 		return nil, &hewerr.Error{Code: hewerr.CodeInexpressible, Component: hewerr.ComponentApplier,
 			Target: target, Path: t.Path.String(), Detail: fmt.Sprintf("unsupported op %q", t.Op)}
 	}
-}
-
-func targetParseErr(target string, err error) error {
-	return &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
-		Target: target, Detail: "target does not parse as JSONC: " + err.Error()}
 }

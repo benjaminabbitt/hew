@@ -5,72 +5,41 @@ import (
 	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewapply"
 	"github.com/benjaminabbitt/hew/go/internal/hewcomment"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 	"github.com/benjaminabbitt/hew/go/internal/hewmatch"
 	"github.com/benjaminabbitt/hew/go/internal/hewresolve"
 )
 
-// Apply is the YAML binding's apply half (§8.3, Appendix A.4's Applier.Apply
-// for the "yaml" format). SEQUENTIAL RESOLUTION (§9.2, §9.3, human ruling):
-// every transform — `test` included — is resolved and evaluated (or applied)
-// against the document AS MODIFIED BY every transform before it, one at a
-// time, in list order, by reparsing the current byte buffer before each
-// step. There is no longer a fixed "every test before any mutation" split; a
-// `test` placed after an earlier write in the same list sees that write,
-// exactly as an `add` placed after one does.
-//
-// Everything happens against an in-memory byte buffer that is only ever
-// returned once every transform has succeeded (§10.5's all-or-nothing): an
-// error at any step discards the buffer and returns nil bytes.
-func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
-	// Pass 0: refuse qualifiers this binding does not implement. §9.3 is
-	// explicit that ignoring one is non-conformant, not lenient. This is a
-	// property of the transform list alone, so it stays a single static pass
-	// ahead of the sequential one below.
-	for _, t := range tl.Transform {
-		if err := unsupported(tl.Target, t); err != nil {
-			return nil, err
-		}
-	}
+// binding is this format's variant of the shared apply loop (hewapply): the
+// loop owns the SEQUENCE — reparse per transform, hints neither assert nor
+// edit, an empty plan is a no-op — and everything below is what YAML itself
+// answers.
+type binding struct{}
 
-	// converged spans the whole apply (§10.6/§7.5): whether a path's
-	// before-image assert was tolerated as "already applied" has to be seen
-	// by that path's own write, wherever in the list it falls, so it lives
-	// above the per-transform reparse rather than inside run.
-	converged := map[string]bool{}
-	cur := target
-	// §4.5e: compensate the patch's own earlier edits before reading advisories.
-	migrated := hew.Migrate(tl.Transform)
-	for i, t := range tl.Transform {
-		d, err := parseDoc(cur)
-		if err != nil {
-			return nil, &hewerr.Error{Code: hewerr.CodeTargetParse, Component: hewerr.ComponentApplier,
-				Target: tl.Target, Detail: "target does not parse as YAML: " + err.Error()}
-		}
-		r := &run{d: d, target: tl.Target, all: tl.Transform, converged: converged, adv: migrated[i]}
-		if t.Op == hew.OpTest {
-			if err := r.evalTest(t); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if t.Op == hew.OpHint {
-			continue // the non-asserting hint channel (satisfied-recoil): no edit, no assertion
-		}
-		es, err := r.planOne(t)
-		if err != nil {
-			return nil, err
-		}
-		if len(es) == 0 {
-			continue
-		}
-		cur, err = hewsplice.Apply(cur, es)
-		if err != nil {
-			return nil, err
-		}
+func (binding) FormatName() string { return "YAML" }
+
+func (binding) Unsupported(target string, t hew.Transform) error {
+	return unsupported(target, t)
+}
+
+func (binding) NewRun(src []byte, ctx hewapply.RunContext) (hewapply.Run, error) {
+	d, err := parseDoc(src)
+	if err != nil {
+		return nil, err
 	}
-	return cur, nil
+	return &run{d: d, target: ctx.Target, all: ctx.All, converged: ctx.Converged, adv: ctx.Adv}, nil
+}
+
+// EvalTest and PlanOne are the run's own methods under the names the loop
+// asks for; the shared package cannot name unexported ones.
+func (r *run) EvalTest(t hew.Transform) error { return r.evalTest(t) }
+
+func (r *run) PlanOne(t hew.Transform) ([]hewsplice.Edit, error) { return r.planOne(t) }
+
+func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
+	return hewapply.Apply(target, tl, binding{})
 }
 
 // planOne computes the edits one mutating transform stands for.
