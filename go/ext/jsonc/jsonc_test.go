@@ -8,6 +8,7 @@ import (
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 	"gopkg.in/yaml.v3"
 )
 
@@ -734,7 +735,8 @@ func TestEncodingHouseStyle(t *testing.T) {
 }
 
 func TestOverlappingEditsAreHEW030(t *testing.T) {
-	if _, err := applyEdits([]byte("abcdef"), []edit{{0, 3, "X"}, {2, 5, "Y"}}); err == nil {
+	overlapping := []edit{{Start: 0, End: 3, Text: "X"}, {Start: 2, End: 5, Text: "Y"}}
+	if _, err := hewsplice.Apply([]byte("abcdef"), overlapping); err == nil {
 		t.Fatal("overlapping edits must be refused")
 	} else if he, ok := hewerr.As(err); !ok || he.Code != hewerr.CodeConflict {
 		t.Fatalf("want HEW030, got %v", err)

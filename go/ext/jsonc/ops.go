@@ -312,7 +312,7 @@ func (d *doc) planTrailingCommentAdd(target string, path hew.Path, owner ref, te
 		return nil, appErr(hewerr.CodeInexpressible, target, path.String(), line,
 			"add: a trailing comment attaches to a member or element (§4.5b)")
 	}
-	return []edit{{start: pos, end: pos, text: " " + renderComment(text)}}, nil
+	return []edit{{Start: pos, End: pos, Text: " " + renderComment(text)}}, nil
 }
 
 func trailingAnchor(valEnd, commaPos int) int {
@@ -403,7 +403,7 @@ func (d *doc) planConflict(target string, path hew.Path, existing ref, v hew.Val
 		return nil, nil
 	case hew.ConflictReplace:
 		start, end := existing.span()
-		return []edit{{start: start, end: end, text: d.insertText(v, raw)}}, nil
+		return []edit{{Start: start, End: end, Text: d.insertText(v, raw)}}, nil
 	}
 	if idempotent && existing.node != nil {
 		got, verr := existing.node.hewValue()
@@ -456,12 +456,12 @@ func (d *doc) removeComment(r ref) []edit {
 			return d.remove(r.parent, slots, i)
 		}
 		if (s.member != nil && s.member.trailing == r.cmt) || (s.elem != nil && s.elem.trailing == r.cmt) {
-			return []edit{{start: gapStart(d.src, r.cmt.start), end: r.cmt.end, text: ""}}
+			return []edit{{Start: gapStart(d.src, r.cmt.start), End: r.cmt.end, Text: ""}}
 		}
 	}
 	// A leading comment: the member it documents stays, so only the comment's
 	// own line goes.
-	return []edit{{start: lineStart(d.src, r.cmt.start), end: lineEnd(d.src, r.cmt.end), text: ""}}
+	return []edit{{Start: lineStart(d.src, r.cmt.start), End: lineEnd(d.src, r.cmt.end), Text: ""}}
 }
 
 func gapStart(src []byte, pos int) int {
@@ -489,7 +489,7 @@ func (d *doc) planReplace(target string, t hew.Transform) ([]edit, error) {
 			return nil, appErr(hewerr.CodeInexpressible, target, t.Path.String(), t.PatchLine,
 				"replace: a comment node's value must be a comment (§9.6: {comment: <text>})")
 		}
-		return []edit{{start: start, end: end, text: renderComment(text)}}, nil
+		return []edit{{Start: start, End: end, Text: renderComment(text)}}, nil
 	}
-	return []edit{{start: start, end: end, text: jsonEncode(t.Value)}}, nil
+	return []edit{{Start: start, End: end, Text: jsonEncode(t.Value)}}, nil
 }

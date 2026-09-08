@@ -313,14 +313,14 @@ func (r *run) planRemove(t hew.Transform) ([]edit, error) {
 	}
 	switch {
 	case rf.comment != nil:
-		return []edit{{start: rf.comment.lineStart, end: r.d.blockEndOf(rf.comment.lineStart)}}, nil
+		return []edit{{Start: rf.comment.lineStart, End: r.d.blockEndOf(rf.comment.lineStart)}}, nil
 	case rf.inherited:
 		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 			"remove: an inherited key cannot be forked away, only shadowed (§8.3)")
 	case rf.entry != nil:
-		return []edit{{start: rf.entry.blockStart, end: rf.entry.blockEnd}}, nil
+		return []edit{{Start: rf.entry.blockStart, End: rf.entry.blockEnd}}, nil
 	case rf.elem != nil:
-		return []edit{{start: rf.elem.blockStart, end: rf.elem.blockEnd}}, nil
+		return []edit{{Start: rf.elem.blockStart, End: rf.elem.blockEnd}}, nil
 	}
 	return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine, "remove: cannot remove the document root")
 }
@@ -367,7 +367,7 @@ func (r *run) write(rf *ref, t hew.Transform) ([]edit, error) {
 			return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 				"a comment address takes a {comment: \"…\"} value (§4.5b)")
 		}
-		return []edit{{start: rf.comment.textStart, end: rf.comment.textEnd, text: text}}, nil
+		return []edit{{Start: rf.comment.textStart, End: rf.comment.textEnd, Text: text}}, nil
 	}
 	if rf.inherited {
 		// `! anchor fork` (OP-41): materialize the inherited key at THIS site.
@@ -379,9 +379,9 @@ func (r *run) write(rf *ref, t hew.Transform) ([]edit, error) {
 		text := r.d.flowText(v)
 		if rf.node.start == rf.node.end && rf.entry != nil {
 			// An empty value ("key:"): write after the colon, with the space.
-			return []edit{{start: rf.entry.colon + 1, end: rf.node.end, text: " " + text}}, nil
+			return []edit{{Start: rf.entry.colon + 1, End: rf.node.end, Text: " " + text}}, nil
 		}
-		return []edit{{start: rf.node.start, end: rf.node.end, text: text}}, nil
+		return []edit{{Start: rf.node.start, End: rf.node.end, Text: text}}, nil
 	}
 	// A block collection replacing a member's value starts on its own line.
 	var body []string
@@ -390,8 +390,8 @@ func (r *run) write(rf *ref, t hew.Transform) ([]edit, error) {
 	} else {
 		body = r.d.emitSeqBody(v)
 	}
-	return []edit{{start: rf.entry.colon + 1, end: rf.node.end,
-		text: "\n" + indentBlock(body, rf.entry.indent+r.d.indent)}}, nil
+	return []edit{{Start: rf.entry.colon + 1, End: rf.node.end,
+		Text: "\n" + indentBlock(body, rf.entry.indent+r.d.indent)}}, nil
 }
 
 // --- copy -------------------------------------------------------------------
@@ -500,9 +500,9 @@ func (r *run) insert(container *ynode, p payload, before, after hew.Path, t hew.
 	text := indentBlock(p.lines, kids[0].indent)
 	if pos > 0 && r.d.src[pos-1] != '\n' {
 		// The container's last line has no newline of its own: open one.
-		return []edit{{start: pos, end: pos, text: "\n" + text}}, nil
+		return []edit{{Start: pos, End: pos, Text: "\n" + text}}, nil
 	}
-	return []edit{{start: pos, end: pos, text: text + "\n"}}, nil
+	return []edit{{Start: pos, End: pos, Text: text + "\n"}}, nil
 }
 
 // insertFlow adds to a flow collection. An EMPTY one has no sibling style to
@@ -515,15 +515,15 @@ func (r *run) insertFlow(container *ynode, p payload, kids []child, t hew.Transf
 				"add: cannot expand an empty flow collection that is not a mapping value")
 		}
 		indent := container.owner.indent + r.d.indent
-		return []edit{{start: container.owner.colon + 1, end: container.end,
-			text: "\n" + indentBlock(p.lines, indent)}}, nil
+		return []edit{{Start: container.owner.colon + 1, End: container.end,
+			Text: "\n" + indentBlock(p.lines, indent)}}, nil
 	}
 	if p.flow == "" {
 		return nil, r.err(hewerr.CodeInexpressible, t.Path.String(), t.PatchLine,
 			"add: this value has no flow rendering for a flow container")
 	}
 	last := kids[len(kids)-1].node.end
-	return []edit{{start: last, end: last, text: ", " + p.flow}}, nil
+	return []edit{{Start: last, End: last, Text: ", " + p.flow}}, nil
 }
 
 // findChild locates the placement sibling a before:/after: path names.

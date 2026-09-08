@@ -2,8 +2,7 @@ package json
 
 import (
 	"fmt"
-	"sort"
-	"strings"
+	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
@@ -58,7 +57,7 @@ func Apply(target []byte, tl hew.TransformList) ([]byte, error) {
 		if e == nil {
 			continue
 		}
-		cur, err = applyEdits(cur, []edit{*e})
+		cur, err = hewsplice.Apply(cur, []edit{*e})
 		if err != nil {
 			return nil, err
 		}
@@ -106,31 +105,14 @@ func parseDoc(src []byte) (*doc, error) {
 	return &doc{src: src, root: root}, nil
 }
 
-// edit is one byte-range splice against the ORIGINAL source: replace
-// [start,end) with text. An insertion is start==end.
-type edit struct {
-	start, end int
-	text       string
-}
-
-func applyEdits(src []byte, edits []edit) ([]byte, error) {
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
-	for i := 1; i < len(edits); i++ {
-		if edits[i].start < edits[i-1].end {
-			return nil, &hewerr.Error{Code: hewerr.CodeConflict, Component: hewerr.ComponentApplier,
-				Detail: "two transforms touch overlapping regions of the target (§10 HEW030)"}
-		}
-	}
-	var b strings.Builder
-	pos := 0
-	for _, e := range edits {
-		b.Write(src[pos:e.start])
-		b.WriteString(e.text)
-		pos = e.end
-	}
-	b.Write(src[pos:])
-	return []byte(b.String()), nil
-}
+// edit is one byte-range splice against the source the doc was parsed from:
+// replace [Start,End) with Text. An insertion is Start==End.
+//
+// The splice is not a per-format concern — every binding resolves transforms
+// to byte ranges and then splices them all at once — so the type and the
+// algorithm are shared (hewsplice.Apply). The alias keeps this package's own
+// spelling at its call sites.
+type edit = hewsplice.Edit
 
 // --- path resolution --------------------------------------------------------
 
