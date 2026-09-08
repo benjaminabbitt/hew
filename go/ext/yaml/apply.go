@@ -5,6 +5,7 @@ import (
 	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewcomment"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 	"github.com/benjaminabbitt/hew/go/internal/hewmatch"
 	"github.com/benjaminabbitt/hew/go/internal/hewresolve"
@@ -336,28 +337,17 @@ func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, *hewresolve.Err) {
 		}
 		return &ref{comment: c, parent: cur.parent}, nil
 	}
-	if seg.Hash == "" {
-		// The ordinal is gone (§4.5b) and the parser refuses it, so this is
-		// only reachable from a Segment built in code. Refusing beats falling
-		// back to Index, which would resolve position 0 for every such segment.
-		return nil, hewresolve.NoMatch("a comment is addressed by the digest of its text, `#hew:comment=<hex>`")
-	}
-	// Addressed by the digest of its TEXT. Identical comments collide just as
-	// identical set members do, and are resolved by the same scored locator
-	// rather than by a private rule.
+	// Which comment a digest names is not a format question — the digest is
+	// over the marker-stripped text, so the same comment hashes alike in every
+	// format — so the decision, collisions included, is made once.
 	comments := r.d.commentChildren(cur.node)
-	var cands []hew.Candidate
+	texts := make([]string, len(comments))
 	for i, c := range comments {
-		if seg.MatchesComment(c.text) {
-			cands = append(cands, hew.Candidate{Index: i})
-		}
+		texts[i] = c.text
 	}
-	if len(cands) == 0 {
-		return nil, hewresolve.NoMatch("no comment matches %s", seg.String())
+	i, err := hewcomment.Pick(seg, texts, r.adv)
+	if err != nil {
+		return nil, err
 	}
-	pick := hew.Locate(cands, len(comments), r.adv)
-	if !pick.OK {
-		return nil, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Final: true, Detail: pick.Explain(seg)}
-	}
-	return &ref{comment: comments[pick.Index], parent: cur.node}, nil
+	return &ref{comment: comments[i], parent: cur.node}, nil
 }
