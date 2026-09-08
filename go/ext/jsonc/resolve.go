@@ -5,6 +5,7 @@ import (
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewresolve"
 )
 
 // ref is a resolved location. Exactly one of node and cmt is set: a value node,
@@ -35,14 +36,7 @@ func appErr(code hewerr.Code, target, path string, patchLine int, detail string)
 // resolveErr classifies a failing step: a missing node (HEW013) or an
 // ambiguous one (HEW012), which the caller stamps with the path prefix that
 // actually failed.
-type resolveErr struct {
-	ambiguous bool
-	detail    string
-}
-
-func (e *resolveErr) Error() string { return e.detail }
-
-func (d *doc) walk(segs []hew.Segment) (ref, int, error) {
+func (d *doc) walk(segs []hew.Segment) (ref, int, *hewresolve.Err) {
 	cur := ref{node: d.root}
 	for i, seg := range segs {
 		next, err := d.step(cur, seg)
@@ -54,34 +48,34 @@ func (d *doc) walk(segs []hew.Segment) (ref, int, error) {
 	return cur, -1, nil
 }
 
-func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
+func (d *doc) step(cur ref, seg hew.Segment) (ref, *hewresolve.Err) {
 	if seg.Kind == hew.SegComment {
 		return d.stepComment(cur, seg)
 	}
 	if cur.node == nil {
-		return ref{}, &resolveErr{detail: "a comment node has no children"}
+		return ref{}, &hewresolve.Err{Detail: "a comment node has no children"}
 	}
 	switch seg.Kind {
 	case hew.SegKey:
 		if cur.node.kind != kObj {
-			return ref{}, &resolveErr{detail: fmt.Sprintf("%q: not an object", seg.Name)}
+			return ref{}, &hewresolve.Err{Detail: fmt.Sprintf("%q: not an object", seg.Name)}
 		}
 		if m := cur.node.memberNamed(seg.Name); m != nil {
 			return ref{node: m.value, parent: cur.node, member: m}, nil
 		}
-		return ref{}, &resolveErr{detail: fmt.Sprintf("no key %q", seg.Name)}
+		return ref{}, &hewresolve.Err{Detail: fmt.Sprintf("no key %q", seg.Name)}
 	case hew.SegIndex:
 		if cur.node.kind != kArr {
-			return ref{}, &resolveErr{detail: "not an array"}
+			return ref{}, &hewresolve.Err{Detail: "not an array"}
 		}
 		if seg.Index < 0 || seg.Index >= len(cur.node.elems) {
-			return ref{}, &resolveErr{detail: fmt.Sprintf("index %d out of range", seg.Index)}
+			return ref{}, &hewresolve.Err{Detail: fmt.Sprintf("index %d out of range", seg.Index)}
 		}
 		e := cur.node.elems[seg.Index]
 		return ref{node: e.value, parent: cur.node, elem: e}, nil
 	case hew.SegMatch:
 		if cur.node.kind != kArr {
-			return ref{}, &resolveErr{detail: "not an array"}
+			return ref{}, &hewresolve.Err{Detail: "not an array"}
 		}
 		var found *element
 		var cands []hew.Value
@@ -99,14 +93,14 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 		}
 		switch {
 		case count == 0:
-			return ref{}, &resolveErr{detail: hew.NoMatchDetail(seg, cands)}
+			return ref{}, &hewresolve.Err{Detail: hew.NoMatchDetail(seg, cands)}
 		case count > 1:
-			return ref{}, &resolveErr{ambiguous: true, detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
+			return ref{}, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Detail: fmt.Sprintf("%d elements match %s", count, seg.String())}
 		}
 		return ref{node: found.value, parent: cur.node, elem: found}, nil
 	case hew.SegHash:
 		if cur.node.kind != kArr {
-			return ref{}, &resolveErr{detail: "not an array"}
+			return ref{}, &hewresolve.Err{Detail: "not an array"}
 		}
 		tokenAt := func(k int) (string, bool) {
 			v, has := d.comparedValue(cur.node.elems[k].value, hew.Segment{})
@@ -125,23 +119,23 @@ func (d *doc) step(cur ref, seg hew.Segment) (ref, error) {
 			}
 		}
 		if len(cands) == 0 {
-			return ref{}, &resolveErr{detail: "no element matches " + seg.String()}
+			return ref{}, &hewresolve.Err{Detail: "no element matches " + seg.String()}
 		}
 		// A collision is decided by the scored locator, shared with every binding.
 		pick := hew.Locate(cands, len(cur.node.elems), d.adv)
 		if !pick.OK {
-			return ref{}, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
+			return ref{}, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Detail: pick.Explain(seg)}
 		}
 		return ref{node: cur.node.elems[pick.Index].value, parent: cur.node, elem: cur.node.elems[pick.Index]}, nil
 	default:
-		return ref{}, &resolveErr{detail: fmt.Sprintf("segment kind %v has no JSONC representation (§8.2)", seg.Kind)}
+		return ref{}, &hewresolve.Err{Detail: fmt.Sprintf("segment kind %v has no JSONC representation (§8.2)", seg.Kind)}
 	}
 }
 
 // stepComment resolves a §4.5b comment address: `#t` is the trailing comment
 // of the member or element just stepped through, `#hew:comment=<hex>` the
 // standalone comment of the container just stepped to whose text hashes to it.
-func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
+func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, *hewresolve.Err) {
 	if seg.Trailing {
 		switch {
 		case cur.member != nil && cur.member.trailing != nil:
@@ -149,16 +143,16 @@ func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
 		case cur.elem != nil && cur.elem.trailing != nil:
 			return ref{cmt: cur.elem.trailing, parent: cur.parent, elem: cur.elem}, nil
 		}
-		return ref{}, &resolveErr{detail: "no trailing comment here"}
+		return ref{}, &hewresolve.Err{Detail: "no trailing comment here"}
 	}
 	if cur.node == nil || !cur.node.container() {
-		return ref{}, &resolveErr{detail: "a comment address names a container's comments"}
+		return ref{}, &hewresolve.Err{Detail: "a comment address names a container's comments"}
 	}
 	if seg.Hash == "" {
 		// The ordinal is gone (§4.5b) and the parser refuses it, so this is
 		// only reachable from a Segment built in code. Refusing beats falling
 		// back to Index, which would resolve position 0 for every such segment.
-		return ref{}, &resolveErr{detail: "a comment is addressed by the digest of its text, `#hew:comment=<hex>`"}
+		return ref{}, &hewresolve.Err{Detail: "a comment is addressed by the digest of its text, `#hew:comment=<hex>`"}
 	}
 	// Addressed by the digest of its TEXT. Identical comments collide just as
 	// identical set members do, and are resolved by the same scored locator
@@ -171,11 +165,11 @@ func (d *doc) stepComment(cur ref, seg hew.Segment) (ref, error) {
 		}
 	}
 	if len(cands) == 0 {
-		return ref{}, &resolveErr{detail: "no comment matches " + seg.String()}
+		return ref{}, &hewresolve.Err{Detail: "no comment matches " + seg.String()}
 	}
 	pick := hew.Locate(cands, len(all), d.adv)
 	if !pick.OK {
-		return ref{}, &resolveErr{ambiguous: true, detail: pick.Explain(seg)}
+		return ref{}, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Detail: pick.Explain(seg)}
 	}
 	return ref{cmt: all[pick.Index], parent: cur.node}, nil
 }
@@ -211,9 +205,9 @@ func (d *doc) resolveFull(target string, path hew.Path, line int) (ref, error) {
 	if err == nil {
 		return r, nil
 	}
-	re := err.(*resolveErr)
+	re := err
 	code := hewerr.CodeNoMatch
-	if re.ambiguous {
+	if re.Code == hewerr.CodeAmbiguousMatch {
 		code = hewerr.CodeAmbiguousMatch
 	}
 	failPath := path

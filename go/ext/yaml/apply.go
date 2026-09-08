@@ -7,6 +7,7 @@ import (
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 	"github.com/benjaminabbitt/hew/go/internal/hewmatch"
+	"github.com/benjaminabbitt/hew/go/internal/hewresolve"
 )
 
 // Apply is the YAML binding's apply half (§8.3, Appendix A.4's Applier.Apply
@@ -155,18 +156,6 @@ type ref struct {
 // resolveErr classifies a step failure. final marks a code the caller must
 // not reinterpret: HEW012, HEW040 and the merge-key HEW013 are decided at the
 // step that raised them, not by the transform that asked.
-type resolveErr struct {
-	code   hewerr.Code
-	detail string
-	final  bool
-}
-
-func (e *resolveErr) Error() string { return e.detail }
-
-func noMatch(format string, args ...any) *resolveErr {
-	return &resolveErr{code: hewerr.CodeNoMatch, detail: fmt.Sprintf(format, args...)}
-}
-
 // resolve walks a whole path from the document root, translating a step
 // failure into a hewerr.Error naming the prefix that failed. The third result
 // is the step's finality: a final error was decided by the step that raised
@@ -177,9 +166,9 @@ func (r *run) resolve(p hew.Path, mode hew.AnchorMode, line int) (*ref, *hewerr.
 	for i, seg := range p.Segments() {
 		next, err := r.step(cur, seg, mode)
 		if err != nil {
-			re := err.(*resolveErr)
+			re := err
 			failed := hew.RootPath().Append(p.Segments()[:i+1]...)
-			return nil, r.err(re.code, failed.String(), line, re.detail), re.final
+			return nil, r.err(re.Code, failed.String(), line, re.Detail), re.Final
 		}
 		cur = next
 	}
@@ -187,13 +176,13 @@ func (r *run) resolve(p hew.Path, mode hew.AnchorMode, line int) (*ref, *hewerr.
 }
 
 // step resolves one segment against the current node.
-func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error) {
+func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, *hewresolve.Err) {
 	if seg.Kind == hew.SegComment {
 		return r.stepComment(cur, seg)
 	}
 	n := cur.node
 	if n == nil {
-		return nil, noMatch("cannot descend into a comment node")
+		return nil, hewresolve.NoMatch("cannot descend into a comment node")
 	}
 	if n.kind == nAlias {
 		followed, err := r.followAlias(n, mode)
@@ -205,7 +194,7 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 	switch seg.Kind {
 	case hew.SegKey:
 		if n.kind != nMap {
-			return nil, noMatch("%q: not a mapping", seg.Name)
+			return nil, hewresolve.NoMatch("%q: not a mapping", seg.Name)
 		}
 		if e := n.lookup(seg.Name); e != nil {
 			return &ref{node: e.val, parent: n, entry: e}, nil
@@ -213,16 +202,16 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 		return r.stepMerged(n, seg, mode)
 	case hew.SegIndex:
 		if n.kind != nSeq {
-			return nil, noMatch("not a sequence")
+			return nil, hewresolve.NoMatch("not a sequence")
 		}
 		if seg.Index < 0 || seg.Index >= len(n.elems) {
-			return nil, noMatch("index %d out of range", seg.Index)
+			return nil, hewresolve.NoMatch("index %d out of range", seg.Index)
 		}
 		el := n.elems[seg.Index]
 		return &ref{node: el.val, parent: n, elem: el}, nil
 	case hew.SegMatch:
 		if n.kind != nSeq {
-			return nil, noMatch("not a sequence")
+			return nil, hewresolve.NoMatch("not a sequence")
 		}
 		var found *elem
 		var cands []hew.Value
@@ -242,15 +231,15 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 		case 0:
 			// O46: name the near miss and its type (§10.3), in the core's
 			// wording so every binding says it the same way.
-			return nil, noMatch("%s", hew.NoMatchDetail(seg, cands))
+			return nil, hewresolve.NoMatch("%s", hew.NoMatchDetail(seg, cands))
 		case 1:
 			return &ref{node: found.val, parent: n, elem: found}, nil
 		}
-		return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true,
-			detail: fmt.Sprintf("%d elements match %s; hew will not pick one (§6.4.2)", count, seg.String())}
+		return nil, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Final: true,
+			Detail: fmt.Sprintf("%d elements match %s; hew will not pick one (§6.4.2)", count, seg.String())}
 	case hew.SegHash:
 		if n.kind != nSeq {
-			return nil, noMatch("not a sequence")
+			return nil, hewresolve.NoMatch("not a sequence")
 		}
 		tokenAt := func(k int) (string, bool) {
 			v, has := r.d.comparedValue(n.elems[k].val, hew.Segment{})
@@ -269,25 +258,25 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 			}
 		}
 		if len(cands) == 0 {
-			return nil, noMatch("no element matches %s", seg.String())
+			return nil, hewresolve.NoMatch("no element matches %s", seg.String())
 		}
 		// A collision is decided by the scored locator, shared with every binding.
 		pick := hew.Locate(cands, len(n.elems), r.adv)
 		if !pick.OK {
-			return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true, detail: pick.Explain(seg)}
+			return nil, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Final: true, Detail: pick.Explain(seg)}
 		}
 		return &ref{node: n.elems[pick.Index].val, parent: n, elem: n.elems[pick.Index]}, nil
 	}
-	return nil, noMatch("segment kind %v has no YAML representation (§8.3)", seg.Kind)
+	return nil, hewresolve.NoMatch("segment kind %v has no YAML representation (§8.3)", seg.Kind)
 }
 
 // stepMerged handles a key a mapping has only via "<<:" (§8.3). Reading or
 // writing it needs an explicit policy, because rewriting the anchor changes
 // every use site and forking changes none of the others.
-func (r *run) stepMerged(n *ynode, seg hew.Segment, mode hew.AnchorMode) (*ref, error) {
+func (r *run) stepMerged(n *ynode, seg hew.Segment, mode hew.AnchorMode) (*ref, *hewresolve.Err) {
 	e, holder, anchor := r.d.mergedLookup(n, seg.Name)
 	if e == nil {
-		return nil, noMatch("no key %q", seg.Name)
+		return nil, hewresolve.NoMatch("no key %q", seg.Name)
 	}
 	switch mode {
 	case hew.AnchorRewrite:
@@ -303,47 +292,47 @@ func (r *run) stepMerged(n *ynode, seg hew.Segment, mode hew.AnchorMode) (*ref, 
 	// deciding pair is yaml/alias-ambiguous (two sites) and
 	// yaml/merge-key-remove (one).
 	if r.d.aliases[anchor] > 1 {
-		return nil, &resolveErr{code: hewerr.CodeAnchorAmbiguity, final: true,
-			detail: fmt.Sprintf("%q here comes from the anchor &%s, aliased at %d sites; "+
+		return nil, &hewresolve.Err{Code: hewerr.CodeAnchorAmbiguity, Final: true,
+			Detail: fmt.Sprintf("%q here comes from the anchor &%s, aliased at %d sites; "+
 				"add \"! anchor rewrite\" to edit the anchor definition or \"! anchor fork\" to materialize this site (§8.3)",
 				seg.Name, anchor, r.d.aliases[anchor])}
 	}
-	return nil, &resolveErr{code: hewerr.CodeNoMatch, final: true,
-		detail: fmt.Sprintf("%q is present here only via the merge key \"<<: *%s\"; an inherited key is not present at this site "+
+	return nil, &hewresolve.Err{Code: hewerr.CodeNoMatch, Final: true,
+		Detail: fmt.Sprintf("%q is present here only via the merge key \"<<: *%s\"; an inherited key is not present at this site "+
 			"and cannot be removed, only shadowed (§8.3)", seg.Name, anchor)}
 }
 
 // followAlias resolves an alias node to the node it names, under the
 // transform's anchor policy.
-func (r *run) followAlias(n *ynode, mode hew.AnchorMode) (*ynode, error) {
+func (r *run) followAlias(n *ynode, mode hew.AnchorMode) (*ynode, *hewresolve.Err) {
 	name := n.y.Value
 	switch mode {
 	case hew.AnchorRewrite:
 		target, ok := r.d.anchors[name]
 		if !ok {
-			return nil, noMatch("alias *%s names no anchor in this document", name)
+			return nil, hewresolve.NoMatch("alias *%s names no anchor in this document", name)
 		}
 		return target, nil
 	case hew.AnchorFork:
-		return nil, &resolveErr{code: hewerr.CodeInexpressible, final: true,
-			detail: fmt.Sprintf("forking the whole aliased node *%s is not expressible in this binding; "+
+		return nil, &hewresolve.Err{Code: hewerr.CodeInexpressible, Final: true,
+			Detail: fmt.Sprintf("forking the whole aliased node *%s is not expressible in this binding; "+
 				"fork applies to a merge-inherited key (§8.3)", name)}
 	}
-	return nil, &resolveErr{code: hewerr.CodeAnchorAmbiguity, final: true,
-		detail: fmt.Sprintf("the path resolves at the alias *%s; add \"! anchor rewrite\" or \"! anchor fork\" (§8.3)", name)}
+	return nil, &hewresolve.Err{Code: hewerr.CodeAnchorAmbiguity, Final: true,
+		Detail: fmt.Sprintf("the path resolves at the alias *%s; add \"! anchor rewrite\" or \"! anchor fork\" (§8.3)", name)}
 }
 
 // stepComment resolves a comment address (§4.5b): a `#hew:comment=<hex>`
 // fragment selects the standalone comment of the current container whose text
 // hashes to that digest, "#t" the trailing comment on the current node.
-func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, error) {
+func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, *hewresolve.Err) {
 	if cur.node == nil {
-		return nil, noMatch("no node to attach a comment address to")
+		return nil, hewresolve.NoMatch("no node to attach a comment address to")
 	}
 	if seg.Trailing {
 		c := r.d.trailingComment(cur.node)
 		if c == nil {
-			return nil, noMatch("no trailing comment here")
+			return nil, hewresolve.NoMatch("no trailing comment here")
 		}
 		return &ref{comment: c, parent: cur.parent}, nil
 	}
@@ -351,7 +340,7 @@ func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, error) {
 		// The ordinal is gone (§4.5b) and the parser refuses it, so this is
 		// only reachable from a Segment built in code. Refusing beats falling
 		// back to Index, which would resolve position 0 for every such segment.
-		return nil, noMatch("a comment is addressed by the digest of its text, `#hew:comment=<hex>`")
+		return nil, hewresolve.NoMatch("a comment is addressed by the digest of its text, `#hew:comment=<hex>`")
 	}
 	// Addressed by the digest of its TEXT. Identical comments collide just as
 	// identical set members do, and are resolved by the same scored locator
@@ -364,11 +353,11 @@ func (r *run) stepComment(cur *ref, seg hew.Segment) (*ref, error) {
 		}
 	}
 	if len(cands) == 0 {
-		return nil, noMatch("no comment matches %s", seg.String())
+		return nil, hewresolve.NoMatch("no comment matches %s", seg.String())
 	}
 	pick := hew.Locate(cands, len(comments), r.adv)
 	if !pick.OK {
-		return nil, &resolveErr{code: hewerr.CodeAmbiguousMatch, final: true, detail: pick.Explain(seg)}
+		return nil, &hewresolve.Err{Code: hewerr.CodeAmbiguousMatch, Final: true, Detail: pick.Explain(seg)}
 	}
 	return &ref{comment: comments[pick.Index], parent: cur.node}, nil
 }
