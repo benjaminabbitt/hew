@@ -85,7 +85,8 @@ apply flags:
 diff flags:
   -o, --output FILE     write the patch to FILE instead of stdout
       --format FORMAT   override format detection
-      --context N       context radius (default 1)
+  -U, --context N       asserting context radius (default 1, or "all")
+      --hint-context N  radius for the non-asserting ~ hint lines (default 3, or "all")
 
 exit codes:
   0  applied
