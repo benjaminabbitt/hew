@@ -379,7 +379,7 @@ needed nor interpreted there, because nothing inside quotes is being disambiguat
 /paths/"*"                       the key "*" — a real tsconfig key (§4.7)
 /x/""                            the empty-string key (RFC 6901's "/")
 /x/"code:0"                      the key "code:0" — NOT a Markdown block ordinal
-/x/"a?"                          the key "a?" — the only spelling of it (§4.7)
+/x/a?                            the key "a?" — `?` means nothing in a path (§4.7)
 ```
 
 **The canonical-rendering rule, and it is normative.** An implementation that renders a path
@@ -766,13 +766,14 @@ hunk's anchor":
 
 Some spellings are `HEW001` even though the grammar above generates nothing for them. Two are
 **reserved** — held for an extension this spec already names — and one is **retired**, withdrawn
-after it shipped. Both kinds are refused for the same reason, stated once below.
+after it shipped. A reservation is refused; the retirement no longer is, and the difference
+between the two is stated below.
 
 | Refused | Why | Literal spelling |
 |---|---|---|
 | A key-match **field** ending `<`, `>` or `!` | Reserved: comparison operators, the [O6](#ratified-by-the-coordinator-2026-08-14) extension | `/x/"count>"=5` |
 | A bare `*` segment | Reserved: a wildcard segment | `/paths/"*"` |
-| A bare segment ending `?` | Retired: the optional segment | `/x/"a?"` |
+| ~~A bare segment ending `?`~~ | Retired: the optional segment. **No longer refused** — see below | not needed: `/x/a?` |
 
 **Ratified ([O44](#p5--the-api-ratification-2026-08-14)).** The first is not speculative
 tidiness: `count>=5` **parses today** as a match on a field named `count>` against the value
@@ -784,7 +785,7 @@ The second is the same trade with a real literal behind it — `*` is a genuine 
 `tsconfig.json` `paths` map — which is exactly why this reservation is affordable only now
 that [O41](#p5--the-api-ratification-2026-08-14) gives every literal a spelling.
 
-**The third is retired, and the refusal is the point.** A trailing `?` once meant "match it, or
+**The third is retired, and `?` now means nothing at all.** A trailing `?` once meant "match it, or
 create it". It was parsed, position-checked, compared and rendered, and read by no resolver, so
 every patch that carried one got exactly the `HEW013 no-match` it was written to avoid. What it
 promised is an **operation**, and hew already has it twice over: `/server/tls?` is `! default`
@@ -792,27 +793,38 @@ promised is an **operation**, and hew already has it twice over: `/server/tls?` 
 the value. Addressing says *which node*; creating is something a patch **does**, and two
 spellings for one behaviour is how two sources of one truth begin to disagree.
 
-**A withdrawn spelling must be refused, not merely unhandled.** `?` is an ordinary character in
-a key, so a `?` that simply stopped being a flag would fall through to `key` — the floor of the
-grammar — and `/server/tls?` would address a key literally spelled `tls?`: no error, just the
-wrong node. That is strictly worse than the construct it replaced, and it is not hypothetical;
-it is what the retired `#<n>` comment ordinal (§4.5b) does when it is not refused. **Every
-spelling this spec withdraws is refused explicitly, for as long as its fall-through would be
-silent.**
+**A withdrawn spelling is refused only while its fall-through would surprise someone.** `?` is
+an ordinary character in a key, so a `?` that simply stopped being a flag falls through to
+`key` — the floor of the grammar — and `/server/tls?` addresses a key literally spelled `tls?`.
+While patches written against the optional segment were still in circulation that was a silent
+mis-addressing, and the spelling was refused so that such a patch got a message naming its
+replacement instead of a bare `HEW013 no-match`.
 
-**Where the refusal sits is normative**, because it decides what stays addressable. A trailing
-`?` is refused **below** an extension's claim in the segment dispatch (§8.8): it is not a shape
-an extension might own but a suffix on an otherwise ordinary token, and prose headings end in a
-question mark all the time. `/# Is it safe?` is a heading whose text ends in `?`, and an
-extension that claims the token receives it whole. Refusing above the claim would make that
-heading unaddressable; stripping the `?` before the claim — which is what the optional segment
-did — addressed the heading `Is it safe`, which the document does not contain.
+**That refusal was scaffolding, and it has been removed.** It bought a better diagnostic during
+a transition and charged a permanent price for it: a key that genuinely ends in `?` had to be
+quoted for as long as the rule lived, and `?` stayed reserved in a grammar where it carries no
+meaning. Transitional scaffolding becomes load-bearing by default, because nobody revisits a
+rule that is merely working. So `/server/tls?` is now the key `tls?`, exactly as `/server/tls!`
+is the key `tls!`, and **no rule of this grammar mentions `?`**.
+
+What still holds is the general form: **a spelling this spec withdraws is refused explicitly
+for as long as its fall-through would be silently wrong** — which is why the retired `#<n>`
+comment ordinal (§4.5b) is still refused, and why this one is not any more.
+
+**An extension still receives the whole token**, and that is what made the retirement safe to
+complete. A trailing `?` is a suffix on an otherwise ordinary token rather than a shape an
+extension might own, and prose headings end in a question mark all the time. `/# Is it safe?`
+is a heading whose text ends in `?`, and the extension claiming that token receives it entire.
+Stripping the `?` before the claim — which is what the optional segment did — addressed the
+heading `Is it safe`, which the document does not contain. Nothing strips it now, at any
+position in the dispatch (§8.8).
 
 **The quoted form is the permanent escape hatch**: any token this spec reserves or retires, now
 or later, remains addressable as a literal by quoting it, so neither a reservation nor a
 withdrawal can make a real document unpatchable. A key that really does end in `?` is written
-`/x/"a?"`, and §4.1's canonical-rendering rule emits exactly that spelling, which is why the
-bijection survives the refusal.
+`/x/a?` — bare, because nothing about that spelling reads back as anything else, and §4.1's
+canonical-rendering rule quotes only what would. The bijection holds either way; the quoted
+form stays legal, as it is for any key.
 
 ---
 
@@ -1628,36 +1640,34 @@ affordance rather than an accident of implementation. In order, a segment is rea
 4. the retired `#<n>` comment ordinal, which is refused (§4.5b);
 5. `-`, RFC 6901's append token (§4.1);
 6. **an extension's claimed forms** (this section);
-7. a trailing `?`, the retired optional segment, which is refused (§4.7);
-8. `#<namespace>:…` fragments — `#hew:sha256=`, `#hew:comment=` (§4.5b, §4.5c);
-9. index, key-match, key.
+7. `#<namespace>:…` fragments — `#hew:sha256=`, `#hew:comment=` (§4.5b, §4.5c);
+8. index, key-match, key.
 
 Three consequences follow, and all are intended.
 
 **An extension may layer over a `#` fragment form, including one spelled like hew's own.**
-Claims are consulted at step 6, ahead of the core's fragment forms at step 8, so an extension
+Claims are consulted at step 6, ahead of the core's fragment forms at step 7, so an extension
 that wants to interpret a `#`-prefixed shape gets it first. This is the layering point for a
 format whose own notation uses `#` — a Markdown heading (`# Setup`) already relies on it. An
 implementation MUST NOT "correct" this ordering to give hew's fragments precedence: doing so
 would close the extension surface this section exists to provide.
 
-**A refusal below the claim is one an extension can pre-empt, and that is why the trailing `?`
-sits at step 7 rather than beside the other refusal at step 4.** The two retired spellings are
-refused in different places because they are different shapes. `#<n>` is a whole segment, and
-no format should be able to bring it back, so it is refused above every claim. A trailing `?`
-is not a shape at all — it is a suffix on an otherwise ordinary token — and a format whose own
-vocabulary ends in one has a legitimate claim on it: `/# Is it safe?` is a Markdown heading
-whose text ends in a question mark. A claimed form therefore receives the token **whole**, and
-only what reaches the core's own fallbacks is refused. The alternative was measured and
-rejected: stripping the `?` before the claim, which is what the optional segment did, silently
-addressed the heading `Is it safe`.
+**A claimed form receives the token WHOLE, and this is where the two retired spellings parted
+company.** `#<n>` is a whole segment, and no format should be able to bring it back, so it is
+refused above every claim at step 4. A trailing `?` was never a shape at all — a suffix on an
+otherwise ordinary token — and a format whose own vocabulary ends in one has a legitimate claim
+on it: `/# Is it safe?` is a Markdown heading whose text ends in a question mark. It is why the
+`?` refusal, while it stood, sat BELOW the claim; and it is why removing that refusal (§4.7)
+took no step out of an extension's reach. The alternative was measured and rejected: stripping
+the `?` before the claim, which is what the optional segment did, silently addressed the
+heading `Is it safe`.
 
 **An extension may NOT reinterpret what sits above it.** The quoted form, `#t` and `-` are
 resolved at steps 1–5 and never reach a claim. Those are the spellings whose meaning is fixed
 across every format, and a patch author must be able to read them without knowing which
 extensions are linked.
 
-The namespace is what keeps step 7 collision-free without needing precedence: `hew` is the
+The namespace is what keeps step 6 collision-free without needing precedence: `hew` is the
 core's, and `#<ext>:…` is reserved for extension namespaces (§4.5c). An extension therefore
 has two ways in — claim the shape outright at step 6, or take a namespace at step 7 — and the
 second needs no claim at all.
@@ -4421,7 +4431,7 @@ fixes addresses that are wrong on disk today.
 
 | # | Question | Ruling |
 |---|---|---|
-| **O41** | `Path.String()` is not injective: a key like `@scope/pkg` renders `/@scope~1pkg` and reparses as a **marker**; a digit-only key reparses as an **index**; `-` as **append**; a trailing `?` flipped a match into create-if-absent (that construct is now retired, §4.7, and a key ending `?` is quoted because the bare spelling is refused); an empty key vanishes into the root. | **A quoted-key segment form, plus a normative canonical-rendering rule** (§4, §4.1). A quoted segment is a key said literally, and `String()` MUST emit it for any key whose bare spelling would not reparse as the same segment. **`String()`↔`ParsePath` becomes a stated bijection.** **This is a live defect, not a hypothesis**: the differ builds key segments straight from the target's own keys and `.hewt` stores every address as this text, so a `package.json` with a scoped dependency produces a transform list whose addresses already mean something else. Also corrected here: §4.1's "RFC 6901, unchanged" was false at the root — hew spells the document `/` where RFC 6901 spells it `""`, and RFC's empty-key member had no hew spelling at all until this form. |
+| **O41** | `Path.String()` is not injective: a key like `@scope/pkg` renders `/@scope~1pkg` and reparses as a **marker**; a digit-only key reparses as an **index**; `-` as **append**; a trailing `?` flipped a match into create-if-absent (that construct is now retired, §4.7, and a key ending `?` needs no quoting because `?` means nothing); an empty key vanishes into the root. | **A quoted-key segment form, plus a normative canonical-rendering rule** (§4, §4.1). A quoted segment is a key said literally, and `String()` MUST emit it for any key whose bare spelling would not reparse as the same segment. **`String()`↔`ParsePath` becomes a stated bijection.** **This is a live defect, not a hypothesis**: the differ builds key segments straight from the target's own keys and `.hewt` stores every address as this text, so a `package.json` with a scoped dependency produces a transform list whose addresses already mean something else. Also corrected here: §4.1's "RFC 6901, unchanged" was false at the root — hew spells the document `/` where RFC 6901 spells it `""`, and RFC's empty-key member had no hew spelling at all until this form. |
 | **O42** | `Scalar.pathString()` quotes only when `Quoted` is set, so a programmatic string scalar `"8080"` renders `name=8080` and re-decodes as a **number**. | **Force-quote any string scalar whose bare rendering would not reparse identically** (§4.2) — the same bijection rule as O41, one level down. And in the API (A.0), `MatchKey(field, value string)` always produces a quoted string scalar, with `MatchKeyNumber`/`MatchKeyBool`/`MatchKeyNull` for typed comparisons, so **the comparison's type is visible at the construction site** rather than inferred from a value's shape. The differ already dodges this by quoting every string it emits, which is the fix generalized rather than invented. |
 | **O43** | How does a caller get a runtime value into a path? | **Typed holes: `At(pattern string, args ...SegmentArg)`** (A.0). Normatively: `At` parses **only the pattern** — literal spans go through the §4 grammar — and each `{}` consumes the next arg as a **structural `Segment` value slotted into the parsed skeleton**, never substituted into text and re-parsed. The invariant that follows is the ruling's whole point: **user data supplied through a typed constructor is never parsed as path text.** It enters as struct data, so there is no escaping step and **no injection channel** — a value cannot introduce a segment boundary, a key-match or an optional marker. The precedent is `database/sql`: parameters travel out-of-band from the statement text, and a placeholder is not a paste site. `SegmentArg` is a **sealed interface** (unexported method, implementable only inside the module); its constructors are `Key`, `Index`, `MatchKey` (always a quoted string scalar, [O42](#p5--the-addressing-language-review-2026-08-14)), `MatchKeyNumber`/`Bool`/`Null`, and `Quoted` — and **every string parameter to them is opaque data**. An address that is programmatic all the way down skips the pattern entirely: build a `Path` from the same constructors and pass it to `doc.AtPath(p)`. **Soundness depends on [O41](#p5--the-addressing-language-review-2026-08-14)**: a structural segment holding hostile data is safe in memory for free, but the path is later written into a `.hew`, a `.hewt` or an error message and read back, so without canonical rendering's bijection the injection prevented at construction would simply move to serialization. The pattern language is **§4-plus-holes, owned by `At`** — and since `{}` is a legal *key* spelling in bare §4, a literal `{}` key needs the quoted form or `AtPath`. A hole/argument count mismatch is an **immediate error, not a partial path**. String concatenation into `At` is documented as a **defect**, not guarded against. Recorded **rejected**: printf-style character-level escaping (an escaper cannot know which of key/field/value its argument stands for, and they escape differently), and concatenation-detection heuristics (false positives on legitimately-computed paths train the reader to route around the warning). |
 | **O44** | Should v0 reserve the tokens its own named extensions would need? | **Yes, two** (§4.7). A key-match **field** ending `<`, `>` or `!` is `HEW001`, reserved for [O6](#ratified-by-the-coordinator-2026-08-14)'s comparison operators — `count>=5` **parses today** as a match on a field named `count>`, a working address a later `>=` would silently reinterpret. A bare `*` segment is `HEW001`, reserved for a wildcard. Both are affordable **only because O41 gives every literal a spelling**: `*` is a real key in `tsconfig.json`, written `/paths/"*"`. The quoted form is named as the permanent escape hatch for any token this spec reserves later, so a reservation can never make a real document unpatchable. |
