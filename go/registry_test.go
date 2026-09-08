@@ -366,20 +366,20 @@ func TestClaimedSegmentParsesAndRoundTrips(t *testing.T) {
 
 // A form is offered the WHOLE token — there are no universal suffixes left to
 // strip — so `[server]?` is simply not a stanza, and what happens next is the
-// core's business. It is REFUSED rather than demoted to a key: a token ending
-// in `?` that reached the fallbacks would otherwise address a key literally
-// spelled `[server]?`, which is the silent mis-addressing the refusal exists to
-// prevent (§4.7). A form that does want a trailing `?` gets it — see
-// ext/markdown's heading test.
-func TestUnclaimedTokenEndingInQuestionMarkIsRefused(t *testing.T) {
+// core's business: it falls through to the key fallback and addresses the key
+// literally spelled `[server]?`. That is the ordinary outcome for any token no
+// form claims, and `?` is no longer special enough to change it (§4.7). A form
+// that does want a trailing `?` still gets it — see ext/markdown's heading
+// test, where the claim takes the whole token first.
+func TestUnclaimedTokenEndingInQuestionMarkIsAKey(t *testing.T) {
 	registerStanza(t)
 
-	_, err := ParsePath("/[server]?")
-	if err == nil {
-		t.Fatal(`ParsePath("/[server]?") succeeded; an unclaimed trailing "?" must be refused (§4.7)`)
+	p, err := ParsePath("/[server]?")
+	if err != nil {
+		t.Fatalf(`ParsePath("/[server]?"): %v`, err)
 	}
-	if !strings.Contains(err.Error(), `"[server]?"`) {
-		t.Fatalf("error %q does not offer the literal spelling as the escape hatch", err)
+	if seg := p.Segment(0); seg.Kind != SegKey || seg.Name != "[server]?" {
+		t.Fatalf("segment = %v/%q, want the key [server]?", seg.Kind, seg.Name)
 	}
 }
 

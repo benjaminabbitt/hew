@@ -22,9 +22,9 @@ import (
 // already provide the "create if absent" it promised.
 //
 // That measurement is why the optional segment was retired rather than wired
-// up (§4.7). `! default` is the spelling; the `?` is now a parse error, which
-// TestOptionalSegmentAddressIsRefused below pins so the redundancy cannot
-// quietly come back as a second way to say this.
+// up (§4.7). `! default` is the spelling, and it is the only one: `?` no
+// longer means anything in a path at all, which
+// TestOptionalSegmentAddressIsAnOrdinaryKey below pins.
 func TestDefaultCreatesAbsentTopLevelKey(t *testing.T) {
 	for _, c := range []struct {
 		format hew.FormatID
@@ -68,16 +68,26 @@ func TestDefaultCreatesAbsentTopLevelKey(t *testing.T) {
 	}
 }
 
-// TestOptionalSegmentAddressIsRefused is the other side of the ruling: the
-// spelling `! default` replaced is refused, in every format, rather than
-// silently addressing a key whose name ends in `?`. Two spellings for one
-// behaviour is how two sources of one truth start disagreeing, and a refusal is
-// what keeps the second from reappearing by accident.
-func TestOptionalSegmentAddressIsRefused(t *testing.T) {
+// TestOptionalSegmentAddressIsAnOrdinaryKey is the other side of the ruling.
+// `! default` is the spelling for "create if absent", and there is no second
+// one — but the way that is enforced is by `?` MEANING NOTHING, not by hew
+// reserving it. `/mcpServers?` therefore addresses a key whose name really is
+// `mcpServers?`, in every format, which is what any other punctuation in a key
+// already does.
+//
+// The refusal that stood here was migration scaffolding: it named the
+// replacement for a stale patch, and charged for that by keeping `?` reserved
+// in a grammar where it means nothing. What stops a second spelling coming
+// back is that `?` is not a flag, not that it is refused.
+func TestOptionalSegmentAddressIsAnOrdinaryKey(t *testing.T) {
 	for _, f := range []hew.FormatID{hew.FormatJSON, hew.FormatJSONC, hew.FormatYAML, hew.FormatTOML} {
 		t.Run(string(f), func(t *testing.T) {
-			if _, err := hew.ParsePathIn(f, "/mcpServers?"); err == nil {
-				t.Fatal(`ParsePathIn("/mcpServers?") succeeded; the optional segment is retired (§4.7)`)
+			p, err := hew.ParsePathIn(f, "/mcpServers?")
+			if err != nil {
+				t.Fatalf(`ParsePathIn("/mcpServers?"): %v`, err)
+			}
+			if seg := p.Segment(0); seg.Kind != hew.SegKey || seg.Name != "mcpServers?" {
+				t.Fatalf("segment = %v/%q, want the key mcpServers?", seg.Kind, seg.Name)
 			}
 		})
 	}

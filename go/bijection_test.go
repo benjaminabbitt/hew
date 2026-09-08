@@ -42,7 +42,6 @@ func adversarialKeys() []string {
 		"# Setup", "## Install", "#0", "#12", "#t", "#foo", "##0", // headings and comment addresses
 		`"quoted"`, `"unterminated`, // a key that opens with the literal form's own quote
 		"code:0", "para:1", "list:12", "notablock:0", "para:x", // block ordinals (§4.5)
-		"opt?", "?", "a?b", // refused as a bare segment (§4.7)
 		"a[1]", "a[]", "[0]", "a[1]b", // the retired IR-only [n] selector
 		"*", "**", "a*b", // O44's wildcard reservation
 
@@ -141,12 +140,15 @@ func TestCanonicalRenderingQuotesExactlyTheEnumeratedClasses(t *testing.T) {
 	// its SHAPE, so "08080" is quoted even though RFC 6901's index production
 	// would not have taken it.
 	quoted := []string{"", "-", "*", "8080", "0", "007", "08080", "@scope/pkg", "#0", "#t",
-		"# Setup", `"q"`, "code:0", "notablock:0", "a1:0", "_x-y:12", "opt?"}
+		"# Setup", `"q"`, "code:0", "notablock:0", "a1:0", "_x-y:12"}
 	bare := []string{"server", "left-pad", "8080x", "a/b", "a~b", "a=b",
 		"para:x", "a[]", "a[1", "0:0", "1a:0", ":0", "a:", "a:b", "-x", "true", "1.0", "{}",
 		// A trailing "[n]" is an ordinary key now that the IR-only ordinal
 		// selector is gone: it reparses as itself, so quoting it would be noise.
-		"a[1]", "a[12]"}
+		"a[1]", "a[12]",
+		// `?` carries no meaning in a path (§4.7), so a key holding or ending
+		// in one is spellable bare like any other.
+		"opt?", "?", "a?b"}
 	for _, k := range quoted {
 		if got := (Segment{Kind: SegKey, Name: k}).String(); !strings.HasPrefix(got, `"`) {
 			t.Errorf("key %q renders bare as %q; §4.1 requires the quoted form", k, got)
