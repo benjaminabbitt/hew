@@ -14,6 +14,25 @@
 // never edits and never asserts, and that an empty plan is a no-op rather than
 // an error. A binding that quietly stopped reparsing, or that treated a hint as
 // an assertion, would pass its own tests and disagree with every other format.
+//
+// WHERE THIS PACKAGE STOPS, and why, so the line is not redrawn by whoever
+// next reads a duplicate report. The op EVALUATORS — evalValue, evalTest,
+// evalCount, step — stay per-binding at 95%+ similarity, and that was weighed
+// rather than overlooked.
+//
+// They could be shared: a Go type parameter carries a binding's own ref
+// opaquely, and the evaluators never read its fields — every use hands it
+// straight back to the binding (matches, nodeKind, describe). What they need
+// is a dozen QUESTIONS about it, so sharing them means a twelve-method
+// interface per binding whose adapters are themselves near-identical. That
+// trades one duplicate for another and buys a single policy: what a failed
+// assert means (final, optional, converged, stale).
+//
+// The judgement was that the price is too high for that one policy. It is not
+// the same call as the loop above, which is shared precisely because its rules
+// are invisible when broken — a binding that stopped reparsing would pass its
+// own tests. An evaluator that diverges shows up as a wrong answer in the
+// corpus, so the copies are held honest by something other than being one copy.
 package hewapply
 
 import (
