@@ -94,10 +94,10 @@ func (r *run) evalValue(t hew.Transform) error {
 	if rf.comment != nil {
 		return r.testComment(t, rf)
 	}
-	if r.d.matches(rf.node, t.Value.Node()) {
+	if matches(rf.node, t.Value.Node()) {
 		return nil
 	}
-	if w, ok := r.pairedWrite(t.Path); ok && w.Op != hew.OpRemove && r.d.equals(rf.node, w.Value.Node()) {
+	if w, ok := r.pairedWrite(t.Path); ok && w.Op != hew.OpRemove && equals(rf.node, w.Value.Node()) {
 		return r.converge(t, w)
 	}
 	e := r.err(hewerr.CodeStaleTarget, t.Path.String(), t.PatchLine, "")
@@ -287,7 +287,7 @@ func (r *run) conflict(t hew.Transform, rf *ref) ([]edit, error) {
 	case hew.ConflictReplace:
 		return r.write(rf, t)
 	}
-	if t.Idempotent && r.d.equals(rf.node, t.Value.Node()) {
+	if t.Idempotent && equals(rf.node, t.Value.Node()) {
 		return nil, nil
 	}
 	if r.converged[t.Path.String()] {
@@ -347,7 +347,7 @@ func (r *run) planReplace(t hew.Transform) ([]edit, error) {
 		}
 		return nil, he
 	}
-	if rf.comment == nil && !rf.inherited && r.d.equals(rf.node, t.Value.Node()) {
+	if rf.comment == nil && !rf.inherited && equals(rf.node, t.Value.Node()) {
 		if t.Idempotent {
 			return nil, nil // converged; the file is already what the patch asks for
 		}

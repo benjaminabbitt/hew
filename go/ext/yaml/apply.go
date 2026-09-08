@@ -6,6 +6,7 @@ import (
 
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewmatch"
 )
 
 // Apply is the YAML binding's apply half (§8.3, Appendix A.4's Applier.Apply
@@ -232,7 +233,7 @@ func (r *run) step(cur *ref, seg hew.Segment, mode hew.AnchorMode) (*ref, error)
 				continue
 			}
 			cands = append(cands, v)
-			if scalarEq(v.Node(), scalarNode(seg.Value)) {
+			if scalarEq(v.Node(), hewmatch.ScalarNode(seg.Value)) {
 				found = el
 				count++
 			}
