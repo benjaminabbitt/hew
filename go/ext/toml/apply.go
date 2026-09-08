@@ -116,6 +116,11 @@ func unsupported(target string, t hew.Transform) error {
 	return nil
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func (r *run) err(code hewerr.Code, path string, line int, detail string) *hewerr.Error {
 	return &hewerr.Error{Code: code, Component: hewerr.ComponentApplier, Target: r.target,
 		Path: path, PatchLine: line, Detail: detail}

@@ -128,6 +128,11 @@ func (o DiffOptions) keyFields() []string {
 	return o.KeyFields
 }
 
+// One constructor per COMPONENT, and that is the point. The component is fixed
+// here so no call site can pass the wrong one or forget it; a single shared
+// helper taking it as a parameter would turn a compile-time fact into an
+// argument, which is the mistake this shape exists to prevent.
+// reprise:ignore
 func diffErr(code hewerr.Code, target, path, format string, args ...any) error {
 	return &hewerr.Error{
 		Code:      code,
