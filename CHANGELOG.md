@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.2.1
+
+A patch hew rendered for a sequence element with no identity field is one hew
+can now read back.
+
+### Fixed
+
+- **A sequence element with no usable identity field round-trips.** The differ
+  addresses such an element positionally, but nothing wrote that position into
+  the text, and the parser is purely textual — §9.1 lowering never opens a
+  target, so a position it was not given is one it cannot recover. Rendering a
+  patch and re-parsing it failed with `HEW001` against §6.4.2, which made the
+  render-then-reparse self-check any consumer performs on a computed reversal
+  fail outright.
+
+  The position advisory now carries that index: `~hew:at=` is written on an
+  element whose container has no usable identity field, and the parser resolves
+  it to the positional segment §6.4.3 already requires. A hand-written patch
+  that names no position is still refused — nothing can invent one.
+
+  The shape that exercises it is an element whose sole key holds an array, so
+  no scalar sits anywhere on it.
+
+### Clarified
+
+- §4.5c and the `At`/`Length` doc comment described the position advisory as
+  only ever disambiguating a value-hash collision. That is one of its two
+  roles; the other is being the whole address when no other one exists.
+  §6.4.2 and §6.4.3 are unchanged — they already required this outcome.
+
 ## v0.2.0
 
 The release that makes a patch locate by **identity** rather than by position,
