@@ -547,6 +547,23 @@ func TestParseLowering(t *testing.T) {
     path: /list
     value: []
 `,
+	}, {
+		// A sequence element whose sole key holds an array has no scalar-valued
+		// key (§6.4.2), so it cannot be addressed by identity; the `~hew:at=`
+		// advisory the differ writes (positionsNoIdentity, diff.go) is what lets
+		// identityPath (lower.go) fall back to a positional /hooks/0 address here.
+		name: "array-valued sole field element resolves via its written position advisory",
+		body: "@@ /hooks @@\n  { \"hooks\": [{\"type\": \"command\"}] } ~hew:at=0 ~hew:length=1\n+ { \"hooks\": [{\"type\": \"command2\"}] }\n",
+		want: `  - op: test
+    path: /hooks/0/hooks
+    value:
+      - {type: command}
+  - op: add
+    path: /hooks
+    after: /hooks/0
+    value:
+      hooks: [{type: command2}]
+`,
 	}}
 
 	for _, tc := range cases {
@@ -747,6 +764,12 @@ func TestParseErrors(t *testing.T) {
 		{"anchor arity", hdr + "@@ / @@\n! anchor fork rewrite\n- a: 1\n", hewerr.CodeParse, 6, "exactly one argument"},
 		{"surface value", hdr + "@@ / @@\n! surface inline\n+ a: 1\n", hewerr.CodeParse, 6, "`! surface` takes"},
 		{"element with no identity", hdr + "@@ /a @@\n  - inner:\n      deep: 1\n", hewerr.CodeParse, 6, "no usable identity field"},
+		// Same rule (§6.4.2), sole field holds an ARRAY rather than a nested map —
+		// the real-world shape (Claude Code's hooks.SessionStart, hooks.PostToolUse
+		// etc.: `{"hooks": [...]}`). With no `~hew:at=` advisory written, identityPath
+		// has nothing to fall back to and must still refuse this, exactly as it
+		// refuses the map-valued case above.
+		{"element with no identity, array-valued field, no position advisory", hdr + "@@ /a @@\n  - hooks:\n      - type: x\n", hewerr.CodeParse, 6, "no usable identity field"},
 		{"comment inside an added container", hdr + "@@ / @@\n+ server:\n+   # why\n+   port: 8080\n", hewerr.CodeInexpressible, 7, "no address in the IR"},
 		{"unreadable value", hdr + "@@ / @@\n  a: \"unterminated\n", hewerr.CodeParse, 6, "cannot read"},
 		{"empty table header", hdr + "@@ / @@\n  [[]]\n", hewerr.CodeParse, 6, "empty table header"},

@@ -166,8 +166,14 @@ type Transform struct {
 	// At and Length are the non-asserting POSITION advisory (satisfied-recoil):
 	// the addressed sequence element's index from the front (At) within a
 	// collection of this Length, spelled as trailing `~hew:at=`/`~hew:length=`
-	// tags. They never fail a match — they disambiguate a value-hash COLLISION (a
-	// duplicate scalar) and measure displacement. Both nil = no position advisory.
+	// tags (§4.5c). They serve two roles. Alongside a hash or key-match address
+	// they disambiguate a COLLISION (a repeated value or key) and measure
+	// displacement, never failing an already-successful match. With no other
+	// address at all — a sequence element with no usable §6.4.2 identity field —
+	// At IS the address: the parser is purely textual (§9.1) and never opens a
+	// target to count elements against, so a position it was not given in the
+	// text is one it can never recover on its own. Both nil = no position
+	// advisory.
 	At     *int
 	Length *int
 

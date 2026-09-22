@@ -566,16 +566,27 @@ Rules:
   absent other signal hew names the collision rather than picking one — the addressing half of
   loud staleness.
 
-**Position advisory — `~hew:at=<front> ~hew:length=<length>`.** A sequence element carries a
-second, non-asserting signal alongside its hash: its index from the front and the list's
-length, as trailing `~`+tagma tags on the element's line (`- beta ~hew:at=2 ~hew:length=3`). The
-hash is identity; the position disambiguates. When a value repeats, the digests collide and
-the position picks the meant element. The advisory can never *fail* a match; it only chooses
-among hash matches, so a keyless set (no position) still refuses a collision, and a unique
-element (one match) ignores it. `at`/`length` are integers, never a path, so they carry no `/`
-to fight the pointer splitter. `~` is the advisory margin's inline twin: `~ key`/`~
-#hew:sha256=…` name a neighbour on their own line, `~hew:key=value` annotates the line it
-trails.
+**Position advisory — `~hew:at=<front> ~hew:length=<length>`.** A sequence element carries this
+non-asserting signal on its line — its index from the front and the list's length, as trailing
+`~`+tagma tags (`- beta ~hew:at=2 ~hew:length=3`) — and it serves one of two roles depending on
+what other address the element already has:
+
+- **Alongside a hash address** (the case above): the hash is identity, the position
+  disambiguates. When a value repeats, the digests collide and the position picks the meant
+  element. The advisory can never *fail* a match here; it only chooses among hash matches, so a
+  keyless set with no position still refuses a collision, and a unique element (one match)
+  ignores it.
+- **Alone, when the element has no §6.4.2 identity field at all**: there is no hash and no
+  key-match to ride alongside, so `at` *is* the address — it resolves directly to the positional
+  segment (§6.4.3's `/tags/0`) that identity addressing has no alternative to for that element.
+  This is the one case a purely textual parser cannot supply for itself: §9.1's lowering never
+  opens a target to count elements against, so a position it was not given in the text is a
+  position it cannot recover. Writing `at` on the element's own line is what lets the parser
+  resolve the same address the differ could only ever have produced positionally.
+
+`at`/`length` are integers, never a path, so they carry no `/` to fight the pointer splitter. `~`
+is the advisory margin's inline twin: `~ key`/`~ #hew:sha256=…` name a neighbour on their own
+line, `~hew:key=value` annotates the line it trails.
 
 **One frame of reference: the before-image.** Every position advisory in a patch is indexed
 against a single document — the BEFORE-IMAGE, the state the patch is applied to. `at` is the

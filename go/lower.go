@@ -292,18 +292,23 @@ func (l *lowerer) emitAdd(path Path, nodes []*mirrorEntry, i, pairedWith int, q 
 		l.push(Transform{Op: OpReplace, Path: target, Value: val}, e, q)
 		return nil
 	}
-	target, err := l.entryPath(path, e, false)
-	if err != nil {
-		return err
-	}
-	t := Transform{Op: OpAdd, Value: val, Path: target}
+	t := Transform{Op: OpAdd, Value: val}
 	if positional(e) {
 		// A sequence element — or a comment, which is keyless in the same way —
 		// is added to its container; the address of the element it lands beside
 		// carries the position (§9.6 placement). There is nothing else it COULD
 		// name: the digest address of §4.5b identifies a comment that already
-		// exists, and an add is precisely the case where none does.
+		// exists, and an add is precisely the case where none does. Its OWN
+		// identity is never consulted — asking for one here would refuse an add
+		// whose new element has no §6.4.2 identity field (e.g. its sole key
+		// holds an array), even though nothing downstream would have used it.
 		t.Path = path
+	} else {
+		target, err := l.entryPath(path, e, false)
+		if err != nil {
+			return err
+		}
+		t.Path = target
 	}
 	before, after, anchor, err := l.placement(path, nodes, i)
 	if err != nil {
@@ -603,8 +608,10 @@ func entrySegments(path Path, e *mirrorEntry, before bool) (Path, error) {
 
 // identityPath addresses a sequence element by identity rather than by
 // position (§4.2, §6.4.2): `=value` for a scalar element, `field=value` for a
-// keyed one. The parser has no target to count against, so a positional
-// address is not available to it even as a fallback.
+// keyed one. The parser has no target to count against, so it cannot COMPUTE
+// a positional address by counting, even as a fallback — but it can still
+// READ one that is already written into the text (a `~hew:at=N` advisory,
+// below), which costs it no count at all.
 func identityPath(path Path, e *mirrorEntry) (Path, error) {
 	if _, ok := elementScalar(e); ok {
 		// A scalar (set) element is addressed by a hash of its value, never by the
@@ -614,6 +621,17 @@ func identityPath(path Path, e *mirrorEntry) (Path, error) {
 	}
 	name, val, ok := elementKeyField(e)
 	if !ok {
+		// No scalar-valued key exists on this element (§6.4.2) — e.g. its sole
+		// field holds an array or a nested map. diff.go's addressing hits the
+		// same wall and falls back to indexing the element (childPath's default
+		// case), writing that index into the text as a `~hew:at=` advisory
+		// (positionsNoIdentity) precisely so this branch does not have to guess
+		// it. Only fall back when the advisory is present: a hand-written patch
+		// that names no position at all is still an error, because nothing here
+		// can invent one.
+		if at := adviceInt(e.advice, "hew", "at"); at != nil {
+			return path.Append(Segment{Kind: SegIndex, Index: *at}), nil
+		}
 		return Path{}, parseErr(e.line, path.String(),
 			"sequence element has no usable identity field: a key must be present with a scalar value (§6.4.2)")
 	}

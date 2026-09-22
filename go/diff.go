@@ -374,7 +374,7 @@ func pairState(o, n *DiffChild) slotState {
 // are the same list.
 func (d *differ) emit(addr addressing, slots []slot) {
 	show := d.window(addr, slots)
-	pos, dup := positions(addr, slots)
+	pos, needsPos := positions(addr, slots)
 	for i := range slots {
 		if !show[i] {
 			continue
@@ -415,7 +415,7 @@ func (d *differ) emit(addr addressing, slots []slot) {
 			continue
 		}
 		tests := addr.tests(&slots[i])
-		if p, ok := pos[i]; ok && dup[i] {
+		if p, ok := pos[i]; ok && needsPos[i] {
 			for j := range tests {
 				tests[j].At, tests[j].Length = intPtr(p.at), intPtr(p.length)
 			}
@@ -448,12 +448,14 @@ func (d *differ) emit(addr addressing, slots []slot) {
 		default:
 			continue
 		}
-		// Written where it DECIDES something: on an element whose value repeats
-		// (so its digest alone cannot say which element is meant), and ALWAYS on
-		// an add, whose anchor index is what later transforms in this collection
+		// Written where it DECIDES something: on an element that cannot resolve
+		// by its own content alone — because its value repeats (the digest
+		// doesn't say which element is meant) or because it has no usable
+		// identity field at all (§6.4.2; positionsNoIdentity) — and ALWAYS on an
+		// add, whose anchor index is what later transforms in this collection
 		// migrate their own coordinates against (§4.5e) even when that anchor is
 		// itself unique.
-		if p, ok := pos[advisorySlot]; ok && (dup[advisorySlot] || slots[i].state == slotAdded) {
+		if p, ok := pos[advisorySlot]; ok && (needsPos[advisorySlot] || slots[i].state == slotAdded) {
 			t.At, t.Length = intPtr(p.at), intPtr(p.length)
 		}
 		d.out = append(d.out, t)
@@ -489,15 +491,32 @@ type elemPos struct{ at, length int }
 
 func intPtr(n int) *int { return &n }
 
-// positions computes the per-slot position advisory for a DUPLICATE by-value
-// scalar array (satisfied-recoil): a removed/replaced element carries its index
-// among the OLD elements, an added element its index among the NEW ones, each
-// with that side's length, so a value that collides on its digest stays
-// resolvable. Nil for every other addressing — unique arrays need no position.
+// positions computes the per-slot position advisory for an addressing that
+// cannot resolve every element from its own content alone: a DUPLICATE
+// by-value scalar array, where several elements share a digest, or a sequence
+// with no usable §6.4.2 identity field at all, where no element has one.
+// Both write position into the patch TEXT (`~hew:at=N ~hew:length=M`,
+// render.go's withAdvice) because the parser never reads a target to count
+// against (§9.1's lowering is purely textual) and so cannot recover a
+// position that was left unwritten. Nil for every other addressing — an
+// addressing that already resolves by key-match, hash, or unique value needs
+// no position.
 func positions(addr addressing, slots []slot) (map[int]elemPos, map[int]bool) {
-	if !addr.byValue || !addr.dups {
+	switch {
+	case addr.byValue && addr.dups:
+		return positionsByValueDup(slots)
+	case addr.seq && !addr.byValue && addr.field == "":
+		return positionsNoIdentity(slots)
+	default:
 		return nil, nil
 	}
+}
+
+// positionsByValueDup computes positions for a by-value scalar array with
+// repeated values: a removed/replaced element carries its index among the OLD
+// elements, an added element its index among the NEW ones, each with that
+// side's length, so a value that collides on its digest stays resolvable.
+func positionsByValueDup(slots []slot) (map[int]elemPos, map[int]bool) {
 	// Only a value that actually REPEATS needs a position. A unique digest
 	// already identifies its element on its own (the advisory would change no
 	// decision the locator makes), so putting one on every element of a
@@ -530,13 +549,42 @@ func positions(addr addressing, slots []slot) (map[int]elemPos, map[int]bool) {
 			oldIdx++
 		}
 	}
-	dup := map[int]bool{}
+	needsPos := map[int]bool{}
 	for i := range slots {
 		if c := slots[i].old; c != nil && !c.Comment && c.Node != nil && repeats[scalarToken(c.Node.Value)] > 1 {
-			dup[i] = true
+			needsPos[i] = true
 		}
 	}
-	return out, dup
+	return out, needsPos
+}
+
+// positionsNoIdentity computes positions for a sequence whose elements carry
+// no usable §6.4.2 identity field at all — addressing already fell back to
+// indexing them (childPath's default case) because usableFields found zero
+// candidates. Unlike the by-value-dup case, EVERY removed/replaced/anchor
+// element needs its own position written, not just the ones that collide:
+// none of them has any content-derived address for the parser to reconstruct.
+func positionsNoIdentity(slots []slot) (map[int]elemPos, map[int]bool) {
+	oldLen := 0
+	for i := range slots {
+		if slots[i].state != slotAdded {
+			oldLen++
+		}
+	}
+	out := map[int]elemPos{}
+	needsPos := map[int]bool{}
+	oldIdx := 0
+	for i := range slots {
+		switch slots[i].state {
+		case slotRemoved, slotReplaced, slotSame:
+			out[i] = elemPos{oldIdx, oldLen}
+			needsPos[i] = true
+		}
+		if slots[i].state != slotAdded {
+			oldIdx++
+		}
+	}
+	return out, needsPos
 }
 
 // window marks which slots the hunk body shows: every changed slot, and every

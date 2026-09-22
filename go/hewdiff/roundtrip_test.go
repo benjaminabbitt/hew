@@ -93,6 +93,24 @@ func TestRoundTripIdentity(t *testing.T) {
 		{"value kind change", hew.FormatJSON,
 			"{\n  \"k\": {\"deep\": 1}\n}\n",
 			"{\n  \"k\": \"flat\"\n}\n"},
+		// Real-world shape from Claude Code's settings.json: each element of
+		// hooks.SessionStart etc. is an object whose SOLE key ("hooks") holds an
+		// ARRAY, so it has zero scalar-valued keys and no usable §6.4.2 identity
+		// field. The differ can still address the existing element positionally
+		// (no scalar field means no usable key-match), but the parser must be able
+		// to read that same address back out of the rendered patch text.
+		{"array-valued sole field, element added", hew.FormatJSON,
+			"{\n  \"hooks\": [\n    {\"hooks\": [{\"type\": \"command\", \"command\": \"a\"}]}\n  ]\n}\n",
+			"{\n  \"hooks\": [\n    {\"hooks\": [{\"type\": \"command\", \"command\": \"a\"}]},\n    { \"hooks\": [{ \"type\": \"command\", \"command\": \"b\" }] }\n  ]\n}\n"},
+		// A sibling shape to the one above: the CONTAINER has an identity field
+		// candidate ("name"), but not every element carries it -- the added
+		// element does not. usableFields requires a candidate to qualify (be
+		// present, scalar, unique) on every element of BOTH the old and the new
+		// side (diff.go fieldQualifies), so one element missing the field
+		// disqualifies it for the whole sequence, not just for that element.
+		{"identity field present on most elements, missing on the added one", hew.FormatJSON,
+			"{\n  \"servers\": [\n    {\"name\": \"a\", \"cmd\": \"x\"}\n  ]\n}\n",
+			"{\n  \"servers\": [\n    {\"name\": \"a\", \"cmd\": \"x\"},\n    { \"cmd\": \"z\" }\n  ]\n}\n"},
 		{"two members appended", hew.FormatJSONC,
 			"{\n  \"a\": 1\n}\n",
 			"{\n  \"a\": 1,\n  \"b\": 2,\n  \"c\": 3\n}\n"},
