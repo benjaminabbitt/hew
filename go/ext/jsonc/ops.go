@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewapply"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
@@ -150,6 +151,16 @@ func (d *doc) resolveTestRef(target string, t hew.Transform) (ref, error) {
 // --- add --------------------------------------------------------------------
 
 func (d *doc) planAdd(target string, t hew.Transform) ([]edit, error) {
+	if c, ok := hewapply.AppendPosition(t.Path); ok {
+		arr, err := d.resolveFull(target, c, t.PatchLine)
+		if err != nil {
+			return nil, err
+		}
+		if arr.node == nil || arr.node.kind != kArr {
+			return nil, appErr(hewerr.CodeNoMatch, target, t.Path.String(), t.PatchLine, hewapply.NotASequence)
+		}
+		return d.planChildInsert(target, arr.node, t.Before, t.After, d.insertText(t.Value, ""), true, t.PatchLine)
+	}
 	return d.planInsert(target, t.Path, t.Before, t.After, t.Value, "", t.OnConflict, t.Idempotent, t.PatchLine)
 }
 

@@ -128,3 +128,24 @@ func Apply(target []byte, tl hew.TransformList, b Binding) ([]byte, error) {
 	}
 	return cur, nil
 }
+
+// AppendPosition reports whether an add's path ends at §4.1's append position
+// ("-"), and returns the CONTAINER it appends to: the add then means OP-11, the
+// same value added as the container's last element. The on-conflict policy has
+// nothing to act on — nothing ever exists at the append position — so a binding
+// inserts directly rather than routing through the branch where "! upsert"
+// would replace the whole sequence.
+//
+// The binding resolves the container itself: only it can say whether that is a
+// sequence, and when it is not the add is NotASequence.
+func AppendPosition(p hew.Path) (hew.Path, bool) {
+	n := p.Len()
+	if n == 0 || p.Segment(n-1).Kind != hew.SegAppend {
+		return p, false
+	}
+	return p.Parent()
+}
+
+// NotASequence is the HEW013 detail for an add at "-" whose container is not
+// a sequence, worded as the resolver words the same path.
+const NotASequence = `add: "-" addresses the end of a sequence, but this node is not one`

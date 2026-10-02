@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewapply"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 )
 
@@ -183,6 +184,16 @@ func (r *run) planAdd(t hew.Transform) ([]edit, error) {
 	}
 	if text, ok := commentText(t.Value); ok {
 		return r.addComment(t, text)
+	}
+	if c, ok := hewapply.AppendPosition(t.Path); ok {
+		seq, she, _ := r.resolve(c, t.PatchLine)
+		if she != nil {
+			return nil, she
+		}
+		if seq.node == nil || seq.node.kind != nSeq {
+			return nil, r.err(hewerr.CodeNoMatch, t.Path.String(), t.PatchLine, hewapply.NotASequence)
+		}
+		return r.insertElement(seq.node, t)
 	}
 	rf, he, final := r.resolve(t.Path, t.PatchLine)
 	if he == nil {

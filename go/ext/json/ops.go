@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/benjaminabbitt/hew/go"
+	"github.com/benjaminabbitt/hew/go/internal/hewapply"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
 	"gopkg.in/yaml.v3"
 )
@@ -134,6 +135,16 @@ func nodeKindOf(n *jNode) hew.NodeKind {
 // with zero edits (! default with an existing key, or ! idempotent with a
 // matching existing value — §7.5, §7.7).
 func (d *doc) planAdd(target string, t hew.Transform) (*edit, error) {
+	if c, ok := hewapply.AppendPosition(t.Path); ok {
+		arr, err := d.resolveFull(target, c, t.PatchLine)
+		if err != nil {
+			return nil, err
+		}
+		if arr.kind != jArr {
+			return nil, appErr(hewerr.CodeNoMatch, target, t.Path.String(), t.PatchLine, hewapply.NotASequence)
+		}
+		return d.insertArrayElement(arr, t.Before, t.After, t.Value, jsonEncode(t.Value), t.PatchLine)
+	}
 	return d.planInsert(target, t.Path, t.Before, t.After, t.Value, jsonEncode(t.Value), t.OnConflict, t.Idempotent, t.PatchLine)
 }
 
