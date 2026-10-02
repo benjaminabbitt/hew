@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.2.2
+
+Undoing an edit to an empty object or array gives back the bytes it started
+from.
+
+### Fixed
+
+- **An empty flow container round-trips through `Invert`.** Seeding an empty
+  flow container replaced its interior, so `{}`, `{ }` and `{  }` all became
+  `{ "x": 1 }`, and the remove that inverts it could not tell which to give
+  back: every one of them came back as `{ }`. That broke `Invert`'s contract
+  (applying it to the after-image yields the before-image), and a consumer
+  that checks its reversal refused any write to a document that was exactly
+  `{}`. The insert now keeps the interior after the new child, and removing a
+  padded object's sole child takes the trailing pad space the seed wrote.
+  Seeding `{}` with a member still renders `{ "x": 1 }`.
+
+### Known
+
+- Removing the sole member of an UNPADDED `{"a": 1}` gives `{}`, whose inverse
+  re-adds it padded. Making that byte-exact conflicts with the corpus case that
+  pins how `{}` is seeded.
+
 ## v0.2.1
 
 A patch hew rendered for a sequence element with no identity field is one hew
