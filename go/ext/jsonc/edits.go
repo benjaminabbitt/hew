@@ -105,10 +105,13 @@ func (d *doc) insertIntoEmpty(c *node, newText string) edit {
 		outer := lineIndent(d.src, c.start)
 		return edit{Start: c.start + 1, End: c.end - 1, Text: "\n" + outer + "  " + newText + "\n" + outer}
 	}
+	// The interior is KEPT after the new child, not replaced: replacing it
+	// made `{}`, `{ }` and `{  }` one image, which no remove can invert.
+	interior := string(d.src[c.start+1 : c.end-1])
 	if c.kind == kObj {
-		return edit{Start: c.start + 1, End: c.end - 1, Text: " " + newText + " "}
+		return edit{Start: c.start + 1, End: c.end - 1, Text: " " + newText + " " + interior}
 	}
-	return edit{Start: c.start + 1, End: c.end - 1, Text: newText}
+	return edit{Start: c.start + 1, End: c.end - 1, Text: newText + interior}
 }
 
 // remove computes the edits that delete slot idx from container c.
@@ -121,7 +124,7 @@ func (d *doc) insertIntoEmpty(c *node, newText string) edit {
 func (d *doc) remove(c *node, slots []slot, idx int) []edit {
 	s := slots[idx]
 	if !d.blockStyle(c, slots) {
-		return []edit{flowRemove(c, slots, idx)}
+		return []edit{flowRemove(d.src, c, slots, idx)}
 	}
 	end := s.end
 	if s.commaPos+1 > end {
@@ -177,7 +180,11 @@ func lineEnd(src []byte, pos int) int {
 
 // flowRemove deletes a child from a single-line container, consuming exactly
 // one adjoining comma so the surviving siblings keep their spacing.
-func flowRemove(c *node, slots []slot, idx int) edit {
+//
+// An object's SOLE child also takes its trailing pad space: that is the
+// inverse of insertIntoEmpty, which writes " child " ahead of the interior it
+// kept.
+func flowRemove(src []byte, c *node, slots []slot, idx int) edit {
 	prevEnd := func() int {
 		if idx == 0 {
 			return c.start + 1
@@ -201,5 +208,9 @@ func flowRemove(c *node, slots []slot, idx int) edit {
 			start = slots[idx-1].commaPos
 		}
 	}
-	return edit{Start: start, End: slots[idx].end, Text: ""}
+	end := slots[idx].end
+	if len(slots) == 1 && c.kind == kObj && src[c.start+1] == ' ' && end < len(src) && src[end] == ' ' {
+		end++
+	}
+	return edit{Start: start, End: end, Text: ""}
 }

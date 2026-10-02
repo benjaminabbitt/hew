@@ -58,10 +58,14 @@ func genericInsert(src []byte, containerStart, containerEnd int, children []chil
 			closeIndent := lineIndent(src, containerStart)
 			return edit{Start: containerStart + 1, End: containerEnd - 1, Text: "\n" + indent + newText + "\n" + closeIndent}
 		}
+		// The container's own interior is KEPT, after the new child, rather
+		// than replaced: replacing it made `{}`, `{ }` and `{  }` one image,
+		// and no remove can invert a write that forgot which one it was.
+		interior := string(src[containerStart+1 : containerEnd-1])
 		if padded {
-			return edit{Start: containerStart + 1, End: containerEnd - 1, Text: " " + newText + " "}
+			return edit{Start: containerStart + 1, End: containerEnd - 1, Text: " " + newText + " " + interior}
 		}
-		return edit{Start: containerStart + 1, End: containerEnd - 1, Text: newText}
+		return edit{Start: containerStart + 1, End: containerEnd - 1, Text: newText + interior}
 	}
 
 	if block {
@@ -94,7 +98,11 @@ func genericInsert(src []byte, containerStart, containerEnd int, children []chil
 // genericRemove computes the byte edit to delete child idx from a container,
 // consuming exactly one adjoining comma and the removed child's own leading
 // gap, so a surviving sibling's formatting is untouched (§6.3).
-func genericRemove(containerStart int, children []childSpan, idx int) edit {
+//
+// A padded container's SOLE child also takes its trailing pad space: that is
+// the inverse of genericInsert seeding an empty padded container, which
+// writes " child " ahead of the interior it kept.
+func genericRemove(src []byte, containerStart int, children []childSpan, idx int, padded bool) edit {
 	n := len(children)
 	if idx < n-1 {
 		start := containerStart + 1
@@ -118,7 +126,17 @@ func genericRemove(containerStart int, children []childSpan, idx int) edit {
 			start = children[idx-1].end
 		}
 	}
-	return edit{Start: start, End: children[idx].end, Text: ""}
+	end := children[idx].end
+	if idx == 0 && soleChildPadded(src, containerStart, end, padded) {
+		end++
+	}
+	return edit{Start: start, End: end, Text: ""}
+}
+
+// soleChildPadded reports whether a container's only child, ending at end,
+// sits between the single pad spaces a padded seed writes.
+func soleChildPadded(src []byte, containerStart, end int, padded bool) bool {
+	return padded && src[containerStart+1] == ' ' && end < len(src) && src[end] == ' '
 }
 
 func insertIntoObj(src []byte, obj *jNode, afterIdx, beforeIdx int, newMemberText string) *edit {
@@ -132,11 +150,11 @@ func insertIntoArr(src []byte, arr *jNode, afterIdx, beforeIdx int, newElemText 
 }
 
 func removeObjMember(src []byte, obj *jNode, idx int) *edit {
-	e := genericRemove(obj.start, objChildren(obj), idx)
+	e := genericRemove(src, obj.start, objChildren(obj), idx, true)
 	return &e
 }
 
 func removeArrElem(src []byte, arr *jNode, idx int) *edit {
-	e := genericRemove(arr.start, arrChildren(arr), idx)
+	e := genericRemove(src, arr.start, arrChildren(arr), idx, false)
 	return &e
 }
