@@ -13,19 +13,22 @@ test-go:
     @test -f go/go.mod || { echo "go implementation not started (go/go.mod missing)"; exit 1; }
     cd go && go test ./...
 
+# -count=1 on the corpus/feature recipes: their inputs (corpus/, features/) live
+# outside the Go package, so go's test cache cannot see an edit to them and would
+# replay a stale result.
 corpus-go:
     @test -f go/go.mod || { echo "go implementation not started (go/go.mod missing)"; exit 1; }
-    cd go && go test ./... -run TestCorpus -v
+    cd go && go test -count=1 ./... -run TestCorpus -v
 
 # Acceptance criteria only (godog over features/, bound to the Go corpus runner).
 accept-go:
     @test -f go/go.mod || { echo "go implementation not started (go/go.mod missing)"; exit 1; }
-    cd go && go test ./conformance -run TestFeatures -v
+    cd go && go test -count=1 ./conformance -run TestFeatures -v
 
 # Corpus with the skip registry disallowed — the end-state conformance gate.
 corpus-go-strict:
     @test -f go/go.mod || { echo "go implementation not started (go/go.mod missing)"; exit 1; }
-    cd go && HEW_CORPUS_NO_SKIPS=1 go test ./... -run TestCorpus -v
+    cd go && HEW_CORPUS_NO_SKIPS=1 go test -count=1 ./... -run TestCorpus -v
 
 # Mutation testing, unit-test killers only (fast inner loop; slow suites skipped).
 mutate-go pkg="./internal/...":
