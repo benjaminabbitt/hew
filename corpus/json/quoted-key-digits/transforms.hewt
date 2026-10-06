@@ -5,9 +5,9 @@ transforms:
   - op: test
     path: /ports/"8080"
     value: http
-  - op: replace
-    path: /ports/"8080"
-    value: http-alt
   - op: test
     path: /ports/"8443"
     value: https
+  - op: replace
+    path: /ports/"8080"
+    value: http-alt

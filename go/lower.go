@@ -194,11 +194,7 @@ func (l *lowerer) emit(path Path, nodes []*mirrorEntry, surface Surface, q quals
 	q.surface = pickSurface(surface, q.surface)
 
 	// §9.1's phases, in order: step 2 emits every before-image test, in body
-	// order; steps 4 and 5 emit the writes. (json/quoted-key-digits' fixture
-	// pins the other reading — its test/replace pair interleaved ahead of a
-	// later context line's test — and contradicts hcl/repeated-label-ordinal,
-	// json/add-key and json/array-remove-element, which pin these phases. See
-	// the note in conformance/skips_test.go.)
+	// order; steps 4 and 5 emit the writes.
 	for _, e := range nodes {
 		var err error
 		switch {
