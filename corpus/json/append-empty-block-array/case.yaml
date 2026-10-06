@@ -1,0 +1,13 @@
+name: json/append-empty-block-array
+seams: [e2e]
+kind: ok
+format: json
+ops: [OP-11]
+why: |
+  An add into an EMPTY array written across lines keeps it across lines (§6.3).
+  The container has no child whose indentation the new one could copy, so the
+  closer returns to the leading whitespace of the line the container opens on,
+  and the child sits one of the file's indent steps deeper. The rest of that
+  line is content, not indentation: copying it once wrote the key again on the
+  child's line and the closer's, corrupt output reported as success.
+spec: "§6.2, §6.3, §11 OP-11"
