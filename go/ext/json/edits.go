@@ -1,5 +1,7 @@
 package json
 
+import "github.com/benjaminabbitt/hew/go/internal/hewsplice"
+
 // childSpan generalizes an object member and an array element for the
 // shared insert/remove byte-splicing logic: start is the first byte of the
 // child overall (a member's KEY start, or an element's value start), end is
@@ -21,14 +23,6 @@ func arrChildren(n *jNode) []childSpan {
 		out[i] = childSpan{start: e.valStart, end: e.valEnd, commaPos: e.commaPos}
 	}
 	return out
-}
-
-func lineIndent(src []byte, pos int) string {
-	i := pos
-	for i > 0 && src[i-1] != '\n' {
-		i--
-	}
-	return string(src[i:pos])
 }
 
 func containsNewline(src []byte, start, end int) bool {
@@ -54,9 +48,7 @@ func genericInsert(src []byte, containerStart, containerEnd int, children []chil
 
 	if len(children) == 0 {
 		if block {
-			indent := lineIndent(src, containerStart) + "  "
-			closeIndent := lineIndent(src, containerStart)
-			return edit{Start: containerStart + 1, End: containerEnd - 1, Text: "\n" + indent + newText + "\n" + closeIndent}
+			return hewsplice.SeedBlock(src, containerStart, containerEnd, newText)
 		}
 		// The container's own interior is KEPT, after the new child, rather
 		// than replaced: replacing it made `{}`, `{ }` and `{  }` one image,
@@ -69,7 +61,7 @@ func genericInsert(src []byte, containerStart, containerEnd int, children []chil
 	}
 
 	if block {
-		indent := lineIndent(src, children[0].start)
+		indent := hewsplice.LineIndent(src, children[0].start)
 		switch {
 		case afterIdx >= 0:
 			c := children[afterIdx]

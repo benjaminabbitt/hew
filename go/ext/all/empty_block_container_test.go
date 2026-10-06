@@ -34,6 +34,9 @@ var emptyBlockCases = []struct{ name, format, doc, path, want string }{
 	{"toml/array-top", "toml", "a = [\n]\n", "/a/-", "a = [\n  9\n]\n"},
 	{"toml/array-in-table", "toml", "[o]\na = [\n  ]\n", "/o/a/-", "[o]\na = [\n  9\n]\n"},
 	{"toml/array-indented", "toml", "[o]\n    a = [\n    ]\n", "/o/a/-", "[o]\n    a = [\n        9\n    ]\n"},
+	// A TOML comment is not an element: the array is empty, and the comment
+	// stays, ahead of the new element.
+	{"toml/array-with-comment", "toml", "a = [\n  # c\n]\n", "/a/-", "a = [\n  # c\n  9\n]\n"},
 	{"toml/inline-table", "toml", "o = {\n}\n", "/o/k", "o = {\n  k = 9\n}\n"},
 	// YAML expands an empty flow collection into block style under its key
 	// (TestInsertFlow's contract), so the multi-line spelling changes nothing.

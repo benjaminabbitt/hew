@@ -41,14 +41,6 @@ func containsNewline(src []byte, start, end int) bool {
 	return false
 }
 
-func lineIndent(src []byte, pos int) string {
-	i := pos
-	for i > 0 && src[i-1] != '\n' {
-		i--
-	}
-	return string(src[i:pos])
-}
-
 // insert computes the edits that put newText into container c at p. isItem
 // says whether the new child is a member/element (and so takes part in comma
 // separation) rather than a comment node.
@@ -66,7 +58,7 @@ func (d *doc) insert(c *node, slots []slot, p placement, newText string, isItem 
 	block := d.blockStyle(c, slots)
 	sep := " "
 	if block {
-		sep = "\n" + lineIndent(d.src, slots[0].start)
+		sep = "\n" + hewsplice.LineIndent(d.src, slots[0].start)
 	}
 
 	itemFollows := false
@@ -102,8 +94,7 @@ func (d *doc) insert(c *node, slots []slot, p placement, newText string, isItem 
 // insertIntoEmpty seeds an empty container, keeping its flow or block layout.
 func (d *doc) insertIntoEmpty(c *node, newText string) edit {
 	if containsNewline(d.src, c.start, c.end) {
-		outer := lineIndent(d.src, c.start)
-		return edit{Start: c.start + 1, End: c.end - 1, Text: "\n" + outer + "  " + newText + "\n" + outer}
+		return hewsplice.SeedBlock(d.src, c.start, c.end, newText)
 	}
 	// The interior is KEPT after the new child, not replaced: replacing it
 	// made `{}`, `{ }` and `{  }` one image, which no remove can invert.

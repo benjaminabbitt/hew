@@ -83,3 +83,37 @@ func TestApply_NoEditsReturnsTheSourceUnchanged(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, "abcdef")
 	}
 }
+
+func TestLineIndent_IsOnlyTheLeadingWhitespace(t *testing.T) {
+	src := []byte("{\n\t  \"a\": [\n")
+	if got := LineIndent(src, len("{\n\t  \"a\": ")); got != "\t  " {
+		t.Fatalf("got %q", got)
+	}
+	if got := LineIndent(src, 0); got != "" {
+		t.Fatalf("got %q at offset 0", got)
+	}
+}
+
+func TestIndentUnit_IsTheFirstIndentedContentLine(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		{"a = 1\n", "  "},
+		{"{\r\n  \r\n\t\"a\": 1\r\n}\r\n", "\t"},
+		{"{\n\n    \"a\": 1\n}\n", "    "},
+	} {
+		if got := IndentUnit([]byte(c.src)); got != c.want {
+			t.Fatalf("IndentUnit(%q) = %q, want %q", c.src, got, c.want)
+		}
+	}
+}
+
+func TestSeedBlock_KeepsANonBlankInterior(t *testing.T) {
+	src := []byte("  a = [ # c\n  ]")
+	e := SeedBlock(src, len("  a = "), len(src), "1")
+	out, err := Apply(src, []Edit{e})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(out), "  a = [ # c\n    1\n  ]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

@@ -53,3 +53,46 @@ func Apply(src []byte, edits []Edit) ([]byte, error) {
 	b.Write(src[pos:])
 	return []byte(b.String()), nil
 }
+
+// SeedBlock is the edit that writes child into the empty container spanning
+// [open,end) — brackets included — when that container is written across
+// lines.
+//
+// An empty container has no child whose indentation a new one can copy, so the
+// indentation comes from the line the container OPENS on: the closer goes back
+// to that line's leading whitespace, and the child sits one of the file's own
+// indent steps deeper. Whatever the interior already holds (a comment the
+// format does not count as a child) is kept, ahead of the child; only the
+// whitespace before the closer is re-laid.
+func SeedBlock(src []byte, open, end int, child string) Edit {
+	outer := LineIndent(src, open)
+	kept := strings.TrimRight(string(src[open+1:end-1]), " \t\r\n")
+	return Edit{Start: open + 1, End: end - 1, Text: kept + "\n" + outer + IndentUnit(src) + child + "\n" + outer}
+}
+
+// LineIndent is the leading whitespace of the line holding pos, and only that:
+// for a position that follows content on its line (a bracket after `"a": `),
+// the bytes between the line start and pos are content, not indentation.
+func LineIndent(src []byte, pos int) string {
+	i := pos
+	for i > 0 && src[i-1] != '\n' {
+		i--
+	}
+	j := i
+	for j < pos && (src[j] == ' ' || src[j] == '\t') {
+		j++
+	}
+	return string(src[i:j])
+}
+
+// IndentUnit is the file's own indent step: the leading whitespace of its first
+// indented line that carries content, or two spaces when no line is indented.
+func IndentUnit(src []byte) string {
+	for _, line := range strings.Split(string(src), "\n") {
+		body := strings.TrimLeft(line, " \t")
+		if body != "" && body != "\r" && len(body) < len(line) {
+			return line[:len(line)-len(body)]
+		}
+	}
+	return "  "
+}

@@ -1,6 +1,7 @@
 package toml
 
 import (
+	"bytes"
 	"errors"
 	"strconv"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/benjaminabbitt/hew/go"
 	"github.com/benjaminabbitt/hew/go/internal/hewapply"
 	"github.com/benjaminabbitt/hew/go/internal/hewerr"
+	"github.com/benjaminabbitt/hew/go/internal/hewsplice"
 )
 
 // alreadyApplied is the §10.6 diagnostic: the after-image holds in full, so
@@ -391,8 +393,7 @@ func (r *run) insertItem(seq *tnode, t hew.Transform) ([]edit, error) {
 			"add: "+t.Value.String()+" has no TOML spelling (§8.4)")
 	}
 	if len(seq.elems) == 0 {
-		pos := seq.end - 1
-		return []edit{{Start: pos, End: pos, Text: text}}, nil
+		return []edit{seedInline(r.d.src, seq, text)}, nil
 	}
 	i, err2 := r.placeAmong(elemSpans(seq), t)
 	if err2 != nil {
@@ -569,11 +570,20 @@ func (r *run) insertInline(n *tnode, name string, t hew.Transform) ([]edit, erro
 	}
 	pair := tomlKey(name) + " = " + text
 	if len(n.entries) == 0 {
-		pos := n.end - 1
-		return []edit{{Start: pos, End: pos, Text: pair}}, nil
+		return []edit{seedInline(r.d.src, n, pair)}, nil
 	}
 	pos := n.entries[len(n.entries)-1].blockEnd
 	return []edit{{Start: pos, End: pos, Text: ", " + pair}}, nil
+}
+
+// seedInline writes the first child of an empty inline array or table. One
+// written across lines keeps that layout (hewsplice.SeedBlock); one on a single
+// line takes the child against its closer.
+func seedInline(src []byte, n *tnode, child string) edit {
+	if bytes.IndexByte(src[n.start:n.end], '\n') >= 0 {
+		return hewsplice.SeedBlock(src, n.start, n.end, child)
+	}
+	return edit{Start: n.end - 1, End: n.end - 1, Text: child}
 }
 
 // --- remove -----------------------------------------------------------------
